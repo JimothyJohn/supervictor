@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+source .env
+rustup component add clippy rustfmt
+SSID=${SSID} PASSWORD=${PASSWORD} HOST=${HOST} cargo clippy --all-features --workspace -- -D warnings
+SSID=${SSID} PASSWORD=${PASSWORD} HOST=${HOST} cargo build --release
+SSID=${SSID} PASSWORD=${PASSWORD} HOST=${HOST} cargo run --release
