@@ -26,8 +26,8 @@ use esp_println::println;
 use esp_wifi::{init, EspWifiController};
 
 use supervictor::constants::endpoints;
-use supervictor::network::{connection, get_request, net_task};
-use supervictor::utils::config_esp;
+use supervictor::network::{connection, net_task};
+use supervictor::utils::{build_request, config_esp};
 
 // When you are okay with using a nightly compiler it's better to use https://docs.rs/static_cell/2.1.0/static_cell/macro.make_static.html
 macro_rules! make_static {
@@ -80,20 +80,19 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(net_task(runner)).ok();
 
     loop {
-        Timer::after(Duration::from_millis(2000)).await;
         if stack.is_link_up() {
             break;
         }
-        println!("Initializing network stack...");
+        Timer::after(Duration::from_millis(500)).await;
     }
 
+    println!("Waiting to get IP address...");
     loop {
-        Timer::after(Duration::from_millis(2000)).await;
         if let Some(config) = stack.config_v4() {
             println!("Got IP: {}", config.address);
             break;
         }
-        println!("Waiting to get IP address...");
+        Timer::after(Duration::from_millis(500)).await;
     }
 
     loop {
@@ -103,15 +102,16 @@ async fn main(spawner: Spawner) -> ! {
 
         socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
 
+        println!("Connecting...");
         let r = socket.connect(endpoints::GOOGLE).await;
         if let Err(e) = r {
             println!("Connect error: {:?}", e);
             continue;
         }
-        println!("Connected to endpoint!");
+        println!("Connected!");
 
         loop {
-            let r = socket.write_all(get_request(HOST).as_bytes()).await;
+            let r = socket.write_all(build_request(HOST).as_bytes()).await;
             if let Err(e) = r {
                 println!("Write error: {:?}", e);
                 break;
