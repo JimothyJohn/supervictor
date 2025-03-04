@@ -33,6 +33,7 @@ Extract information from the environment as efficiently as possible.
 ### TODO
 
 - [x] Create an async GET HTTP request -> [Code](https://github.com/esp-rs/esp-hal/blob/main/examples/src/bin/wifi_embassy_dhcp.rs)
+- [x] Create an async GET HTTP request with JSON response 
 - [ ] Create an async POST HTTP request
-- [ ] Create a SECURE POST HTTP request using TLS. [Reference](https://github.com/drogue-iot/embedded-tls)
+- [ ] Create an async GET HTTP request using TLS
 - [ ] Utilize flash/NVS encryption. [Reference](https://espressif.github.io/esp32-c3-book-en/chapter_13/13.3/13.3.7.html)

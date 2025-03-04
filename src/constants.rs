@@ -11,7 +11,7 @@ pub mod endpoints {
     pub const HTTPS_PORT: u16 = 443;
 
     /// Default UVICORN port
-    pub const UVICORN_PORT: u16 = 8000;
+    pub const UVICORN_PORT: u16 = 8032;
 
     /// Google server endpoint (IP: 142.250.185.115, Port: 80)
     pub const GOOGLE: (Ipv4Addr, u16) = (Ipv4Addr::new(142, 250, 185, 115), HTTP_PORT);

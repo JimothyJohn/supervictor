@@ -75,6 +75,9 @@ static_cell = { version = "2.1.0", features = ["nightly"] }
 cfg-if = "1.0.0"
 # esp-mbedtls = { git = "https://github.com/esp-rs/esp-mbedtls.git",  features = ["esp32c3"] }
 reqwless = { version = "0.13.0", default-features = false, features = ["log"] }
+# https://serde.rs/no-std.html#no-std-support
+serde = { version = "1.0.140", default-features = false, features = ["alloc"] }
+serde-json-core = "0.6.0"
 
 [profile.dev]
 # Rust debug is too slow.

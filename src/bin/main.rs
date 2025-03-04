@@ -14,7 +14,6 @@
 #![no_std]
 #![no_main]
 
-use embassy_executor::Spawner;
 use embassy_net::{tcp::TcpSocket, StackResources};
 use embassy_time::{Duration, Timer};
 use embedded_io_async::Write;
@@ -25,9 +24,8 @@ use esp_hal::{clock::CpuClock, rng::Rng, timer::timg::TimerGroup};
 use esp_println::println;
 use esp_wifi::{init, EspWifiController};
 
-use supervictor::constants::endpoints;
 use supervictor::network::{connection, get_request, net_task};
-use supervictor::utils::config_esp;
+use supervictor::utils::{config_esp, process_http_response};
 
 // When you are okay with using a nightly compiler it's better to use https://docs.rs/static_cell/2.1.0/static_cell/macro.make_static.html
 macro_rules! make_static {
@@ -44,7 +42,7 @@ const PASSWORD: &str = env!("PASSWORD");
 const HOST: &str = env!("HOST");
 
 #[esp_hal_embassy::main]
-async fn main(spawner: Spawner) -> ! {
+async fn main(spawner: embassy_executor::Spawner) -> ! {
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
     let mut buf = [0; 1024];
@@ -97,25 +95,30 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     loop {
-        Timer::after(Duration::from_millis(5_000)).await;
-
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+        socket.set_timeout(Some(Duration::from_secs(10)));
 
-        socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
-
-        let r = socket.connect(endpoints::GOOGLE).await;
+        let r = socket
+            .connect(supervictor::constants::endpoints::LOCAL_DEV)
+            .await;
         if let Err(e) = r {
             println!("Connect error: {:?}", e);
             continue;
         }
         println!("Connected to endpoint!");
 
+        let r = socket.write_all(get_request(HOST).as_bytes()).await;
+        if let Err(e) = r {
+            println!("Write error: {:?}", e);
+            continue;
+        }
+
+        // Create a buffer to collect the complete HTTP response
+        let mut http_buffer = heapless::String::<512>::new();
+
+        // Read loop to collect the complete response
+        let mut response_result = None;
         loop {
-            let r = socket.write_all(get_request(HOST).as_bytes()).await;
-            if let Err(e) = r {
-                println!("Write error: {:?}", e);
-                break;
-            }
             let n = match socket.read(&mut buf).await {
                 Ok(0) => {
                     println!("Read EOF");
@@ -127,7 +130,37 @@ async fn main(spawner: Spawner) -> ! {
                     break;
                 }
             };
-            println!("{}", core::str::from_utf8(&buf[..n]).unwrap());
+
+            // Convert bytes to string and append to buffer
+            if let Ok(str_data) = core::str::from_utf8(&buf[..n]) {
+                // Print raw response for debugging
+                println!("Received: {}", str_data);
+
+                // Append to HTTP buffer
+                if http_buffer.push_str(str_data).is_err() {
+                    println!("Buffer overflow, message too large");
+                    break;
+                }
+            } else {
+                println!("Invalid UTF-8 data received");
+                break;
+            }
+
+            // Try to process the HTTP response
+            let result = process_http_response(&http_buffer);
+            if result.is_ok() {
+                response_result = Some(result);
+                break;
+            }
         }
+
+        // Use the stored result
+        if let Some(Ok(response)) = response_result {
+            println!("Successfully parsed message: {}", response.message);
+            // Do something with the response
+        } else {
+            println!("Failed to parse JSON");
+        }
+        Timer::after(Duration::from_millis(3_000)).await;
     }
 }

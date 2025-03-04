@@ -44,17 +44,29 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }
 
+// https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/GET
 pub fn get_request(host: &str) -> heapless::String<128> {
     let mut request = heapless::String::<128>::new();
     const USER_AGENT: &str = "Uplink/0.1.0 (Platform; ESP32-C3)";
 
-    request.push_str("GET / HTTP/1.0\r\nHost: ").unwrap();
+    // method and version
+    request.push_str("GET / HTTP/1.0").unwrap();
+    request.push_str("\r\n").unwrap();
+
+    // host
+    request.push_str("Host: ").unwrap();
     request.push_str(host).unwrap();
     request.push_str("\r\n").unwrap();
+
+    // user agent
     request.push_str("User-Agent: ").unwrap();
     request.push_str(USER_AGENT).unwrap();
     request.push_str("\r\n").unwrap();
-    request.push_str("Accept: */*\r\n").unwrap();
+
+    // accepted responses
+    request.push_str("Accept: */*").unwrap();
+    request.push_str("\r\n\r\n").unwrap();
+
     request
 }
 

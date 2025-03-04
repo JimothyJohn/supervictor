@@ -1,7 +1,66 @@
 #!/usr/bin/env bash
 
-source .env
-rustup component add clippy rustfmt
-SSID=${SSID} PASSWORD=${PASSWORD} HOST=${HOST} cargo clippy --all-features --workspace -- -D warnings
-SSID=${SSID} PASSWORD=${PASSWORD} HOST=${HOST} cargo build --release
-SSID=${SSID} PASSWORD=${PASSWORD} HOST=${HOST} cargo run --release
+set -o errexit
+set -o nounset
+set -o pipefail
+if [[ "${TRACE-0}" == "1" ]]; then
+    set -o xtrace
+fi
+
+# Display help information
+if [[ "${1-}" =~ ^-*h(elp)?$ ]]; then
+    cat << EOF
+ESP32 WiFi Project Quickstart Script
+
+Usage:
+  ./Quickstart [options]
+
+Options:
+  -h, --help     Show this help message
+  -r, --release  Build in release mode with clippy checks
+
+Environment variables (set in .env file):
+  SSID           WiFi network name
+  PASSWORD       WiFi password
+  HOST           Target host for HTTP requests
+
+Examples:
+  ./Quickstart              # Run in debug mode
+  ./Quickstart --release    # Run in release mode
+EOF
+    exit 0
+fi
+
+install_dependencies() {
+    rustup component add clippy rustfmt
+}
+
+main() {
+    source .env
+    export SSID=${SSID}
+    export PASSWORD=${PASSWORD}
+    export HOST=${HOST}
+
+    local RELEASE=""
+    
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            -r|--release)
+                RELEASE="--release"
+                cargo clippy --all-features --workspace -- -D warnings
+                cargo build --release
+                ;;
+            *)
+                echo "Unknown parameter passed: $1"
+                exit 1
+                ;;
+        esac
+        shift
+    done
+
+    install_dependencies
+
+    cargo run $RELEASE
+}
+
+main "$@"
