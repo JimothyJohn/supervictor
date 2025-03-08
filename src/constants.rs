@@ -18,4 +18,6 @@ pub mod endpoints {
 
     /// Default local development server (IP: 10.0.0.31, Port: 8000)
     pub const LOCAL_DEV: (Ipv4Addr, u16) = (Ipv4Addr::new(10, 0, 0, 31), UVICORN_PORT);
+
+    pub const USER_AGENT: &str = "Uplink/0.1.0 (Platform; ESP32-C3)";
 }

@@ -11,6 +11,7 @@ env:
   CARGO_TERM_COLOR: always
   SSID: fake_ssid
   PASSWORD: fake_password
+  HOST: fake_host
 
 jobs:
   rust-checks:

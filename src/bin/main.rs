@@ -23,8 +23,10 @@ use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{clock::CpuClock, rng::Rng, timer::timg::TimerGroup};
 use esp_println::println;
 use esp_wifi::{init, EspWifiController};
+use heapless::String as HString;
 
-use supervictor::network::{connection, get_request, net_task};
+use supervictor::models::{RequestBody, RequestData};
+use supervictor::network::{connection, net_task, post_request};
 use supervictor::utils::{config_esp, process_http_response};
 
 // When you are okay with using a nightly compiler it's better to use https://docs.rs/static_cell/2.1.0/static_cell/macro.make_static.html
@@ -107,7 +109,15 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         }
         println!("Connected to endpoint!");
 
-        let r = socket.write_all(get_request(HOST).as_bytes()).await;
+        let data: RequestData = RequestData {
+            data: RequestBody {
+                body: HString::<64>::try_from("message").unwrap(),
+            },
+        };
+
+        let r = socket
+            .write_all(post_request(HOST, &data, Some("/post")).as_bytes())
+            .await;
         if let Err(e) = r {
             println!("Write error: {:?}", e);
             continue;
@@ -156,7 +166,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
         // Use the stored result
         if let Some(Ok(response)) = response_result {
-            println!("Successfully parsed message: {}", response.message);
+            println!("Successfully parsed message: {}", response.detail[0].msg);
             // Do something with the response
         } else {
             println!("Failed to parse JSON");

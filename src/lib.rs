@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod constants;
+pub mod models;
 pub mod network;
 pub mod utils;
 
