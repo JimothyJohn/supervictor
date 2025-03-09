@@ -25,7 +25,7 @@ use esp_println::println;
 use esp_wifi::{init, EspWifiController};
 use heapless::String as HString;
 
-use supervictor::models::{RequestBody, RequestData};
+use supervictor::models::RequestBody;
 use supervictor::network::{connection, net_task, post_request};
 use supervictor::utils::{config_esp, process_http_response};
 
@@ -89,8 +89,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     loop {
         Timer::after(Duration::from_millis(2000)).await;
-        if let Some(config) = stack.config_v4() {
-            println!("Got IP: {}", config.address);
+        if let Some(_config) = stack.config_v4() {
             break;
         }
         println!("Waiting to get IP address...");
@@ -107,12 +106,9 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
             println!("Connect error: {:?}", e);
             continue;
         }
-        println!("Connected to endpoint!");
 
-        let data: RequestData = RequestData {
-            data: RequestBody {
-                body: HString::<64>::try_from("message").unwrap(),
-            },
+        let data: RequestBody = RequestBody {
+            body: HString::<64>::try_from("message").unwrap(),
         };
 
         let r = socket
@@ -131,7 +127,6 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         loop {
             let n = match socket.read(&mut buf).await {
                 Ok(0) => {
-                    println!("Read EOF");
                     break;
                 }
                 Ok(n) => n,
@@ -143,9 +138,6 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
             // Convert bytes to string and append to buffer
             if let Ok(str_data) = core::str::from_utf8(&buf[..n]) {
-                // Print raw response for debugging
-                println!("Received: {}", str_data);
-
                 // Append to HTTP buffer
                 if http_buffer.push_str(str_data).is_err() {
                     println!("Buffer overflow, message too large");
@@ -157,16 +149,20 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
             }
 
             // Try to process the HTTP response
-            let result = process_http_response(&http_buffer);
-            if result.is_ok() {
-                response_result = Some(result);
-                break;
+            match process_http_response(&http_buffer) {
+                ok_result @ Ok(_) => {
+                    response_result = Some(ok_result);
+                    break;
+                }
+                Err(_) => {
+                    // Continue reading more data
+                }
             }
         }
 
         // Use the stored result
         if let Some(Ok(response)) = response_result {
-            println!("Successfully parsed message: {}", response.detail[0].msg);
+            println!("Received: {}", response.message);
             // Do something with the response
         } else {
             println!("Failed to parse JSON");

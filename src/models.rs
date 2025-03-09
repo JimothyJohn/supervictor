@@ -1,12 +1,6 @@
 use heapless::String as HString;
 use serde::{Deserialize, Serialize};
 
-// Define your struct that matches the expected JSON structure
-#[derive(Debug, Serialize)]
-pub struct RequestData {
-    pub data: RequestBody,
-}
-
 #[derive(Debug, Serialize, Clone)]
 pub struct RequestBody {
     pub body: HString<64>,
@@ -15,7 +9,8 @@ pub struct RequestBody {
 #[derive(Debug, Deserialize)]
 pub struct FastApiResponse {
     // Using heapless::Vec to store the array of error details
-    pub detail: heapless::Vec<ErrorDetail, 8>,
+    // pub detail: heapless::Vec<ErrorDetail, 8>,
+    pub message: HString<64>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -38,9 +38,8 @@ Extract information from the environment as efficiently as possible.
 
 - [x] Create an async GET HTTP request with JSON response 
 
-- [ ] Create an async POST HTTP request
+- [x] Create an async POST HTTP request with JSON request/response 
 
 - [ ] Create an async GET HTTP request using TLS
 
 - [ ] Utilize flash/NVS encryption. [Reference](https://espressif.github.io/esp32-c3-book-en/chapter_13/13.3/13.3.7.html)
-

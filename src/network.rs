@@ -6,10 +6,8 @@ use esp_wifi::wifi::{
 };
 use heapless::String as HString;
 use serde::Serialize;
-use serde_json_core::to_string;
 
 use crate::constants::endpoints::USER_AGENT;
-use crate::models::RequestData;
 
 #[embassy_executor::task]
 pub async fn connection(
@@ -17,8 +15,6 @@ pub async fn connection(
     ssid: &'static str,
     password: &'static str,
 ) {
-    // println!("Device capabilities: {:?}", controller.capabilities());
-
     loop {
         if esp_wifi::wifi::wifi_state() == WifiState::StaConnected {
             // wait until we're no longer connected
@@ -100,26 +96,33 @@ where
         Ok(json) => {
             // Add Content-Length header
             request.push_str("Content-Length: ").unwrap();
-            // Convert length to string and append
+
+            // Convert length to string - simplified approach
             let len = json.len();
-            let mut len_str = HString::<16>::new();
-            // Simple conversion of number to string
-            let mut n = len;
-            if n == 0 {
-                len_str.push_str("0").unwrap();
+            // For most HTTP requests, content length will be small
+            // This handles up to 5 digits (lengths up to 99999)
+            let mut buffer = [0u8; 5];
+            let mut i = 0;
+
+            // Handle zero case
+            if len == 0 {
+                request.push_str("0").unwrap();
             } else {
-                let mut digits = HString::<16>::new();
+                // Convert number to digits
+                let mut n = len;
                 while n > 0 {
-                    let digit = (n % 10) as u8 + b'0';
-                    digits.push(digit as char).unwrap();
+                    buffer[i] = (n % 10) as u8 + b'0';
                     n /= 10;
+                    i += 1;
                 }
-                // Reverse the digits
-                for i in (0..digits.len()).rev() {
-                    len_str.push(digits.as_bytes()[i] as char).unwrap();
+
+                // Add digits in reverse order
+                while i > 0 {
+                    i -= 1;
+                    request.push(buffer[i] as char).unwrap();
                 }
             }
-            request.push_str(&len_str).unwrap();
+
             request.push_str("\r\n\r\n").unwrap();
 
             // Add the JSON body
