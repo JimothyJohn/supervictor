@@ -1,6 +1,8 @@
 #![no_std]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod constants;
+pub mod http;
 pub mod models;
 pub mod network;
 pub mod utils;

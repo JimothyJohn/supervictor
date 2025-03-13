@@ -13,21 +13,25 @@
 
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 
-use embassy_net::{tcp::TcpSocket, StackResources};
+// use embassy_net::dns::DnsSocket;
+// use embassy_net::tcp::client::{TcpClient, TcpClientState};
+// use embassy_net::{tcp::TcpSocket, StackResources};
+use embassy_net::StackResources;
 use embassy_time::{Duration, Timer};
-use embedded_io_async::Write;
+// use embedded_io_async::Write;
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{clock::CpuClock, rng::Rng, timer::timg::TimerGroup};
 use esp_println::println;
 use esp_wifi::{init, EspWifiController};
-use heapless::String as HString;
+// use heapless::String as HString;
 
-use supervictor::models::RequestBody;
-use supervictor::network::{connection, net_task, post_request};
-use supervictor::utils::{config_esp, process_http_response};
+// use supervictor::models::RequestBody;
+use supervictor::network::{access_website, connection, net_task};
+use supervictor::utils::config_esp;
 
 // When you are okay with using a nightly compiler it's better to use https://docs.rs/static_cell/2.1.0/static_cell/macro.make_static.html
 macro_rules! make_static {
@@ -41,13 +45,13 @@ macro_rules! make_static {
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
-const HOST: &str = env!("HOST");
+// const HOST: &str = env!("HOST");
 
 #[esp_hal_embassy::main]
 async fn main(spawner: embassy_executor::Spawner) -> ! {
-    let mut rx_buffer = [0; 4096];
-    let mut tx_buffer = [0; 4096];
-    let mut buf = [0; 1024];
+    // let mut rx_buffer = [0; 4096];
+    // let mut tx_buffer = [0; 4096];
+    // let mut buf = [0; 1024];
 
     config_esp();
 
@@ -56,7 +60,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let mut rng = Rng::new(peripherals.RNG);
     // Uses bit shifting to convert a 32-bit random to a 64-bit, pretty smart!
-    let seed = (rng.random() as u64) << 32 | rng.random() as u64;
+    let tls_seed = (rng.random() as u64) << 32 | rng.random() as u64;
+    let net_seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
     let esp_wifi_ctrl = &*make_static!(
         EspWifiController<'static>,
@@ -73,7 +78,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         interfaces.sta,
         embassy_net::Config::dhcpv4(Default::default()),
         make_static!(StackResources<3>, StackResources::<3>::new()),
-        seed,
+        net_seed,
     );
 
     spawner.spawn(connection(controller, SSID, PASSWORD)).ok();
@@ -96,6 +101,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     }
 
     loop {
+        access_website(&stack, tls_seed).await;
+        /*
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
 
@@ -167,6 +174,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         } else {
             println!("Failed to parse JSON");
         }
+        */
+
         Timer::after(Duration::from_millis(3_000)).await;
     }
 }

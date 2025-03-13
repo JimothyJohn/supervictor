@@ -1,10 +1,16 @@
-use embassy_net::Runner;
+use embassy_net::{
+    dns::DnsSocket,
+    tcp::client::{TcpClient, TcpClientState},
+    Runner, Stack,
+};
 use embassy_time::{Duration, Timer};
 use esp_println::println;
 use esp_wifi::wifi::{
     ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiState,
 };
+
 use heapless::String as HString;
+use reqwless::client::{HttpClient, TlsConfig};
 use serde::Serialize;
 
 use crate::constants::endpoints::USER_AGENT;
@@ -135,4 +141,38 @@ where
     }
 
     request
+}
+
+// https://esp32.implrust.com/wifi/embassy/http-request.html
+pub async fn access_website<'a>(stack: &'a Stack<'a>, tls_seed: u64) {
+    let mut rx_buffer = [0; 4096];
+    let mut tx_buffer = [0; 4096];
+    let dns = DnsSocket::new(*stack);
+    let tcp_state = TcpClientState::<1, 4096, 4096>::new();
+    let tcp = TcpClient::new(*stack, &tcp_state);
+
+    let tls = TlsConfig::new(
+        tls_seed,
+        &mut rx_buffer,
+        &mut tx_buffer,
+        reqwless::client::TlsVerify::None,
+    );
+
+    let mut client = HttpClient::new_with_tls(&tcp, &dns, tls);
+    let mut buffer = [0u8; 4096];
+    // TODO JSON https://docs.rs/reqwest/latest/reqwest/#json
+    let mut http_req = client
+        .request(
+            reqwless::request::Method::GET,
+            "https://jsonplaceholder.typicode.com/posts/1",
+        )
+        .await
+        .unwrap();
+    let response = http_req.send(&mut buffer).await.unwrap();
+
+    println!("Got response");
+    let res = response.body().read_to_end().await.unwrap();
+
+    let content = core::str::from_utf8(res).unwrap();
+    println!("{}", content);
 }
