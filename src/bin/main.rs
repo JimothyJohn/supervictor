@@ -43,22 +43,15 @@ macro_rules! make_static {
     }};
 }
 
-const SSID: &str = env!("SSID");
-const PASSWORD: &str = env!("PASSWORD");
-// const HOST: &str = env!("HOST");
-
 #[esp_hal_embassy::main]
 async fn main(spawner: embassy_executor::Spawner) -> ! {
-    // let mut rx_buffer = [0; 4096];
-    // let mut tx_buffer = [0; 4096];
-    // let mut buf = [0; 1024];
-
     config_esp();
 
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let mut rng = Rng::new(peripherals.RNG);
+
     // Uses bit shifting to convert a 32-bit random to a 64-bit, pretty smart!
     let tls_seed = (rng.random() as u64) << 32 | rng.random() as u64;
     let net_seed = (rng.random() as u64) << 32 | rng.random() as u64;
@@ -81,7 +74,9 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         net_seed,
     );
 
-    spawner.spawn(connection(controller, SSID, PASSWORD)).ok();
+    spawner
+        .spawn(connection(controller, env!("SSID"), env!("PASSWORD")))
+        .ok();
     spawner.spawn(net_task(runner)).ok();
 
     loop {
@@ -102,80 +97,6 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     loop {
         access_website(&stack, tls_seed).await;
-        /*
-        let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-        socket.set_timeout(Some(Duration::from_secs(10)));
-
-        let r = socket
-            .connect(supervictor::constants::endpoints::LOCAL_DEV)
-            .await;
-        if let Err(e) = r {
-            println!("Connect error: {:?}", e);
-            continue;
-        }
-
-        let data: RequestBody = RequestBody {
-            body: HString::<64>::try_from("message").unwrap(),
-        };
-
-        let r = socket
-            .write_all(post_request(HOST, &data, Some("/post")).as_bytes())
-            .await;
-        if let Err(e) = r {
-            println!("Write error: {:?}", e);
-            continue;
-        }
-
-        // Create a buffer to collect the complete HTTP response
-        let mut http_buffer = heapless::String::<512>::new();
-
-        // Read loop to collect the complete response
-        let mut response_result = None;
-        loop {
-            let n = match socket.read(&mut buf).await {
-                Ok(0) => {
-                    break;
-                }
-                Ok(n) => n,
-                Err(e) => {
-                    println!("Read error: {:?}", e);
-                    break;
-                }
-            };
-
-            // Convert bytes to string and append to buffer
-            if let Ok(str_data) = core::str::from_utf8(&buf[..n]) {
-                // Append to HTTP buffer
-                if http_buffer.push_str(str_data).is_err() {
-                    println!("Buffer overflow, message too large");
-                    break;
-                }
-            } else {
-                println!("Invalid UTF-8 data received");
-                break;
-            }
-
-            // Try to process the HTTP response
-            match process_http_response(&http_buffer) {
-                ok_result @ Ok(_) => {
-                    response_result = Some(ok_result);
-                    break;
-                }
-                Err(_) => {
-                    // Continue reading more data
-                }
-            }
-        }
-
-        // Use the stored result
-        if let Some(Ok(response)) = response_result {
-            println!("Received: {}", response.message);
-            // Do something with the response
-        } else {
-            println!("Failed to parse JSON");
-        }
-        */
-
         Timer::after(Duration::from_millis(3_000)).await;
     }
 }

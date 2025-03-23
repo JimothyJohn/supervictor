@@ -9,9 +9,11 @@ use esp_wifi::wifi::{
     ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiState,
 };
 
-use heapless::String as HString;
-use reqwless::client::{HttpClient, TlsConfig};
-use serde::Serialize;
+use reqwless::{
+    client::{HttpClient, TlsConfig, TlsVerify},
+    headers::ContentType,
+    request::{Method, RequestBuilder},
+};
 
 use crate::constants::endpoints::USER_AGENT;
 
@@ -52,127 +54,70 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }
 
-// https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/GET
-pub fn get_request(host: &str, path: Option<&str>) -> heapless::String<128> {
-    let mut request = heapless::String::<128>::new();
-    // Use the provided path or default to "/"
-    let path = path.unwrap_or("/");
-
-    // Use the path in the request line instead of hardcoded "/"
-    request.push_str("GET ").unwrap();
-    request.push_str(path).unwrap();
-    request.push_str(" HTTP/1.0").unwrap();
-    request.push_str("\r\n").unwrap();
-    request.push_str("Host: ").unwrap();
-    request.push_str(host).unwrap();
-    request.push_str("\r\n").unwrap();
-    request.push_str("User-Agent: ").unwrap();
-    request.push_str(USER_AGENT).unwrap();
-    request.push_str("\r\n").unwrap();
-    request.push_str("Accept: */*").unwrap();
-    request.push_str("\r\n\r\n").unwrap();
-    request
-}
-
-/// Create an HTTP POST request with JSON body
-pub fn post_request<T>(host: &str, data: &T, path: Option<&str>) -> HString<512>
-where
-    T: Serialize,
-{
-    let mut request = HString::<512>::new();
-
-    // Format the request path
-    let endpoint = path.unwrap_or("/");
-
-    // Start building the request
-    request.push_str("POST ").unwrap();
-    request.push_str(endpoint).unwrap();
-    request.push_str(" HTTP/1.1\r\n").unwrap();
-    request.push_str("Host: ").unwrap();
-    request.push_str(host).unwrap();
-    request.push_str("\r\n").unwrap();
-    request
-        .push_str("Content-Type: application/json\r\n")
-        .unwrap();
-
-    // Serialize the data to JSON
-    let json_result = serde_json_core::to_string::<T, 256>(data);
-
-    match json_result {
-        Ok(json) => {
-            // Add Content-Length header
-            request.push_str("Content-Length: ").unwrap();
-
-            // Convert length to string - simplified approach
-            let len = json.len();
-            // For most HTTP requests, content length will be small
-            // This handles up to 5 digits (lengths up to 99999)
-            let mut buffer = [0u8; 5];
-            let mut i = 0;
-
-            // Handle zero case
-            if len == 0 {
-                request.push_str("0").unwrap();
-            } else {
-                // Convert number to digits
-                let mut n = len;
-                while n > 0 {
-                    buffer[i] = (n % 10) as u8 + b'0';
-                    n /= 10;
-                    i += 1;
-                }
-
-                // Add digits in reverse order
-                while i > 0 {
-                    i -= 1;
-                    request.push(buffer[i] as char).unwrap();
-                }
-            }
-
-            request.push_str("\r\n\r\n").unwrap();
-
-            // Add the JSON body
-            request.push_str(&json).unwrap();
-        }
-        Err(_) => {
-            // Handle serialization error
-            request.push_str("Content-Length: 0\r\n\r\n").unwrap();
-        }
-    }
-
-    request
-}
-
 // https://esp32.implrust.com/wifi/embassy/http-request.html
+// TODO add TLS Verify once able
 pub async fn access_website<'a>(stack: &'a Stack<'a>, tls_seed: u64) {
+    // Message buffers
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
-    let dns = DnsSocket::new(*stack);
+    let mut response_buffer = [0u8; 1024];
+    let mut body_buffer = [0u8; 1024];
+
+    // Borrowed variables
     let tcp_state = TcpClientState::<1, 4096, 4096>::new();
     let tcp = TcpClient::new(*stack, &tcp_state);
+    let dns = DnsSocket::new(*stack);
 
-    let tls = TlsConfig::new(
-        tls_seed,
-        &mut rx_buffer,
-        &mut tx_buffer,
-        reqwless::client::TlsVerify::None,
+    // Create TLS client
+    let mut client = HttpClient::new_with_tls(
+        &tcp,
+        &dns,
+        TlsConfig::new(tls_seed, &mut rx_buffer, &mut tx_buffer, TlsVerify::None),
     );
 
-    let mut client = HttpClient::new_with_tls(&tcp, &dns, tls);
-    let mut buffer = [0u8; 4096];
-    // TODO JSON https://docs.rs/reqwest/latest/reqwest/#json
-    let mut http_req = client
-        .request(
-            reqwless::request::Method::GET,
-            "https://jsonplaceholder.typicode.com/posts/1",
-        )
-        .await
-        .unwrap();
-    let response = http_req.send(&mut buffer).await.unwrap();
+    // Create the request handler
+    let request_builder = match client.request(Method::POST, env!("HOST")).await {
+        Ok(builder) => builder,
+        Err(e) => {
+            // AI-generated: Properly handle request creation errors
+            println!("Error creating HTTP request: {:?}", e);
+            return; // Exit the function early since we can't proceed
+        }
+    };
 
-    println!("Got response");
-    let res = response.body().read_to_end().await.unwrap();
+    // Create the request
+    let mut request = request_builder
+        .headers(&[("User-Agent", USER_AGENT), ("Accept", "application/json")])
+        .content_type(ContentType::ApplicationJson)
+        .body(&b"{\"message\":\"PINGS\"}"[..]);
 
-    let content = core::str::from_utf8(res).unwrap();
-    println!("{}", content);
+    // Send the request and get a response
+    let response = match request.send(&mut response_buffer).await {
+        Ok(res) => res,
+        Err(e) => {
+            println!("Error in HTTP request: {:?}", e);
+            return;
+        }
+    };
+
+    // Read the response body into body_buffer
+    match response.body().reader().read_to_end(&mut body_buffer).await {
+        Ok(res) => res,
+        Err(e) => {
+            println!("Error reading response body: {:?}", e);
+            return;
+        }
+    };
+
+    // Convert the response body to a string
+    match core::str::from_utf8(&body_buffer) {
+        Ok(body_str) => {
+            // Successfully converted bytes to UTF-8 string
+            println!("Response body:\n\n{}", body_str);
+        }
+        Err(e) => {
+            // Failed to convert to UTF-8 string
+            println!("Error: Response contains invalid UTF-8: {:?}", e);
+        }
+    }
 }

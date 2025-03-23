@@ -1,0 +1,66 @@
+yourdomain.com {
+    # Enable HTTPS automatically
+    tls internal
+
+    # Reverse proxy to your FastAPI container
+    reverse_proxy fastapi:8000 {
+        # Optional: Add headers for proper forwarding
+        header_up Host {host}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Optional: Enable logging
+    log {
+        output file /var/log/caddy/yourdomain.log
+    }
+}
+
+# For local development with self-signed certificates
+localhost {
+    tls internal
+    reverse_proxy fastapi:8000
+}
+
+yourdomain.local {
+    tls internal
+    reverse_proxy fastapi:8000
+}
+
+# Main HTTPS configuration
+10.0.0.31 {
+    # Use self-signed certificates for local network
+    tls internal
+
+    # Reverse proxy to your FastAPI container
+    reverse_proxy localhost:8000 {
+        # Headers for proper forwarding
+        header_up Host {host}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Optional logging
+    log {
+        output file /var/log/caddy/api-https.log
+    }
+}
+
+# HTTP fallback configuration
+http://10.0.0.31 {
+    # Reverse proxy to your FastAPI container
+    reverse_proxy localhost:8000 {
+        # Headers for proper forwarding
+        header_up Host {host}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Optional logging
+    log {
+        output file /var/log/caddy/api-http.log
+    }
+}

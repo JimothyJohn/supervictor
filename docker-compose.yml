@@ -1,10 +1,42 @@
 version: '3'
 
 services:
-  api:
+  fastapi:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: fastapi
+    restart: unless-stopped
+    # Don't expose ports directly to the host
+    # (Caddy will handle external connections)
+    expose:
+      - 8000
+    networks:
+      - app_network
+
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
     ports:
-      - "8032:8000"
-    restart: unless-stopped 
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./logs/caddy:/var/log/caddy
+    networks:
+      - app_network
+    depends_on:
+      - fastapi
+    # Important: Use host network to make Caddy accessible on your local IP
+    network_mode: host
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config: 
