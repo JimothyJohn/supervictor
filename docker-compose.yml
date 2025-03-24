@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   fastapi:
     build:
@@ -30,8 +28,6 @@ services:
       - app_network
     depends_on:
       - fastapi
-    # Important: Use host network to make Caddy accessible on your local IP
-    network_mode: host
 
 networks:
   app_network:

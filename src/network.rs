@@ -15,8 +15,6 @@ use reqwless::{
     request::{Method, RequestBuilder},
 };
 
-use crate::constants::endpoints::USER_AGENT;
-
 #[embassy_executor::task]
 pub async fn connection(
     mut controller: WifiController<'static>,
@@ -56,7 +54,7 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
 
 // https://esp32.implrust.com/wifi/embassy/http-request.html
 // TODO add TLS Verify once able
-pub async fn access_website<'a>(stack: &'a Stack<'a>, tls_seed: u64) {
+pub async fn post_request<'a>(stack: &'a Stack<'a>, tls_seed: u64, host: &str, json_body: &str) {
     // Message buffers
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
@@ -76,7 +74,7 @@ pub async fn access_website<'a>(stack: &'a Stack<'a>, tls_seed: u64) {
     );
 
     // Create the request handler
-    let request_builder = match client.request(Method::POST, env!("HOST")).await {
+    let request_builder = match client.request(Method::POST, host).await {
         Ok(builder) => builder,
         Err(e) => {
             // AI-generated: Properly handle request creation errors
@@ -87,9 +85,12 @@ pub async fn access_website<'a>(stack: &'a Stack<'a>, tls_seed: u64) {
 
     // Create the request
     let mut request = request_builder
-        .headers(&[("User-Agent", USER_AGENT), ("Accept", "application/json")])
+        .headers(&[
+            ("User-Agent", "Uplink/0.1.0 (Platform; ESP32-C3)"),
+            ("Accept", "application/json"),
+        ])
         .content_type(ContentType::ApplicationJson)
-        .body(&b"{\"message\":\"PINGS\"}"[..]);
+        .body(json_body.as_bytes());
 
     // Send the request and get a response
     let response = match request.send(&mut response_buffer).await {

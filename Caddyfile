@@ -1,40 +1,18 @@
-yourdomain.com {
-    # Enable HTTPS automatically
-    tls internal
+# Main HTTPS configuration for local development
+10.0.0.31 {
+    # Use self-signed certificates for local network
+    tls internal {
+        # Explicitly set TLS protocols
+        protocols tls1.2 tls1.3
+        # Allow all cipher suites for testing
+        ciphers TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+    }
+
+    # Debug TLS handshake
+    debug
 
     # Reverse proxy to your FastAPI container
     reverse_proxy fastapi:8000 {
-        # Optional: Add headers for proper forwarding
-        header_up Host {host}
-        header_up X-Real-IP {remote}
-        header_up X-Forwarded-For {remote}
-        header_up X-Forwarded-Proto {scheme}
-    }
-
-    # Optional: Enable logging
-    log {
-        output file /var/log/caddy/yourdomain.log
-    }
-}
-
-# For local development with self-signed certificates
-localhost {
-    tls internal
-    reverse_proxy fastapi:8000
-}
-
-yourdomain.local {
-    tls internal
-    reverse_proxy fastapi:8000
-}
-
-# Main HTTPS configuration
-10.0.0.31 {
-    # Use self-signed certificates for local network
-    tls internal
-
-    # Reverse proxy to your FastAPI container
-    reverse_proxy localhost:8000 {
         # Headers for proper forwarding
         header_up Host {host}
         header_up X-Real-IP {remote}
@@ -42,25 +20,15 @@ yourdomain.local {
         header_up X-Forwarded-Proto {scheme}
     }
 
-    # Optional logging
+    # Log all requests with TLS info
     log {
-        output file /var/log/caddy/api-https.log
+        output stdout
+        format json
+        include_system_fields
     }
 }
 
-# HTTP fallback configuration
+# HTTP fallback (optional)
 http://10.0.0.31 {
-    # Reverse proxy to your FastAPI container
-    reverse_proxy localhost:8000 {
-        # Headers for proper forwarding
-        header_up Host {host}
-        header_up X-Real-IP {remote}
-        header_up X-Forwarded-For {remote}
-        header_up X-Forwarded-Proto {scheme}
-    }
-
-    # Optional logging
-    log {
-        output file /var/log/caddy/api-http.log
-    }
+    reverse_proxy fastapi:8000
 }

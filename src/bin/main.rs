@@ -4,7 +4,7 @@
 //!
 //! Set SSID and PASSWORD env variable before running this example.
 //!
-//! This gets an ip address via DHCP then performs an HTTP get request to some "random" server
+//! This gets an ip address via DHCP then performs an HTTP get request to an echo server
 //!
 //! Because of the huge task-arena size configured this won't work on ESP32-S2
 
@@ -15,25 +15,19 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
-// use embassy_net::dns::DnsSocket;
-// use embassy_net::tcp::client::{TcpClient, TcpClientState};
-// use embassy_net::{tcp::TcpSocket, StackResources};
 use embassy_net::StackResources;
 use embassy_time::{Duration, Timer};
-// use embedded_io_async::Write;
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{clock::CpuClock, rng::Rng, timer::timg::TimerGroup};
 use esp_println::println;
 use esp_wifi::{init, EspWifiController};
-// use heapless::String as HString;
 
-// use supervictor::models::RequestBody;
-use supervictor::network::{access_website, connection, net_task};
+use supervictor::models::UplinkMessage;
+use supervictor::network::{connection, net_task, post_request};
 use supervictor::utils::config_esp;
 
-// When you are okay with using a nightly compiler it's better to use https://docs.rs/static_cell/2.1.0/static_cell/macro.make_static.html
 macro_rules! make_static {
     ($t:ty,$val:expr) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
@@ -95,8 +89,21 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         println!("Waiting to get IP address...");
     }
 
+    let json_body: heapless::String<128> = match serde_json_core::to_string(&UplinkMessage {
+        // Don't use unwrap in production, use a fixed length string
+        id: "1234567890".try_into().unwrap(),
+        current: 100,
+    }) {
+        Ok(body) => body,
+        Err(e) => {
+            println!("Error serializing JSON: {:?}", e);
+            let json_body: heapless::String<128> = "{}".try_into().unwrap();
+            json_body
+        }
+    };
+
     loop {
-        access_website(&stack, tls_seed).await;
+        post_request(&stack, tls_seed, env!("HOST"), &json_body).await;
         Timer::after(Duration::from_millis(3_000)).await;
     }
 }
