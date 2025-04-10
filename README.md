@@ -32,11 +32,11 @@ Extract information from the environment as efficiently as possible.
 
 - [Embassy Book](https://embassy.dev/book/index.html)
 
+- [Impl Rust for ESP32](https://esp32.implrust.com)
+
 ### TODO
 
 - [x] Create an async GET HTTP request -> [Code](https://github.com/esp-rs/esp-hal/blob/main/examples/src/bin/wifi_embassy_dhcp.rs)
-
-- [x] Create an async GET HTTPS request with JSON response 
 
 - [x] Create an async POST HTTPS request with JSON request/response 
 

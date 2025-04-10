@@ -18,6 +18,7 @@ Usage:
 Options:
   -h, --help     Show this help message
   -r, --release  Build in release mode with clippy checks
+  -d, --desktop  Run desktop version instead of embedded
 
 Environment variables (set in .env file):
   SSID           WiFi network name
@@ -25,8 +26,10 @@ Environment variables (set in .env file):
   HOST           Target host for HTTP requests
 
 Examples:
-  ./Quickstart              # Run in debug mode
-  ./Quickstart --release    # Run in release mode
+  ./Quickstart              # Run embedded version in debug mode
+  ./Quickstart --release    # Run embedded version in release mode
+  ./Quickstart --desktop    # Run desktop version in debug mode
+  ./Quickstart -rd          # Run desktop version in release mode
 EOF
     exit 0
 fi
@@ -41,14 +44,20 @@ main() {
     export PASSWORD=${PASSWORD}
     export HOST=${HOST}
 
-    local RELEASE=""
+    local BIN="supervictor-embedded"
+    local FEATURES="embedded"
+    local TARGET="riscv32imc-unknown-none-elf"
     
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             -r|--release)
-                RELEASE="--release"
                 cargo clippy --all-features --workspace -- -D warnings
-                cargo build --release
+                cargo build -Z build-std=core,alloc --release
+                ;;
+            -d|--desktop)
+                BIN="supervictor-desktop"
+                FEATURES="desktop"
+                TARGET="x86_64-unknown-linux-gnu"
                 ;;
             *)
                 echo "Unknown parameter passed: $1"
@@ -60,7 +69,7 @@ main() {
 
     install_dependencies
 
-    cargo run $RELEASE
+    cargo run --features="$FEATURES" --bin $BIN
 }
 
 main "$@"

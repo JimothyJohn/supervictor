@@ -25,8 +25,7 @@ use esp_println::println;
 use esp_wifi::{init, EspWifiController};
 
 use supervictor::models::UplinkMessage;
-use supervictor::network::{connection, net_task, post_request};
-use supervictor::utils::config_esp;
+use supervictor::network::embedded::{connection, net_task, post_request};
 
 macro_rules! make_static {
     ($t:ty,$val:expr) => {{
@@ -39,7 +38,9 @@ macro_rules! make_static {
 
 #[esp_hal_embassy::main]
 async fn main(spawner: embassy_executor::Spawner) -> ! {
-    config_esp();
+    esp_println::logger::init_logger_from_env();
+    // TODO: Optimize this once able
+    esp_alloc::heap_allocator!(size: 72 * 1024);
 
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
 
