@@ -44,20 +44,24 @@ main() {
     export PASSWORD=${PASSWORD}
     export HOST=${HOST}
 
+    # Default to embedded version
     local BIN="supervictor-embedded"
     local FEATURES="embedded"
     local TARGET="riscv32imc-unknown-none-elf"
+    local BUILD_LIBS="core,alloc"
+    local RELEASE=""
     
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             -r|--release)
-                cargo clippy --all-features --workspace -- -D warnings
-                cargo build -Z build-std=core,alloc --release
+                RELEASE="--release"
                 ;;
             -d|--desktop)
                 BIN="supervictor-desktop"
                 FEATURES="desktop"
                 TARGET="x86_64-unknown-linux-gnu"
+                BUILD_LIBS=""
+                RUSTFLAGS=""
                 ;;
             *)
                 echo "Unknown parameter passed: $1"
@@ -69,7 +73,16 @@ main() {
 
     install_dependencies
 
-    cargo run --features="$FEATURES" --bin $BIN
+    # Run clippy in release mode
+    if [ -n "$RELEASE" ]; then
+        cargo clippy --all-features --workspace -- -D warnings
+    fi
+
+    if [ -n "$BUILD_LIBS" ]; then
+        cargo run $RELEASE --features=$FEATURES --bin $BIN --target $TARGET -Z build-std=$BUILD_LIBS
+    else
+        cargo run $RELEASE --features=$FEATURES --bin $BIN --target $TARGET
+    fi
 }
 
 main "$@"

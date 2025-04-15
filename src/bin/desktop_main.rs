@@ -9,18 +9,14 @@
 //% FEATURES: embassy esp-wifi esp-wifi/wifi esp-hal/unstable
 //% CHIPS: esp32 esp32s2 esp32s3 esp32c2 esp32c3 esp32c6
 
-use std::env;
-use tokio::time::sleep;
+use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Get environment variables
-    let host = env::var("HOST").expect("HOST environment variable not set");
-
-    let body = reqwest::get("https://www.rust-lang.org")
+    let resp = reqwest::get("https://httpbin.org/ip")
         .await?
-        .text()
+        .json::<HashMap<String, String>>()
         .await?;
-
-    println!("body = {body:?}");
+    println!("{resp:#?}");
+    Ok(())
 }
