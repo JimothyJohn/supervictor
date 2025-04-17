@@ -20,7 +20,7 @@ pub struct EchoResponse {
     #[serde(rename = "parsedQueryParams")]
     pub parsed_query_params: EchoQueryParams,
     #[serde(rename = "parsedBody")]
-    pub parsed_body: UplinkMessage,
+    pub parsed_body: Option<UplinkMessage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,12 +28,12 @@ pub struct EchoResponse {
 pub struct EchoHeaders {
     pub host: HString<64>,
     #[serde(rename = "User-Agent")]
-    pub user_agent: HString<64>,
+    pub user_agent: Option<HString<64>>,
     #[serde(rename = "Content-Length")]
     pub content_length: HString<8>,
     pub accept: HString<32>,
     #[serde(rename = "Content-Type")]
-    pub content_type: HString<32>,
+    pub content_type: Option<HString<32>>,
     #[serde(rename = "Accept-Encoding")]
     pub accept_encoding: HString<16>,
 }

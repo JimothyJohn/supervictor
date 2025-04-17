@@ -37,7 +37,7 @@ embassy-net = { version = "0.6.0", features = [
   "dns",
 ] }
 
-reqwest = { version = "0.12.15", optional = true, features = ["json"] }
+reqwest = { version = "0.12.15", optional = true, features = ["json", "rustls-tls"] }
 tokio = { version = "1.0", optional = true, features = ["full"] }
 
 embedded-io = "0.6.1"
@@ -79,8 +79,6 @@ serde-json-core = "0.6.0"
 reqwless = { version = "0.13.0", features = ["log"] }
 log = "0.4.26"
 rust-mqtt = { version = "0.3.0", default-features = false, features = ["tls"]}
-
-
 
 [profile.dev]
 # Rust debug is too slow.
