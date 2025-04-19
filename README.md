@@ -40,4 +40,6 @@ Extract information from the environment as efficiently as possible.
 
 - [x] Create an async POST HTTPS request with JSON request/response 
 
+- [x] Create an async POST HTTPS with custom cert/key and JSON request/response
+
 - [ ] Utilize flash/NVS encryption. [Reference](https://espressif.github.io/esp32-c3-book-en/chapter_13/13.3/13.3.7.html)

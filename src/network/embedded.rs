@@ -54,7 +54,12 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
 
 // https://esp32.implrust.com/wifi/embassy/http-request.html
 // TODO add TLS Verify once able
-pub async fn post_request<'a>(stack: &'a Stack<'a>, tls_seed: u64, host: &str, json_body: &str) {
+pub async fn post_request_reqwless<'a>(
+    stack: &'a Stack<'a>,
+    tls_seed: u64,
+    host: &str,
+    json_body: &str,
+) {
     // Message buffers
     let mut rx_buffer = [0u8; 4096];
     let mut tx_buffer = [0u8; 4096];
