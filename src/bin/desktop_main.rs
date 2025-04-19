@@ -9,8 +9,10 @@
 //% FEATURES: embassy esp-wifi esp-wifi/wifi esp-hal/unstable
 //% CHIPS: esp32 esp32s2 esp32s3 esp32c2 esp32c3 esp32c6
 
-use std::collections::HashMap;
-// use supervictor::models::EchoResponse;
+use heapless::String as HString;
+// use std::collections::HashMap;
+use std::time::Duration;
+use supervictor::models::UplinkMessage;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,15 +30,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .identity(client_cert)
         .build()?;
 
-    // Make authenticated request
-    let resp = client
-        .post(env!("HOST"))
-        .body("the exact body that is sent")
-        .send()
-        .await?
-        .json::<HashMap<String, String>>()
-        .await?;
+    // Get host from environment
+    let host = env!("HOST");
+    // let host = env::var("HOST").expect("HOST environment variable not set");
 
-    println!("{resp:#?}");
-    Ok(())
+    // Create the message data
+    let message = UplinkMessage {
+        id: "1234567890".try_into().unwrap(),
+        current: 100,
+    };
+
+    // Convert to JSON using serde-json-core
+    let json_body: HString<512> =
+        serde_json_core::to_string(&message).unwrap_or_else(|_| "{}".try_into().unwrap());
+
+    println!("Starting message loop with 3 second interval");
+
+    // Loop like in embedded version
+    loop {
+        // Make authenticated request
+        match client.post(host).json(&json_body).send().await {
+            Ok(response) => {
+                // println!("Response status: {}", response.status());
+                if let Ok(text) = response.text().await {
+                    println!("Response body: {}", text);
+                }
+            }
+            Err(e) => println!("Error sending request: {}", e),
+        }
+
+        // Wait before sending next message
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
