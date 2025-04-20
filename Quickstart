@@ -43,6 +43,7 @@ main() {
     export SSID=${SSID}
     export PASSWORD=${PASSWORD}
     export HOST=${HOST}
+    export PORT=${PORT}
 
     # Default to embedded version
     local BIN="supervictor-embedded"
@@ -75,6 +76,8 @@ main() {
 
     # Run clippy in release mode
     if [ -n "$RELEASE" ]; then
+        cargo build --release --features=$FEATURES --bin $BIN --target $TARGET -Z build-std=$BUILD_LIBS 
+        cargo fmt --all -- --check
         cargo clippy --all-features --workspace -- -D warnings
     fi
 

@@ -58,7 +58,7 @@ esp-backtrace = { version = "0.15.1", features = [
 esp-hal = { version = "1.0.0-beta.0", default-features = false, features = [
   "defmt",
   "esp32c3",
-  "unstable",
+  # "unstable",
 ], optional = true }
 esp-println = { version = "0.13.0", features = [
   "defmt-espflash",
