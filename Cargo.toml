@@ -55,7 +55,7 @@ esp-backtrace = { version = "0.15.1", features = [
   "exception-handler",
   "panic-handler",
 ], optional = true  }
-esp-hal = { version = "1.0.0-beta.0", features = [
+esp-hal = { version = "1.0.0-beta.0", default-features = false, features = [
   "defmt",
   "esp32c3",
   "unstable",

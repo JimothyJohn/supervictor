@@ -1,3 +1,4 @@
-#[cfg(feature = "embedded")]
-pub mod embedded;
 pub mod http;
+#[cfg(feature = "embedded")]
+pub mod tls;
+pub mod utils;

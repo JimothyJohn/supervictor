@@ -1,18 +1,8 @@
-use embassy_net::{
-    dns::DnsSocket,
-    tcp::client::{TcpClient, TcpClientState},
-    Runner, Stack,
-};
+use embassy_net::Runner;
 use embassy_time::{Duration, Timer};
 use esp_println::println;
 use esp_wifi::wifi::{
     ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiState,
-};
-
-use reqwless::{
-    client::{HttpClient, TlsConfig, TlsVerify},
-    headers::ContentType,
-    request::{Method, RequestBuilder},
 };
 
 #[embassy_executor::task]
@@ -52,6 +42,12 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }
 
+/*
+use reqwless::{
+    client::{HttpClient, TlsConfig, TlsVerify},
+    headers::ContentType,
+    request::{Method, RequestBuilder},
+};
 // https://esp32.implrust.com/wifi/embassy/http-request.html
 // TODO add TLS Verify once able
 pub async fn post_request_reqwless<'a>(
@@ -127,3 +123,4 @@ pub async fn post_request_reqwless<'a>(
         }
     }
 }
+*/

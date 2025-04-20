@@ -22,7 +22,7 @@ jobs:
       matrix:
         action:
           - command: build
-            args: --release
+            args: --release --features embedded
           - command: fmt
             args: --all -- --check
           - command: clippy

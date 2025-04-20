@@ -3,5 +3,17 @@
   "rust-analyzer.cargo.target": "riscv32imc-unknown-none-elf",
   "rust-analyzer.cargo.features": [
     "embedded"
-  ]
+  ],
+  "rust-analyzer.server.extraEnv": {
+    "HOST": "echo.free.beeceptor.com",
+    // HOST=https://a2m9xuporrzts-ats.iot.us-east-1.amazonaws.com:8443/topics/sdk/test/python?qos=1
+    "PORT": "443",
+    // Also add other env vars used by env! if needed
+    "SSID": "TheCage",
+    "PASSWORD": "2143001929",
+    // Add env vars needed by build.rs if you use that approach
+    // "CA_CERT_PATH": "../../aws/letsencrypt.pem",
+    // "CLIENT_CERT_PATH": "../../aws/debian.cert.pem",
+    // "CLIENT_KEY_PATH": "../../aws/debian.private.key"
+  }
 }
