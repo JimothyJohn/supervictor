@@ -36,10 +36,10 @@ Extract information from the environment as efficiently as possible.
 
 ### TODO
 
-- [x] Create an async GET HTTP request -> [Code](https://github.com/esp-rs/esp-hal/blob/main/examples/src/bin/wifi_embassy_dhcp.rs)
+- [x] [Create an async GET HTTP request](examples/wifi_embassy_dhcp.rs)
 
-- [x] Create an async POST HTTPS request with JSON request/response 
+- [x] [Create an async POST HTTPS request with JSON request/response](examples/tls_dns_dhcp_wifi.rs)
 
-- [x] Create an async POST HTTPS with custom cert/key and JSON request/response
+- [ ] Connect to AWS IoT over MQTT [Reference](https://github.com/sambenko/esp32s3-no-std-async-tls-mqtt/blob/main/src/main.rs)
 
 - [ ] Utilize flash/NVS encryption. [Reference](https://espressif.github.io/esp32-c3-book-en/chapter_13/13.3/13.3.7.html)

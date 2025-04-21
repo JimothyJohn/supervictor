@@ -43,7 +43,6 @@ main() {
     export SSID=${SSID}
     export PASSWORD=${PASSWORD}
     export HOST=${HOST}
-    export PORT=${PORT}
 
     # Default to embedded version
     local BIN="supervictor-embedded"

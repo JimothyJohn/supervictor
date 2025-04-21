@@ -4,17 +4,18 @@ pub fn load_certificates() -> Certificates<'static> {
     // AI-Generated comment: Load the CA chain certificate data at compile time.
     // AI-Generated comment: The concat! macro appends a null byte, required by X509::pem.
     // AI-Generated comment: as_bytes() gets a reference to the static byte slice.
-    let ca_chain_bytes = concat!(include_str!("../../aws/letsencrypt.pem"), "\0").as_bytes();
+    let ca_chain_bytes = concat!(include_str!("../../certs/letsencrypt.pem"), "\0").as_bytes();
     // AI-Generated comment: Create the X509 object, borrowing the static data. Returns Option<X509<'static>>.
     let ca_chain = X509::pem(ca_chain_bytes);
 
     // AI-Generated comment: Load the client certificate data at compile time.
-    let client_cert_bytes = concat!(include_str!("../../aws/debian.cert.pem"), "\0").as_bytes();
+    let client_cert_bytes = concat!(include_str!("../../certs/debian.cert.pem"), "\0").as_bytes();
     // AI-Generated comment: Create the X509 object, borrowing the static data.
     let client_cert = X509::pem(client_cert_bytes);
 
     // AI-Generated comment: Load the private key data at compile time.
-    let private_key_bytes = concat!(include_str!("../../aws/debian.private.key"), "\0").as_bytes();
+    let private_key_bytes =
+        concat!(include_str!("../../certs/debian.private.key"), "\0").as_bytes();
     // AI-Generated comment: Create the X509 object, borrowing the static data.
     let private_key = X509::pem(private_key_bytes);
 
