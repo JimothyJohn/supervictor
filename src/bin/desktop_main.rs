@@ -17,10 +17,10 @@ use supervictor::models::UplinkMessage;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load certificates and key
-    let ca_cert = reqwest::Certificate::from_pem(include_bytes!("../../aws/AmazonRootCA1.pem"))?;
+    let ca_cert = reqwest::Certificate::from_pem(include_bytes!("../../certs/AmazonRootCA1.pem"))?;
 
     // https://github.com/seanmonstar/reqwest/issues/2011#issuecomment-2801252988
-    let client_cert = reqwest::Identity::from_pem(include_bytes!("../../aws/debian.pem"))?;
+    let client_cert = reqwest::Identity::from_pem(include_bytes!("../../certs/temp-250423.pem"))?;
 
     // Build client with certificates
     let client = reqwest::Client::builder()
@@ -31,8 +31,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     // Get host from environment
-    let host = env!("HOST");
+    let base_host = env!("HOST");
     // let host = env::var("HOST").expect("HOST environment variable not set");
+
+    // AI-Generated comment: Construct the full target URL by prepending scheme and appending path.
+    let target_url = format!("https://{}/supervictor", base_host);
+    println!("Using target URL: {}", target_url);
 
     // Create the message data
     let message = UplinkMessage {
@@ -49,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Loop like in embedded version
     loop {
         // Make authenticated request
-        match client.post(host).json(&json_body).send().await {
+        match client.post(&target_url).json(&json_body).send().await {
             Ok(response) => {
                 // println!("Response status: {}", response.status());
                 if let Ok(text) = response.text().await {

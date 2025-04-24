@@ -11,6 +11,7 @@ use esp_println::println;
 use esp_wifi::wifi::{
     ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiState,
 };
+use heapless::String as HString;
 
 #[embassy_executor::task]
 pub async fn connection(
@@ -50,7 +51,7 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
 }
 
 #[embassy_executor::task]
-pub async fn new_main(stack: Stack<'static>, tls: Tls<'static>) {
+pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;
         if stack.is_link_up() {
@@ -68,14 +69,14 @@ pub async fn new_main(stack: Stack<'static>, tls: Tls<'static>) {
     }
 
     // AI-Generated comment: Call the function to create and serialize the data map.
-    let json_body: heapless::String<128> = match serde_json_core::to_string(&UplinkMessage {
+    let json_body: HString<128> = match serde_json_core::to_string(&UplinkMessage {
         id: "1234567890".try_into().unwrap(),
         current: 100,
     }) {
         Ok(body) => body,
         Err(e) => {
             println!("Error serializing JSON: {:?}", e);
-            let json_body: heapless::String<128> = "{}".try_into().unwrap();
+            let json_body: HString<128> = "{}".try_into().unwrap();
             json_body
         }
     };
@@ -119,10 +120,7 @@ pub async fn new_main(stack: Stack<'static>, tls: Tls<'static>) {
     // AI-Generated comment: Create the CStr for the servername *before* Session::new.
     // This ensures the CStr reference lives long enough for the Session::new call.
     let host_cstr = match CStr::from_bytes_with_nul(concat!(env!("HOST"), "\0").as_bytes()) {
-        Ok(cstr) => {
-            println!("   ✅ Host CStr created for SNI."); // AI-Generated comment: Added log for success
-            cstr // AI-Generated comment: Assign the valid &'static CStr
-        }
+        Ok(cstr) => cstr,
         Err(e) => {
             // AI-Generated comment: Log and panic if HOST env var is invalid (contains null bytes).
             println!("   ❌ FATAL: Invalid HOST environment variable ('{}'): Must not contain null bytes. Error: {:?}",
@@ -132,9 +130,7 @@ pub async fn new_main(stack: Stack<'static>, tls: Tls<'static>) {
         }
     };
 
-    // AI-Generated comment: Load certificates. Ensure load_certificates returns the correct type.
     let certs = load_certificates();
-    println!("   ℹ️ Certificates loaded."); // AI-Generated comment: Added log after loading
 
     // AI-Generated comment: Initialize the TLS session, passing the pre-validated host_cstr.
     let mut session = match Session::new(
@@ -146,10 +142,7 @@ pub async fn new_main(stack: Stack<'static>, tls: Tls<'static>) {
         certs,              // AI-Generated comment: Pass the loaded certificates.
         tls.reference(),    // AI-Generated comment: Pass a reference to the Tls context.
     ) {
-        Ok(s) => {
-            println!("   ✅ TLS Session structure created."); // AI-Generated comment: Added log for success
-            s
-        }
+        Ok(s) => s,
         Err(e) => {
             println!("   ❌ Failed to create TLS session: {:?}", e);
             panic!("Failed to create TLS session: {:?}", e);
@@ -176,7 +169,7 @@ pub async fn new_main(stack: Stack<'static>, tls: Tls<'static>) {
 
     loop {
         // Try sending a simple HTTP request to verify the connection
-        let request = post_request(env!("HOST"), &json_body, None);
+        let request = post_request(env!("HOST"), &json_body, Some("/supervictor"));
         match session.write(request.as_bytes()).await {
             Ok(written) => {
                 if written != request.len() {

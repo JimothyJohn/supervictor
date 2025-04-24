@@ -1,7 +1,5 @@
 {
   "name": "supervictor",
-  // Select between image and build properties to pull or build the image.
-  // "image": "docker.io/espressif/idf-rust:esp32c3_latest",
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
@@ -49,5 +47,8 @@
     "--group-add=dialout"
   ],
   "workspaceMount": "source=${localWorkspaceFolder},target=/home/esp/supervictor,type=bind,consistency=cached",
-  "workspaceFolder": "/home/esp/supervictor"
+  "workspaceFolder": "/home/esp/supervictor",
+  "mounts": [
+    "source=${localEnv:HOME}/.aws,target=/home/esp/.aws,type=bind,consistency=cached,readonly"
+  ]
 }
