@@ -3,6 +3,11 @@
 // AI-Generated comment: Import Duration for time-based constants.
 use embassy_time::Duration;
 
+pub const HOST: &str = env!("HOST");
+pub const CA_PATH: &str = "../../certs/AmazonRootCA1.pem";
+pub const CERT_PATH: &str = "../../certs/temp-250423.crt";
+pub const KEY_PATH: &str = "../../certs/temp-250423.key";
+
 // --- System ---
 // AI-Generated comment: Size of the heap allocator. Tuning might be needed based on memory usage.
 pub const HEAP_SIZE: usize = 144 * 1024;

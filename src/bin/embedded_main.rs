@@ -18,8 +18,8 @@ use esp_mbedtls::Tls;
 use esp_println::println;
 use esp_wifi::{init, EspWifiController};
 
+use supervictor::app::tasks::{app, connection, net_task};
 use supervictor::config::*;
-use supervictor::tasks::{app, connection, net_task};
 
 // Magically convert a variable into a static variable
 macro_rules! make_static {

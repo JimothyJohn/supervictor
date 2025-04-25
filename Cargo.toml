@@ -14,7 +14,7 @@ path = "./src/bin/desktop_main.rs"
 required-features = ["desktop"]
 
 [features]
-desktop = ["reqwest", "tokio"]
+desktop = ["reqwest", "tokio", "rustls", "tokio-rustls", "rustls-pemfile"]
 embedded = [
   "esp-alloc", 
   "esp-backtrace", 
@@ -85,6 +85,9 @@ serde-json-core = "0.6.0"
 reqwless = { version = "0.13.0", features = ["log"] }
 log = "0.4.26"
 esp-mbedtls = { git = "https://github.com/esp-rs/esp-mbedtls.git", optional = true, features = ["esp32c3"] }
+rustls = { version = "0.23.26", optional = true }
+tokio-rustls = { version = "0.26.2", optional = true }
+rustls-pemfile = { version = "2.2.0", optional = true }
 
 [profile.dev]
 # Rust debug is too slow.

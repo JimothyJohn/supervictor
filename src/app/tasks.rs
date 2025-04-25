@@ -1,8 +1,10 @@
-use core::ffi::CStr;
+#![no_std]
 
 use crate::config::*;
 use crate::models::UplinkMessage;
-use crate::network::{http::post_request, tls::load_certificates};
+use crate::network::http::post_request;
+use crate::network::tls::load_certificates;
+use core::ffi::CStr;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::{Runner, Stack};
 use embassy_time::{Duration, Timer};
@@ -13,6 +15,7 @@ use esp_wifi::wifi::{
 };
 use heapless::String as HString;
 
+#[cfg(feature = "embedded")]
 #[embassy_executor::task]
 pub async fn connection(
     mut controller: WifiController<'static>,
@@ -45,11 +48,13 @@ pub async fn connection(
     }
 }
 
+#[cfg(feature = "embedded")]
 #[embassy_executor::task]
 pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }
 
+#[cfg(feature = "embedded")]
 #[embassy_executor::task]
 pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
     loop {
@@ -82,7 +87,7 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
     };
 
     let address = match stack
-        .dns_query(env!("HOST"), embassy_net::dns::DnsQueryType::A)
+        .dns_query(HOST, embassy_net::dns::DnsQueryType::A)
         .await
     {
         Ok(addresses) => {
@@ -119,7 +124,9 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
 
     // AI-Generated comment: Create the CStr for the servername *before* Session::new.
     // This ensures the CStr reference lives long enough for the Session::new call.
-    let host_cstr = match CStr::from_bytes_with_nul(concat!(env!("HOST"), "\0").as_bytes()) {
+    // AI-Generated change: Create null-terminated bytes first to simplify the match line.
+    let host_bytes_with_null = concat!(env!("HOST"), "\0").as_bytes();
+    let host_cstr = match CStr::from_bytes_with_nul(&host_bytes_with_null) {
         Ok(cstr) => cstr,
         Err(e) => {
             // AI-Generated comment: Log and panic if HOST env var is invalid (contains null bytes).

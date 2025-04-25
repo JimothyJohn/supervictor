@@ -80,6 +80,8 @@ where
                 }
             }
 
+            request.push_str("\r\n").unwrap();
+            request.push_str("Connection: close").unwrap();
             request.push_str("\r\n\r\n").unwrap();
 
             // Add the JSON body

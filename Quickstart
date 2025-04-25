@@ -61,7 +61,6 @@ main() {
                 FEATURES="desktop"
                 TARGET="x86_64-unknown-linux-gnu"
                 BUILD_LIBS=""
-                RUSTFLAGS=""
                 ;;
             *)
                 echo "Unknown parameter passed: $1"
