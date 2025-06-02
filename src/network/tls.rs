@@ -1,5 +1,3 @@
-use esp_println::println;
-
 use esp_mbedtls::{Certificates, X509};
 
 pub fn load_certificates() -> Certificates<'static> {

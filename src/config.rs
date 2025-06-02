@@ -23,6 +23,7 @@ pub const DNS_RETRY_DELAY: Duration = Duration::from_millis(3000);
 // --- TCP/Socket ---
 // AI-Generated comment: Size of the TCP receive buffer. Should accommodate largest expected TLS record/HTTP response.
 pub const TCP_RX_BUFFER_SIZE: usize = 4096;
+pub const TLS_RX_BUFFER_SIZE: usize = 4096;
 // AI-Generated comment: Size of the TCP transmit buffer. Should accommodate largest expected TLS record/HTTP request.
 pub const TCP_TX_BUFFER_SIZE: usize = 4096;
 // AI-Generated comment: Timeout for TCP socket operations like connect.

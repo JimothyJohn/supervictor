@@ -22,7 +22,10 @@ use tokio::{
 // AI-Generated comment: Imports for Rustls TLS implementation.
 use rustls::pki_types::ServerName;
 use rustls_pemfile::{certs, private_key}; // To load PEM files
-use supervictor::{models::UplinkMessage, network::http::post_request};
+use supervictor::{
+    models::uplink::UplinkMessage,
+    network::http::{parse_response, post_request},
+};
 use tokio_rustls::TlsConnector; // Rustls connector for Tokio // For SNI
 
 // AI-Generated comment: Standard web root CAs (optional but good practice).
@@ -39,7 +42,7 @@ async fn main() {
 }
 
 pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
-    rustls::crypto::ring::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
     // --- Network Setup ---
     let connector = match create_connector() {
@@ -73,7 +76,6 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
     };
     let json_body: HString<512> =
         serde_json_core::to_string(&message).unwrap_or_else(|_| "{}".try_into().unwrap());
-    let json_body_str = json_body.as_str();
 
     // --- Main Loop ---
     loop {
@@ -83,7 +85,6 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(mut tls_stream) => {
                         // AI-Generated comment: Manually construct the HTTP POST request.
                         let request = post_request(base_host, &json_body, Some("/supervictor"));
-                        println!("Request: {}", request);
 
                         if let Err(e) = tls_stream.write_all(request.as_bytes()).await {
                             println!("Error writing request: {}", e);
@@ -95,12 +96,20 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
                         let mut response_buf = Vec::new();
                         match tls_stream.read_to_end(&mut response_buf).await {
                             Ok(bytes_read) => {
-                                println!("Read {} bytes.", bytes_read);
                                 // AI-Generated comment: Attempt to print response as UTF-8.
                                 match String::from_utf8(response_buf) {
-                                    Ok(response_str) => {
-                                        println!("Received response:\n---\n{}---", response_str)
-                                    }
+                                    Ok(response_str) => match parse_response(&response_str) {
+                                        Ok(response) => {
+                                            println!(
+                                                "Parsed response:\n---\n{}\n---",
+                                                serde_json_core::to_string::<_, 1024>(
+                                                    &response.body
+                                                )
+                                                .unwrap()
+                                            )
+                                        }
+                                        Err(e) => println!("Error parsing response: {}", e),
+                                    },
                                     Err(_) => println!(
                                         "Received non-UTF8 response ({} bytes)",
                                         bytes_read
@@ -123,8 +132,9 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
 
 pub fn create_connector() -> Result<TlsConnector, Box<dyn std::error::Error>> {
     // AI-Generated comment: Load the Amazon CA certificate (server validation).
-    let mut ca_reader =
-        std::io::BufReader::new(&include_bytes!("../../certs/AmazonRootCA1.pem")[..]);
+    let mut ca_reader = concat!(include_str!("../../certs/AmazonRootCA1.pem"), "\0").as_bytes();
+
+    // std::io::BufReader::new(&include_bytes!("../../certs/AmazonRootCA1.pem")[..]);
     // AI-Generated comment: rustls_pemfile::certs returns an iterator, collect results before using ?
     let ca_certs = certs(&mut ca_reader).collect::<Result<Vec<_>, _>>()?;
     if ca_certs.is_empty() {
@@ -167,6 +177,7 @@ pub fn create_connector() -> Result<TlsConnector, Box<dyn std::error::Error>> {
     Ok(connector)
 }
 
+/*
 // Higher-level version of above method
 async fn reqwest_app() -> Result<(), Box<dyn std::error::Error>> {
     // Load certificates and key
@@ -217,3 +228,4 @@ async fn reqwest_app() -> Result<(), Box<dyn std::error::Error>> {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
+*/

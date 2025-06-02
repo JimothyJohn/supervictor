@@ -6,14 +6,13 @@ An experiment in deploying Rust on a RISC-V MCU. If you can do it here you can d
 
 ## Goal
 
-Extract information from the environment as efficiently as possible.
+Extract information from our environment as efficiently as possible.
 
 ### Hardware
 
 - [XIAO ESP32C3](https://wiki.seeedstudio.com/XIAO_ESP32C3_Getting_Started/)
 
-
-### Built on
+### Built with 
 
 - esp-generate 0.3.0
 
@@ -40,6 +39,8 @@ Extract information from the environment as efficiently as possible.
 
 - [x] [Create an async POST HTTPS request with JSON request/response](examples/tls_dns_dhcp_wifi.rs)
 
-- [ ] Connect to AWS IoT over MQTT [Reference](https://github.com/sambenko/esp32s3-no-std-async-tls-mqtt/blob/main/src/main.rs)
+- [x] [Create cloud endpoint pair for MCU](supervictor-cloud/README.md)
+
+- [x] [Connect to AWS Lambda using mTLS](src/bin/embedded_main.rs)
 
 - [ ] Utilize flash/NVS encryption. [Reference](https://espressif.github.io/esp32-c3-book-en/chapter_13/13.3/13.3.7.html)

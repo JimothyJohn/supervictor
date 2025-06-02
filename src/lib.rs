@@ -1,5 +1,6 @@
 #![no_std]
 
+pub mod error;
 pub mod models;
 pub mod network;
 

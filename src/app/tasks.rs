@@ -1,7 +1,5 @@
-#![no_std]
-
 use crate::config::*;
-use crate::models::UplinkMessage;
+use crate::models::uplink::UplinkMessage;
 use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
 use core::ffi::CStr;
@@ -86,122 +84,134 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
         }
     };
 
-    let address = match stack
-        .dns_query(HOST, embassy_net::dns::DnsQueryType::A)
-        .await
-    {
-        Ok(addresses) => {
-            if let Some(first_addr) = addresses.first() {
-                *first_addr
-            } else {
-                println!("No addresses returned from DNS query");
-                panic!("No addresses returned from DNS query");
-            }
-        }
-        Err(e) => {
-            println!("DNS resolution failed: {:?}", e);
-            panic!("DNS resolution failed: {:?}", e);
-        }
-    };
-
-    let remote_endpoint = (address, AWS_IOT_PORT);
-
-    let mut rx_buffer = [0u8; TCP_RX_BUFFER_SIZE];
-    let mut tx_buffer = [0u8; TCP_TX_BUFFER_SIZE];
-
-    let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-
-    socket.set_timeout(Some(SOCKET_TIMEOUT));
-
-    println!("Connecting...");
-    let r = socket.connect(remote_endpoint).await;
-
-    if let Err(e) = r {
-        println!("connect error: {:?}", e);
-        #[allow(clippy::empty_loop)]
-        loop {}
-    }
-
-    // AI-Generated comment: Create the CStr for the servername *before* Session::new.
-    // This ensures the CStr reference lives long enough for the Session::new call.
-    // AI-Generated change: Create null-terminated bytes first to simplify the match line.
-    let host_bytes_with_null = concat!(env!("HOST"), "\0").as_bytes();
-    let host_cstr = match CStr::from_bytes_with_nul(&host_bytes_with_null) {
-        Ok(cstr) => cstr,
-        Err(e) => {
-            // AI-Generated comment: Log and panic if HOST env var is invalid (contains null bytes).
-            println!("   ❌ FATAL: Invalid HOST environment variable ('{}'): Must not contain null bytes. Error: {:?}",
-                env!("HOST"), e);
-            panic!("FATAL: Invalid HOST environment variable ('{}'): Must not contain null bytes. Error: {:?}",
-                env!("HOST"), e);
-        }
-    };
-
-    let certs = load_certificates();
-
-    // AI-Generated comment: Initialize the TLS session, passing the pre-validated host_cstr.
-    let mut session = match Session::new(
-        &mut socket,
-        Mode::Client {
-            servername: host_cstr, // AI-Generated comment: Pass the host_cstr variable here.
-        },
-        TlsVersion::Tls1_3, // Using TLS 1.3 as per the code
-        certs,              // AI-Generated comment: Pass the loaded certificates.
-        tls.reference(),    // AI-Generated comment: Pass a reference to the Tls context.
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            println!("   ❌ Failed to create TLS session: {:?}", e);
-            panic!("Failed to create TLS session: {:?}", e);
-        }
-    };
-
-    // AI-Generated comment: Connect with timeout handling.
-    match embassy_time::with_timeout(
-        TLS_HANDSHAKE_TIMEOUT, // 15 second timeout
-        session.connect(),
-    )
-    .await
-    {
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => {
-            println!("TLS connect error: {:?}", e);
-            panic!("TLS connect error: {:?}", e);
-        }
-        Err(_) => {
-            println!("TLS connect timed out after 15 seconds");
-            panic!("TLS connect timed out after 15 seconds");
-        }
-    };
-
+    // AI-Generated comment: The main application loop. Each iteration will attempt to make a new connection and send a request.
     loop {
-        // Try sending a simple HTTP request to verify the connection
-        let request = post_request(env!("HOST"), &json_body, Some("/supervictor"));
-        match session.write(request.as_bytes()).await {
-            Ok(written) => {
-                if written != request.len() {
-                    println!("   ⚠️ Only wrote {} of {} bytes", written, request.len());
+        // AI-Generated comment: DNS resolution is performed in each loop iteration in case the IP changes.
+        let address = match stack
+            .dns_query(HOST, embassy_net::dns::DnsQueryType::A)
+            .await
+        {
+            Ok(addresses) => {
+                if let Some(first_addr) = addresses.first() {
+                    *first_addr
+                } else {
+                    println!("No addresses returned from DNS query for host: {}", HOST);
+                    // AI-Generated comment: Delay before retrying DNS to avoid spamming queries on persistent failure.
+                    Timer::after(MAIN_LOOP_DELAY).await;
+                    continue; // AI-Generated comment: Skip to the next iteration of the loop.
                 }
             }
-            Err(e) => println!("   ❌ Failed to send request: {:?}", e),
+            Err(e) => {
+                println!("DNS resolution failed for host {}: {:?}", HOST, e);
+                // AI-Generated comment: Delay before retrying DNS.
+                Timer::after(MAIN_LOOP_DELAY).await;
+                continue; // AI-Generated comment: Skip to the next iteration of the loop.
+            }
         };
 
-        // Try to read response
-        let mut buffer = [0u8; 1024];
-        match embassy_time::with_timeout(HTTP_READ_TIMEOUT, session.read(&mut buffer)).await {
-            Ok(Ok(n)) => {
-                if n > 0 {
-                    match core::str::from_utf8(&buffer[..n]) {
-                        Ok(s) => println!("   Response: {}", s),
-                        Err(_) => println!("   Response not UTF-8 (binary data)"),
-                    }
-                } else {
-                    println!("   Empty response (0 bytes)");
-                }
+        let remote_endpoint = (address, AWS_IOT_PORT);
+
+        // AI-Generated comment: Buffers for the TCP socket are created in each iteration.
+        // These need to be mutable and their lifetime is tied to the socket.
+        let mut rx_buffer = [0u8; TCP_RX_BUFFER_SIZE];
+        let mut tx_buffer = [0u8; TCP_TX_BUFFER_SIZE];
+
+        // AI-Generated comment: Load certificates. This could potentially be done outside the loop if certs don't change.
+        // However, keeping it here simplifies state management per connection attempt.
+        let certs = load_certificates();
+
+        // AI-Generated comment: Create the CStr for the servername *before* Session::new.
+        // This ensures the CStr reference lives long enough for the Session::new call.
+        let host_bytes_with_null = concat!(env!("HOST"), "\0").as_bytes();
+        let host_cstr = match CStr::from_bytes_with_nul(&host_bytes_with_null) {
+            Ok(cstr) => cstr,
+            Err(e) => {
+                // AI-Generated comment: Log and panic if HOST env var is invalid (contains null bytes). This is a fatal configuration error.
+                println!("   ❌ FATAL: Invalid HOST environment variable ('{}'): Must not contain null bytes. Error: {:?}",
+                        env!("HOST"), e);
+                panic!("FATAL: Invalid HOST environment variable ('{}'): Must not contain null bytes. Error: {:?}",
+                        env!("HOST"), e);
             }
-            Ok(Err(e)) => println!("   ❌ Read failed: {:?}", e),
-            Err(_) => println!("   ❌ Read timed out"),
         };
-        Timer::after(MAIN_LOOP_DELAY).await;
+
+        loop {
+            // AI-Generated comment: A new TCP socket is created for each connection attempt.
+            let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+            socket.set_timeout(Some(SOCKET_TIMEOUT));
+
+            // AI-Generated comment: Attempt to connect the TCP socket.
+            if let Err(e) = socket.connect(remote_endpoint).await {
+                println!("   ❌ TCP connect error: {:?}", e);
+                // AI-Generated comment: Close the socket explicitly on error, though it might be implicitly closed on drop.
+                // socket.close(); // AI-Generated comment: esp-hal's TcpSocket doesn't have an explicit close, relies on drop.
+                Timer::after(MAIN_LOOP_DELAY).await; // AI-Generated comment: Wait before retrying.
+                continue; // AI-Generated comment: Skip to the next iteration of the loop.
+            }
+
+            // AI-Generated comment: Initialize the TLS session for each new connection.
+            // The 'socket' is moved into the Session here.
+            let mut session = match Session::new(
+                &mut socket,
+                Mode::Client {
+                    servername: host_cstr, // AI-Generated comment: Pass the host_cstr variable here.
+                },
+                TlsVersion::Tls1_3, // Using TLS 1.3 as per the code
+                certs,              // AI-Generated comment: Pass the loaded certificates.
+                tls.reference(),    // AI-Generated comment: Pass a reference to the Tls context.
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    println!("   ❌ Failed to create TLS session: {:?}", e);
+                    panic!("Failed to create TLS session: {:?}", e);
+                }
+            };
+
+            // AI-Generated comment: Connect with timeout handling.
+            match embassy_time::with_timeout(
+                TLS_HANDSHAKE_TIMEOUT, // 15 second timeout
+                session.connect(),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    println!("TLS connect error: {:?}", e);
+                    panic!("TLS connect error: {:?}", e);
+                }
+                Err(_) => {
+                    println!("TLS connect timed out after 15 seconds");
+                    panic!("TLS connect timed out after 15 seconds");
+                }
+            };
+
+            // Try sending a simple HTTP request to verify the connection
+            let request = post_request(env!("HOST"), &json_body, Some("/supervictor"));
+            match session.write(request.as_bytes()).await {
+                Ok(written) => {
+                    if written != request.len() {
+                        println!("   ⚠️ Only wrote {} of {} bytes", written, request.len());
+                    }
+                }
+                Err(e) => println!("   ❌ Failed to send request: {:?}", e),
+            };
+
+            // Try to read response
+            let mut buffer = [0u8; 1024];
+            match embassy_time::with_timeout(HTTP_READ_TIMEOUT, session.read(&mut buffer)).await {
+                Ok(Ok(n)) => {
+                    if n > 0 {
+                        match core::str::from_utf8(&buffer[..n]) {
+                            Ok(s) => println!("Received response:\n---\n{}\n---", s),
+                            Err(_) => println!("   Response not UTF-8 (binary data)"),
+                        }
+                    } else {
+                        println!("   Empty response (0 bytes)");
+                    }
+                }
+                Ok(Err(e)) => println!("   ❌ Read failed: {:?}", e),
+                Err(_) => println!("   ❌ Read timed out"),
+            };
+            Timer::after(MAIN_LOOP_DELAY).await;
+        }
     }
 }

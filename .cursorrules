@@ -1,5 +1,0 @@
-Don't provide any code unless explicitly asked.
-Provide code exclusively in Rust in no_std mode, do not use std libraries.
-Only use TOML in markup files.
-Provide explanations of esoteric Rust functionality to the user, a beginner.
-Comment liberally in the code provided.

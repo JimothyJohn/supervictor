@@ -19,6 +19,7 @@ Options:
   -h, --help     Show this help message
   -r, --release  Build in release mode with clippy checks
   -d, --desktop  Run desktop version instead of embedded
+  -t, --test     Run library unit tests (requires 'desktop' feature)
 
 Environment variables (set in .env file):
   SSID           WiFi network name
@@ -48,7 +49,6 @@ main() {
     local BIN="supervictor-embedded"
     local FEATURES="embedded"
     local TARGET="riscv32imc-unknown-none-elf"
-    local BUILD_LIBS="core,alloc"
     local RELEASE=""
     
     while [[ "$#" -gt 0 ]]; do
@@ -60,7 +60,16 @@ main() {
                 BIN="supervictor-desktop"
                 FEATURES="desktop"
                 TARGET="x86_64-unknown-linux-gnu"
-                BUILD_LIBS=""
+                ;;
+            -t|--test)
+                echo "Running library unit tests..."
+                if cargo test src --features=$FEATURES; then
+                    echo "Tests passed."
+                    exit 0
+                else
+                    echo "Tests failed."
+                    exit 1
+                fi
                 ;;
             *)
                 echo "Unknown parameter passed: $1"
@@ -74,16 +83,12 @@ main() {
 
     # Run clippy in release mode
     if [ -n "$RELEASE" ]; then
-        cargo build --release --features=$FEATURES --bin $BIN --target $TARGET -Z build-std=$BUILD_LIBS 
+        cargo build --release
         cargo fmt --all -- --check
         cargo clippy --all-features --workspace -- -D warnings
     fi
 
-    if [ -n "$BUILD_LIBS" ]; then
-        cargo run $RELEASE --features=$FEATURES --bin $BIN --target $TARGET -Z build-std=$BUILD_LIBS
-    else
-        cargo run $RELEASE --features=$FEATURES --bin $BIN --target $TARGET
-    fi
+    cargo run $RELEASE --features=$FEATURES --bin $BIN --target $TARGET
 }
 
 main "$@"

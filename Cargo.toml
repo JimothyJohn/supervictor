@@ -28,6 +28,8 @@ embedded = [
   "embedded-io",
   "embedded-io-async",
   "esp-mbedtls",
+  "reqwless",
+  "static_cell",
 ]
 
 # Use custom libraries
@@ -58,7 +60,7 @@ esp-backtrace = { version = "0.15.1", features = [
 esp-hal = { version = "1.0.0-beta.0", default-features = false, features = [
   "defmt",
   "esp32c3",
-  # "unstable",
+  "unstable",
 ], optional = true }
 esp-println = { version = "0.13.0", features = [
   "defmt-espflash",
@@ -79,10 +81,10 @@ esp-wifi = { version = "0.13.0", features = [
   "wifi",
 ], optional = true }
 heapless = { version = "0.8.0", default-features = false }
-static_cell = { version = "2.1.0", features = ["nightly"] }
+static_cell = { version = "2.1.0", optional = true, features = ["nightly"] }
 serde = { version = "1.0.219", default-features = false, features = ["alloc"] }
 serde-json-core = "0.6.0"
-reqwless = { version = "0.13.0", features = ["log"] }
+reqwless = { version = "0.13.0", default-features = false, optional = true,  features = ["log"] }
 log = "0.4.26"
 esp-mbedtls = { git = "https://github.com/esp-rs/esp-mbedtls.git", optional = true, features = ["esp32c3"] }
 rustls = { version = "0.23.26", optional = true }
