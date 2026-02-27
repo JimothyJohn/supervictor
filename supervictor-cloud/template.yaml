@@ -1,137 +1,178 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
   supervictor-cloud
-
-  SAM Template for supervictor-cloud with API Gateway, IAM Auth, and mTLS.
+  Companion API endpoint for Supervictor edge device with mTLS authentication.
 
 Parameters:
-  # AI-Generated comment: Parameter for the custom domain name for the API Gateway.
-  # Replace 'api.example.com' with your actual custom domain.
-  ApiDomainName:
+  Environment:
     Type: String
-    Description: The custom domain name for the API Gateway (e.g., api.example.com)
-    Default: supervictor.advin.io # <-- REPLACE THIS PLACEHOLDER
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
 
-  # AI-Generated comment: Parameter for the ACM Certificate ARN covering the custom domain.
-  # Replace the ARN placeholder with your actual ACM Certificate ARN.
-  AcmCertificateArn:
+  StackName:
     Type: String
-    Description: The ARN of the ACM certificate for the custom domain name.
-    Default: arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx # <-- REPLACE THIS PLACEHOLDER
+    Default: supervictor-dev
+    Description: The name of the CloudFormation stack (used for SSM parameter lookup).
 
-  # AI-Generated comment: Parameter for the S3 bucket used as the API Gateway truststore.
-  # Replace 'your-mtls-truststore-bucket' with your actual S3 bucket name.
-  TruststoreBucketName:
+  AppName:
     Type: String
-    Description: The S3 bucket name containing the trusted client certificates for mTLS.
-    Default: your-mtls-truststore-bucket # <-- REPLACE THIS PLACEHOLDER
+    Default: supervictor
+    Description: The application name (used for SSM paths and resource naming).
 
-  # AI-Generated comment: Optional parameter for the prefix (folder) within the truststore bucket.
-  # Leave empty if certificates are at the root, otherwise e.g., 'trusted-certs/'.
-  TruststorePrefix:
-    Type: String
-    Description: Optional S3 prefix (folder) within the truststore bucket (e.g., trusted-certs/). Must end with '/' if specified.
-    Default: '' # <-- REPLACE or REMOVE if not needed
+
+Conditions:
+  IsProd: !Equals [!Ref Environment, prod]
 
 Globals:
   Function:
-    Timeout: 3
-    MemorySize: 128
+    Timeout: 10
+    MemorySize: 256
+    Tracing: Active
     LoggingConfig:
       LogFormat: JSON
+  Api:
+    TracingEnabled: true
 
 Resources:
-  # AI-Generated comment: Defines the API Gateway explicitly to configure custom domain, mTLS, and IAM auth.
+
+  # -------------------------------------------------------------------------
+  # API Gateway (Regional REST API)
+  # -------------------------------------------------------------------------
   SupervictorApi:
     Type: AWS::Serverless::Api
     Properties:
-      StageName: Prod
-      # AI-Generated comment: Configure the custom domain name settings.
-      DisableExecuteApiEndpoint: true
-      Domain:
-        DomainName: !Ref ApiDomainName
-        CertificateArn: !Ref AcmCertificateArn
-        EndpointConfiguration: REGIONAL
-        # AI-Generated comment: Configure Mutual TLS Authentication using the S3 truststore.
-        MutualTlsAuthentication:
-          TruststoreUri: !Sub 's3://${TruststoreBucketName}/${TruststorePrefix}' # Constructs S3 URI
-          # TruststoreVersion: # Optional: Specify a version if using S3 versioning
-        SecurityPolicy: TLS_1_2 # Specify minimum TLS version
-      # AI-Generated comment: Set the default authorization method for the API to AWS IAM.
-      # Auth:
-        # DefaultAuthorizer: AWS_IAM
-        # AI-Generated comment: Define a resource policy allowing access ONLY via mTLS connections.
-        # This adds an extra layer: requests must be signed with valid IAM credentials AND present a trusted cert.
-        # Use with caution, ensure your client signing process is correct.
-        # Addiotnally, you might need to grant invoke permissions via Lambda resource policy
-        # or Identity-based policy for the role/user signing the requests.
-        # ResourcePolicy:
-        #   CustomStatements:
-        #     - Effect: Allow
-        #       Principal: '*'
-        #       Action: execute-api:Invoke
-        #       Resource: execute-api:/*/*/*
-        #       Condition:
-        #         StringEquals:
-        #           "iot:Certificate.Subject.Organization": "Your Organization Name" # Example condition based on cert subject
-        #         # Add other conditions based on your certficate details if needed
+      StageName: !Ref Environment
+      EndpointConfiguration: REGIONAL
+      Cors:
+        AllowMethods: "'GET,OPTIONS'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
 
-  SupervictorCloudFunction:
+  # -------------------------------------------------------------------------
+  # Lambda Function
+  # -------------------------------------------------------------------------
+  HelloWorldFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: api/
+      CodeUri: hello_world/
       Handler: app.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Architectures:
-      - x86_64
+        - arm64
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          APP_NAME: !Ref AppName
+          LOG_LEVEL: INFO
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
       Events:
-        # AI-Generated comment: Event definition for handling GET requests on /supervictor
-        SupervictorCloudApiGetEvent: # Renamed event for clarity
+        HelloGet:
           Type: Api
           Properties:
-            # AI-Generated comment: Link this event to the explicitly defined API Gateway.
             RestApiId: !Ref SupervictorApi
-            Path: /supervictor
-            Method: get # AI-Generated change: Set method explicitly to get for this event
-            # AI-Generated comment: IAM authorization removed for this specific route.
-            # Auth:
-            #  Authorizer: AWS_IAM
-
-        # AI-Generated comment: Event definition for handling POST requests on /supervictor
-        SupervictorCloudApiPostEvent: # Added new event for POST method
+            Path: /hello
+            Method: get
+        HelloPost:
           Type: Api
           Properties:
-            RestApiId: !Ref SupervictorApi # AI-Generated comment: Link to the same API Gateway
-            Path: /supervictor           # AI-Generated comment: Use the same path
-            Method: post                # AI-Generated comment: Set method explicitly to post for this event
-            # AI-Generated comment: IAM authorization would be configured here if needed for POST
-            # Auth:
-            #  Authorizer: AWS_IAM
+            RestApiId: !Ref SupervictorApi
+            Path: /hello
+            Method: post
 
+  # -------------------------------------------------------------------------
+  # ACM Certificate (prod only — must be in same region as REGIONAL API)
+  # -------------------------------------------------------------------------
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: IsProd
+    Properties:
+      DomainName: supervictor.advin.io
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: supervictor.advin.io
+          HostedZoneId: !Sub "{{resolve:ssm:/${AppName}/${StackName}/hosted_zone_id}}"
+
+  # -------------------------------------------------------------------------
+  # Custom Domain with mTLS (prod only)
+  # Truststore CA certificates are stored in s3://supervictor/truststore.pem
+  # -------------------------------------------------------------------------
+  SupervictorDomainName:
+    Type: AWS::ApiGateway::DomainName
+    Condition: IsProd
+    Properties:
+      DomainName: supervictor.advin.io
+      RegionalCertificateArn: !Ref ApiCertificate
+      MutualTlsAuthentication:
+        TruststoreUri: s3://supervictor/truststore.pem
+      SecurityPolicy: TLS_1_2
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ApiBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: IsProd
+    Properties:
+      DomainName: !Ref SupervictorDomainName
+      RestApiId: !Ref SupervictorApi
+      Stage: !Ref Environment
+
+  # -------------------------------------------------------------------------
+  # Route53 (prod only)
+  # -------------------------------------------------------------------------
+  Route53RecordSet:
+    Type: AWS::Route53::RecordSet
+    Condition: IsProd
+    Properties:
+      HostedZoneId: !Sub "{{resolve:ssm:/${AppName}/${StackName}/hosted_zone_id}}"
+      Name: supervictor.advin.io
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt SupervictorDomainName.RegionalHostedZoneId
+        DNSName: !GetAtt SupervictorDomainName.RegionalDomainName
+
+  # -------------------------------------------------------------------------
+  # Observability
+  # -------------------------------------------------------------------------
   ApplicationResourceGroup:
     Type: AWS::ResourceGroups::Group
     Properties:
-      Name:
-        Fn::Sub: ApplicationInsights-SAM-${AWS::StackName}
+      Name: !Sub "ApplicationInsights-SAM-${AWS::StackName}"
       ResourceQuery:
         Type: CLOUDFORMATION_STACK_1_0
 
   ApplicationInsightsMonitoring:
     Type: AWS::ApplicationInsights::Application
     Properties:
-      ResourceGroupName:
-        Ref: ApplicationResourceGroup
-      AutoConfigurationEnabled: 'true'
+      ResourceGroupName: !Ref ApplicationResourceGroup
+      AutoConfigurationEnabled: true
 
 Outputs:
-  # AI-Generated comment: Output the custom domain URL for the API.
-  SupervictorCloudApiEndpoint:
-    Description: API Gateway custom domain URL for Prod stage for Supervictor Cloud function
-    Value: !Sub "https://${ApiDomainName}/supervictor" # Use the custom domain name
-  SupervictorCloudFunction:
-    Description: Supervictor Cloud Lambda Function ARN
-    Value: !GetAtt SupervictorCloudFunction.Arn
-  # SupervictorCloudFunctionIamRole:
-  #   Description: Implicit IAM Role created for Supervictor Cloud function
-  #   Value: !GetAtt SupervictorCloudFunctionRole.Arn
+  SupervictorApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${SupervictorApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/hello"
+
+  HelloWorldFunctionArn:
+    Description: Hello World Lambda Function ARN
+    Value: !GetAtt HelloWorldFunction.Arn
+
+  HelloWorldFunctionIamRole:
+    Description: Implicit IAM Role ARN for Hello World function
+    Value: !GetAtt HelloWorldFunctionRole.Arn
+
+  CustomDomainUrl:
+    Description: Custom domain endpoint (prod only)
+    Condition: IsProd
+    Value: "https://supervictor.advin.io/hello"

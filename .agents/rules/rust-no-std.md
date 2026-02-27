@@ -1,0 +1,9 @@
+---
+trigger: glob
+globs: *.rs
+---
+
+Provide code exclusively in no_std mode, do not use std libraries.
+Provide explanations of esoteric Rust functionality to the user, a beginner.
+Comment liberally in the code provided.
+Document core functionality with "///" so it can be built with docs

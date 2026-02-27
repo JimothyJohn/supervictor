@@ -10,12 +10,14 @@ pub fn load_certificates() -> Certificates<'static> {
     let ca_chain = X509::pem(ca_chain_bytes);
 
     // AI-Generated comment: Load the client certificate data at compile time.
-    let client_cert_bytes = concat!(include_str!("../../certs/temp-250423.crt"), "\0").as_bytes();
+    let client_cert_bytes =
+        concat!(include_str!("../../certs/supervictor.cert.pem"), "\0").as_bytes();
     // AI-Generated comment: Create the X509 object, borrowing the static data.
     let client_cert = X509::pem(client_cert_bytes);
 
     // AI-Generated comment: Load the private key data at compile time.
-    let private_key_bytes = concat!(include_str!("../../certs/temp-250423.key"), "\0").as_bytes();
+    let private_key_bytes =
+        concat!(include_str!("../../certs/supervictor.key.pem"), "\0").as_bytes();
     // AI-Generated comment: Create the X509 object, borrowing the static data.
     let private_key = X509::pem(private_key_bytes);
 

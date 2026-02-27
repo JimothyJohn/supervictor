@@ -185,7 +185,7 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
             };
 
             // Try sending a simple HTTP request to verify the connection
-            let request = post_request(env!("HOST"), &json_body, Some("/supervictor"));
+            let request = post_request(env!("HOST"), &json_body, Some(env!("API_PATH")));
             match session.write(request.as_bytes()).await {
                 Ok(written) => {
                     if written != request.len() {

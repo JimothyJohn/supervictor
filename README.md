@@ -35,12 +35,8 @@ Extract information from our environment as efficiently as possible.
 
 ### TODO
 
-- [x] [Create an async GET HTTP request](examples/wifi_embassy_dhcp.rs)
+- [ ] Deploy to AWS Lambda...again...
 
-- [x] [Create an async POST HTTPS request with JSON request/response](examples/tls_dns_dhcp_wifi.rs)
-
-- [x] [Create cloud endpoint pair for MCU](supervictor-cloud/README.md)
-
-- [x] [Connect to AWS Lambda using mTLS](src/bin/embedded_main.rs)
+- [ ] Updgrade to espflash v4 via esp-hal guidance: [esp-hal v1.0.0-rc.0](https://github.com/esp-rs/esp-hal/releases/tag/esp-hal-v1.0.0-rc.0)
 
 - [ ] Utilize flash/NVS encryption. [Reference](https://espressif.github.io/esp32-c3-book-en/chapter_13/13.3/13.3.7.html)

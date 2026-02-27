@@ -84,7 +84,7 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
                 match connector.connect(server_name.clone(), socket).await {
                     Ok(mut tls_stream) => {
                         // AI-Generated comment: Manually construct the HTTP POST request.
-                        let request = post_request(base_host, &json_body, Some("/supervictor"));
+                        let request = post_request(base_host, &json_body, Some(env!("API_PATH")));
 
                         if let Err(e) = tls_stream.write_all(request.as_bytes()).await {
                             println!("Error writing request: {}", e);
@@ -199,7 +199,7 @@ async fn reqwest_app() -> Result<(), Box<dyn std::error::Error>> {
     // let host = env::var("HOST").expect("HOST environment variable not set");
 
     // AI-Generated comment: Construct the full target URL by prepending scheme and appending path.
-    let target_url = format!("https://{}/supervictor", base_host);
+    let target_url = format!("https://{}{}", base_host, env!("API_PATH"));
 
     // Create the message data
     let message = UplinkMessage {
