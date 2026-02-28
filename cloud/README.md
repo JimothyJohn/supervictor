@@ -115,6 +115,10 @@ supervictor-cloud$ python -m pytest tests/unit -v
 supervictor-cloud$ AWS_SAM_STACK_NAME="supervictor-cloud" python -m pytest tests/integration -v
 ```
 
+## TODO
+
+- [ ] Re-enable `test_valid_client_cert_returns_200` and `test_response_includes_client_subject` in `tests/integration/test_api_gateway.py` once the test-device cert is uploaded to the S3 truststore (`s3://supervictor/truststore.pem`)
+
 ## Cleanup
 
 To delete the sample application that you created, use the AWS CLI. Assuming you used your project name for the stack name, you can run the following:

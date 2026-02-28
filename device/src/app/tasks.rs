@@ -11,7 +11,6 @@ use esp_println::println;
 use esp_wifi::wifi::{
     ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiState,
 };
-use heapless::String as HString;
 
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]

@@ -210,7 +210,7 @@ mod tests {
     use super::*;
     // AI-Generated comment: Also import necessary items from other modules if needed for tests.
     // AI-Generated comment: For example, you might need the model for post_request.
-    use crate::models::UplinkMessage;
+    use crate::models::uplink::UplinkMessage;
 
     // AI-Generated comment: Basic test function ensuring things compile and run.
     #[test]

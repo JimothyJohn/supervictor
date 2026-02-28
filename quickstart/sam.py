@@ -46,7 +46,7 @@ class SamLocal:
 
         runner.step("Building SAM artifacts")
         runner.run(
-            ["sam", "build"],
+            ["sam", "build", "--skip-pull-image"],
             cwd=self._config.cloud_dir,
             env=self._env,
             verbose=self._verbose,

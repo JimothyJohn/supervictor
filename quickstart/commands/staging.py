@@ -57,7 +57,7 @@ def run_staging(
     env = make_env(staging_vars)
 
     # Preflight
-    require(["uv", "sam", "docker"], need_docker=True)
+    require(["uv", "sam", "docker", "openssl"], need_docker=True)
 
     # Deploy to dev stack
     sam = SamLocal(config, env=env, verbose=verbose, dry_run=dry_run)
@@ -85,6 +85,28 @@ def run_staging(
         )
     except Exception:
         runner.error("Staging integration tests failed.")
+        return 1
+
+    # Verify mTLS against prod custom domain (certs, not code).
+    # The dev stack's execute-api URL has no mTLS — only the prod custom domain
+    # (supervictor.advin.io) enforces client certificates via S3 truststore.
+    runner.step("Verifying mTLS against production endpoint")
+    _ensure_certs(config, env, verbose, dry_run)
+
+    certs_dir = str(config.repo_root / config.certs_dir_name)
+    mtls_env = make_env({
+        **staging_vars,
+        "API_ENDPOINT": config.prod_api_endpoint,
+        "TEST_CERT_DIR": certs_dir,
+    })
+
+    try:
+        runner.run(
+            ["uv", "run", "pytest", "tests/integration/", "-m", "remote", "-v"],
+            cwd=config.cloud_dir, env=mtls_env, verbose=verbose, dry_run=dry_run,
+        )
+    except Exception:
+        runner.error("mTLS verification against prod failed.")
         return 1
 
     runner.success("\nStaging pipeline passed.")
