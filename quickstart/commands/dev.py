@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 
 from quickstart import runner
 from quickstart.config import ProjectConfig
 from quickstart.env import load_env, make_env
 from quickstart.preflight import require
 from quickstart.sam import SamLocal
+
+
+def _rust_host_target() -> str:
+    """Return the native Rust host triple (e.g. aarch64-apple-darwin).
+
+    Required because .cargo/config.toml hard-wires the default build target to
+    riscv32imc-unknown-none-elf (the ESP32-C3), so tests must explicitly target
+    the host machine.
+    """
+    result = subprocess.run(
+        ["rustc", "-vV"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    for line in result.stdout.splitlines():
+        if line.startswith("host:"):
+            return line.split(":", 1)[1].strip()
+    raise RuntimeError("Cannot determine Rust host target from `rustc -vV`")
 
 
 def run_dev(args: argparse.Namespace, config: ProjectConfig) -> int:
@@ -32,17 +52,29 @@ def run_dev(args: argparse.Namespace, config: ProjectConfig) -> int:
     )
 
     # Preflight
-    require(["uv", "sam", "docker"], need_docker=True)
+    require(["uv", "sam", "docker", "cargo"], need_docker=True)
 
-    # Unit tests
-    runner.step("Running unit tests")
+    # Rust library tests (host-side unit tests; no Docker or network required)
+    runner.step("Running Rust library tests")
+    try:
+        host_target = _rust_host_target()
+        runner.run(
+            ["cargo", "test", "--lib", "--target", host_target],
+            cwd=cfg.device_dir, env=env, verbose=verbose, dry_run=dry_run,
+        )
+    except Exception:
+        runner.error("Rust library tests failed.")
+        return 1
+
+    # Python unit tests
+    runner.step("Running Python unit tests")
     try:
         runner.run(
             ["uv", "run", "pytest", "tests/unit/", "-v"],
             cwd=cfg.cloud_dir, env=env, verbose=verbose, dry_run=dry_run,
         )
     except Exception:
-        runner.error("Unit tests failed.")
+        runner.error("Python unit tests failed.")
         return 1
 
     # SAM build

@@ -35,8 +35,6 @@ Extract information from our environment as efficiently as possible.
 
 ### TODO
 
-- [ ] Deploy to AWS Lambda...again...
-
-- [ ] Updgrade to espflash v4 via esp-hal guidance: [esp-hal v1.0.0-rc.0](https://github.com/esp-rs/esp-hal/releases/tag/esp-hal-v1.0.0-rc.0)
+- [ ] Updgrade to espflash v4 via esp-hal guidance: [esp-hal v1.0.0-rc.0](https://github.com/esp-rs/esp-hal/releases/tag/esp-hal-v1.0.0-rc.0) to enable esp-flash v4.3
 
 - [ ] Utilize flash/NVS encryption. [Reference](https://espressif.github.io/esp32-c3-book-en/chapter_13/13.3/13.3.7.html)

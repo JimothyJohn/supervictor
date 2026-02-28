@@ -9,6 +9,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class ProjectConfig:
     repo_root: Path
+    device_dir: Path
     cloud_dir: Path
     env_dev: Path
     env_staging: Path
@@ -18,7 +19,6 @@ class ProjectConfig:
     sam_ready_timeout: int = 120
     sam_log_file: str = "/tmp/supervictor_sam_local.log"
     sam_pid_file: str = "/tmp/supervictor_sam_local.pid"
-    health_path: str = "/hello"
 
     # SAM deploy config-env names (match samconfig.toml sections)
     sam_config_env_dev: str = "dev"
@@ -33,10 +33,10 @@ class ProjectConfig:
 
     @classmethod
     def from_repo_root(cls, root: Path) -> ProjectConfig:
-        cloud = root / "supervictor-cloud"
         return cls(
             repo_root=root,
-            cloud_dir=cloud,
+            device_dir=root / "device",
+            cloud_dir=root / "cloud",
             env_dev=root / ".env.dev",
             env_staging=root / ".env.staging",
         )

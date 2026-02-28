@@ -2,10 +2,18 @@ name: Continuous Integration
 
 on:
   push:
-    paths-ignore:
-      - "**/README.md"
+    paths:
+      - "device/**"
+      - ".github/workflows/rust_ci.yml"
   pull_request:
+    paths:
+      - "device/**"
+      - ".github/workflows/rust_ci.yml"
   workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: device
 
 env:
   CARGO_TERM_COLOR: always

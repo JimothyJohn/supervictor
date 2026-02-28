@@ -14,7 +14,7 @@ from quickstart.sam import SamLocal
 
 def _ensure_certs(config: ProjectConfig, env: dict[str, str], verbose: bool, dry_run: bool) -> None:
     """Generate test CA + device cert if missing."""
-    certs_dir = config.cloud_dir / config.certs_dir_name
+    certs_dir = config.repo_root / config.certs_dir_name
     gen_script = config.cloud_dir / config.gen_certs_script
 
     if not (certs_dir / "ca" / "ca.pem").exists():

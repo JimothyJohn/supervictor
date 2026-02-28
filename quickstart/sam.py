@@ -60,31 +60,34 @@ class SamLocal:
             [
                 "sam", "local", "start-api",
                 "--port", str(self._config.sam_local_port),
-                "--log-file", self._config.sam_log_file,
+                "--skip-pull-image",
             ],
             cwd=self._config.cloud_dir,
             env=self._env,
+            log_file=self._config.sam_log_file,
             verbose=self._verbose,
             dry_run=self._dry_run,
         )
 
     def wait_ready(self) -> None:
-        """Poll health endpoint until sam local responds (any HTTP status)."""
+        """Poll until sam local's HTTP server is up (any HTTP response)."""
         if self._dry_run:
             print("  [dry-run] wait for sam local ready")
             return
 
-        health_url = f"{self.url}{self._config.health_path}"
-        print(f"  Waiting for sam local at {health_url} ...")
+        # Hit a non-existent path — SAM responds immediately with 403/404
+        # without invoking a Lambda, so we don't pay the cold-start penalty here.
+        probe_url = f"{self.url}/_qs_health_probe"
+        print(f"  Waiting for sam local at {self.url} ...")
         deadline = time.monotonic() + self._config.sam_ready_timeout
 
         while time.monotonic() < deadline:
             try:
-                resp = urllib.request.urlopen(health_url, timeout=2)
+                resp = urllib.request.urlopen(probe_url, timeout=2)
                 runner.success(f"  sam local ready (HTTP {resp.status}).")
                 return
             except urllib.error.HTTPError as e:
-                # 4xx/5xx still means the server is up
+                # 4xx still means the HTTP server is up
                 runner.success(f"  sam local ready (HTTP {e.code}).")
                 return
             except (urllib.error.URLError, OSError):

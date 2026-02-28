@@ -3,17 +3,17 @@ name: Python CI
 on:
   push:
     paths:
-      - "supervictor-cloud/**"
+      - "cloud/**"
       - ".github/workflows/python_ci.yml"
   pull_request:
     paths:
-      - "supervictor-cloud/**"
+      - "cloud/**"
       - ".github/workflows/python_ci.yml"
   workflow_dispatch:
 
 defaults:
   run:
-    working-directory: supervictor-cloud
+    working-directory: cloud
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -49,6 +49,11 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Set up SAM CLI
         uses: aws-actions/setup-sam@v2

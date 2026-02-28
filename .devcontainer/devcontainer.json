@@ -28,7 +28,6 @@
       "extensions": [
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
-        "Wokwi.wokwi-vscode",
         "fill-labs.dependi",
         "github.vscode-github-actions",
         "ms-azuretools.vscode-docker",
@@ -36,14 +35,19 @@
       ]
     }
   },
-  "forwardPorts": [
-    8000,
-    3333
-  ],
-  // This only works for Linux and requires updating the `device` field
+  // Tell the Docker CLI inside the container to negotiate down to the host daemon's
+  // API version rather than assuming its own (newer) default.
+  "remoteEnv": {
+    "DOCKER_API_VERSION": "${localEnv:DOCKER_API_VERSION:1.43}"
+  },
+  "forwardPorts": [8000, 3333],
+  // Runs on the host before the container starts.
+  // Detects the ESP32 serial device and writes ESPFLASH_PORT to .device.env.
+  // On macOS, USB pass-through is not supported by Docker Desktop — flash from the host.
+  "initializeCommand": ".devcontainer/scripts/detect-device.sh",
   "runArgs": [
     "--privileged",
-    "--device=/dev/ttyACM0",
+    "--env-file=.devcontainer/.device.env",
     "--group-add=dialout"
   ],
   "workspaceMount": "source=${localWorkspaceFolder},target=/home/esp/supervictor,type=bind,consistency=cached",

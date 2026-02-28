@@ -1,6 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-Don't provide any code unless explicitly asked.

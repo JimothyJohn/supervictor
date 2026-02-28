@@ -1,0 +1,23 @@
+[target.riscv32imc-unknown-none-elf]
+runner = "espflash flash --monitor --chip esp32c3 --log-format defmt"
+
+[target.riscv32imc-unknown-none-elf.unstable]
+build-std = "alloc,core"
+
+[env]
+DEFMT_LOG="info"
+
+[build]
+target = "riscv32imc-unknown-none-elf"
+rustflags = [
+  # Required to obtain backtraces (e.g. when using the "esp-backtrace" crate.)
+  # NOTE: May negatively impact performance of produced code
+  "-C", "force-frame-pointers",
+]
+
+# Configuration for the desktop target (x86_64 Linux)
+# Typically, no special runner or rustflags are needed here,
+# unless you have specific requirements for desktop builds.
+[target.x86_64-unknown-linux-gnu]
+# runner = "my_desktop_runner_if_needed" # Usually not needed
+# rustflags = ["--some-desktop-flag"]     # Usually not needed

@@ -1,0 +1,13 @@
+target/
+*.lock
+cloud/.aws-sam/
+certs/
+*.pem
+*.key
+*.crt
+.env*
+logs/
+docs/_build/
+__pycache__/
+*.pyc
+.pytest_cache/

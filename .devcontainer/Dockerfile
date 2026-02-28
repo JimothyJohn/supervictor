@@ -9,75 +9,116 @@ ENV ESPFLASH_PORT=/dev/ttyACM0
 # Arguments
 ARG CONTAINER_USER=esp
 ARG CONTAINER_GROUP=esp
-ARG ESP_BOARD=all
+ARG ESP_BOARD=esp32c3
 ARG GITHUB_TOKEN
 
-# Install dependencies
+# Install system dependencies + Docker CE CLI
+# curl and ca-certificates are bootstrapped first to add the Docker apt repository
 RUN apt-get update \
-    && apt-get install -y git curl llvm-dev libclang-dev clang unzip \
-    libusb-1.0-0 libssl-dev libudev-dev pkg-config \
-    python3.11 python3-pip groff mandoc \
-    && apt-get clean -y && rm -rf /var/lib/apt/lists/* /tmp/library-scripts
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && printf "deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian %s stable\n" \
+        "$(dpkg --print-architecture)" "$(. /etc/os-release && echo "${VERSION_CODENAME}")" \
+        > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y \
+        clang \
+        cmake \
+        curl \
+        docker-ce-cli \
+        git \
+        groff \
+        libclang-dev \
+        libssl-dev \
+        libudev-dev \
+        libusb-1.0-0 \
+        llvm-dev \
+        make \
+        mandoc \
+        ninja-build \
+        pkg-config \
+        python3 \
+        python3-venv \
+        unzip \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
 
-# AI-generated step: Install AWS CLI v2
-# Requires unzip (already installed) and curl (already installed)
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
-    && unzip awscliv2.zip \
-    && ./aws/install \
-    && rm -rf awscliv2.zip aws
+# Install uv (system-wide, architecture-aware via the official installer)
+RUN curl -fsSL https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
 
-# AI-generated step: Install AWS SAM CLI
-# Requires unzip (already installed) and curl (already installed)
-# Reference: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html#install-sam-cli-linux
-RUN curl -L "https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-x86_64.zip" -o "aws-sam-cli.zip" \
-    && unzip aws-sam-cli.zip -d sam-installation \
-    && ./sam-installation/install \
-    && rm -rf aws-sam-cli.zip sam-installation
+# Install AWS CLI v2 (architecture-aware)
+RUN DPKG_ARCH="$(dpkg --print-architecture)" \
+    && case "$DPKG_ARCH" in \
+        amd64) AWS_ARCH="x86_64"  ;; \
+        arm64) AWS_ARCH="aarch64" ;; \
+        *) printf "Unsupported architecture: %s\n" "$DPKG_ARCH" >&2 && exit 1 ;; \
+    esac \
+    && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip \
+    && unzip /tmp/awscliv2.zip -d /tmp/awscli \
+    && /tmp/awscli/aws/install \
+    && rm -rf /tmp/awscliv2.zip /tmp/awscli
 
-# Set users
-RUN adduser --disabled-password --gecos "" ${CONTAINER_USER}
+# Install AWS SAM CLI (architecture-aware)
+RUN DPKG_ARCH="$(dpkg --print-architecture)" \
+    && case "$DPKG_ARCH" in \
+        amd64) SAM_ARCH="x86_64" ;; \
+        arm64) SAM_ARCH="arm64"  ;; \
+        *) printf "Unsupported architecture: %s\n" "$DPKG_ARCH" >&2 && exit 1 ;; \
+    esac \
+    && curl -fsSL "https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-${SAM_ARCH}.zip" -o /tmp/aws-sam-cli.zip \
+    && unzip /tmp/aws-sam-cli.zip -d /tmp/sam-installation \
+    && /tmp/sam-installation/install \
+    && rm -rf /tmp/aws-sam-cli.zip /tmp/sam-installation
 
-# Add user to dialout group for serial port access
-RUN usermod -aG dialout ${CONTAINER_USER}
+# Create user with serial port access
+RUN adduser --disabled-password --gecos "" ${CONTAINER_USER} \
+    && usermod -aG dialout ${CONTAINER_USER}
 
 USER ${CONTAINER_USER}
 WORKDIR /home/${CONTAINER_USER}
 
-# Install rustup
+# Install rustup (toolchain version controlled by rust-toolchain.toml)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
     --default-toolchain none -y --profile minimal
 
-# Update envs
-ENV PATH=${PATH}:/home/${CONTAINER_USER}/.cargo/bin
+ENV PATH="${PATH}:/home/${CONTAINER_USER}/.cargo/bin"
 
-# Install extra crates
-RUN ARCH=$($HOME/.cargo/bin/rustup show | grep "Default host" | sed -e 's/.* //') && \
-    curl -L "https://github.com/esp-rs/espup/releases/latest/download/espup-${ARCH}" -o "${HOME}/.cargo/bin/espup" && \
-    chmod u+x "${HOME}/.cargo/bin/espup" && \
-    curl -L "https://github.com/esp-rs/espflash/releases/latest/download/cargo-espflash-${ARCH}.zip" -o "${HOME}/.cargo/bin/cargo-espflash.zip" && \
-    unzip "${HOME}/.cargo/bin/cargo-espflash.zip" -d "${HOME}/.cargo/bin/" && \
-    rm "${HOME}/.cargo/bin/cargo-espflash.zip" && \
-    chmod u+x "${HOME}/.cargo/bin/cargo-espflash" && \
-    curl -L "https://github.com/esp-rs/espflash/releases/latest/download/espflash-${ARCH}.zip" -o "${HOME}/.cargo/bin/espflash.zip" && \
-    unzip "${HOME}/.cargo/bin/espflash.zip" -d "${HOME}/.cargo/bin/" && \
-    rm "${HOME}/.cargo/bin/espflash.zip" && \
-    chmod u+x "${HOME}/.cargo/bin/espflash" && \
-    curl -L "https://github.com/esp-rs/esp-web-flash-server/releases/latest/download/web-flash-${ARCH}.zip" -o "${HOME}/.cargo/bin/web-flash.zip" && \
-    unzip "${HOME}/.cargo/bin/web-flash.zip" -d "${HOME}/.cargo/bin/" && \
-    rm "${HOME}/.cargo/bin/web-flash.zip" && \
-    chmod u+x "${HOME}/.cargo/bin/web-flash"
+# Install esp-rs tooling (espup, espflash, cargo-espflash, web-flash)
+# Uses the rustup host triple to select the correct pre-built binary
+RUN RUST_ARCH="$($HOME/.cargo/bin/rustup show | grep 'Default host' | sed 's/.* //')" \
+    \
+    && curl -fsSL "https://github.com/esp-rs/espup/releases/latest/download/espup-${RUST_ARCH}" \
+        -o "${HOME}/.cargo/bin/espup" \
+    && chmod u+x "${HOME}/.cargo/bin/espup" \
+    \
+    && curl -fsSL "https://github.com/esp-rs/espflash/releases/latest/download/cargo-espflash-${RUST_ARCH}.zip" \
+        -o /tmp/cargo-espflash.zip \
+    && unzip /tmp/cargo-espflash.zip -d "${HOME}/.cargo/bin/" \
+    && chmod u+x "${HOME}/.cargo/bin/cargo-espflash" \
+    && rm /tmp/cargo-espflash.zip \
+    \
+    && curl -fsSL "https://github.com/esp-rs/espflash/releases/latest/download/espflash-${RUST_ARCH}.zip" \
+        -o /tmp/espflash.zip \
+    && unzip /tmp/espflash.zip -d "${HOME}/.cargo/bin/" \
+    && chmod u+x "${HOME}/.cargo/bin/espflash" \
+    && rm /tmp/espflash.zip \
+    \
+    && curl -fsSL "https://github.com/esp-rs/esp-web-flash-server/releases/latest/download/web-flash-${RUST_ARCH}.zip" \
+        -o /tmp/web-flash.zip \
+    && unzip /tmp/web-flash.zip -d "${HOME}/.cargo/bin/" \
+    && chmod u+x "${HOME}/.cargo/bin/web-flash" \
+    && rm /tmp/web-flash.zip
 
-# RUN rustup default stable
-# RUN rustup component add --toolchain nightly-x86_64-unknown-linux-gnu clippy rustfmt
+# Install ESP toolchain via espup (handles RISC-V for ESP32C3)
+RUN if [ -n "${GITHUB_TOKEN}" ]; then export GITHUB_TOKEN="${GITHUB_TOKEN}"; fi \
+    && "${HOME}/.cargo/bin/espup" install \
+        --targets "${ESP_BOARD}" \
+        --log-level info \
+        --export-file "/home/${CONTAINER_USER}/export-esp.sh"
 
-# Install Xtensa Rust
-RUN if [ -n "${GITHUB_TOKEN}" ]; then export GITHUB_TOKEN=${GITHUB_TOKEN}; fi  \
-    && ${HOME}/.cargo/bin/espup install\
-    --targets "${ESP_BOARD}" \
-    --log-level debug \
-    --export-file /home/${CONTAINER_USER}/export-esp.sh
-
-# Activate ESP environment
+# Activate ESP environment on login
 RUN echo "source /home/${CONTAINER_USER}/export-esp.sh" >> ~/.bashrc
 
-CMD [ "/bin/bash" ]
+CMD ["/bin/bash"]

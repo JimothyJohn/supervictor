@@ -1,5 +1,0 @@
-[toolchain]
-# https://github.com/esp-rs/esp-mbedtls?tab=readme-ov-file#running-examples
-channel    = "nightly"
-components = ["rust-src", "rustfmt", "clippy"]
-targets = ["riscv32imc-unknown-none-elf"]

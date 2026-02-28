@@ -264,9 +264,10 @@ $RECYCLE.BIN/
 .env*
 *venv*
 logs/
-certs/*
+certs/
 .vscode/
 .aws-sam/
 *.crt
 *.key
 *.pem
+.devcontainer/.device.env

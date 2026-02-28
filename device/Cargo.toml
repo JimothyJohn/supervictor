@@ -1,0 +1,106 @@
+[package]
+edition = "2021"
+name = "supervictor"
+version = "0.1.0"
+
+[[bin]]
+name = "supervictor-embedded"
+path = "./src/bin/embedded_main.rs"
+required-features = ["embedded"]
+
+[[bin]]
+name = "supervictor-desktop"
+path = "./src/bin/desktop_main.rs"
+required-features = ["desktop"]
+
+[features]
+desktop = ["reqwest", "tokio", "rustls", "tokio-rustls", "rustls-pemfile"]
+embedded = [
+  "esp-alloc", 
+  "esp-backtrace", 
+  "esp-hal", 
+  "esp-hal-embassy", 
+  "esp-println", 
+  "esp-wifi",
+  "embassy-net",
+  "embassy-executor",
+  "embassy-time",
+  "embedded-io",
+  "embedded-io-async",
+  "esp-mbedtls",
+  "reqwless",
+  "static_cell",
+]
+
+# Use custom libraries
+[lib]
+name = "supervictor"
+path = "./src/lib.rs"
+
+[dependencies]
+embassy-net = { version = "0.6.0", features = [
+  "dhcpv4",
+  "medium-ethernet",
+  "tcp",
+  "dns",
+], optional = true }
+
+reqwest = { version = "0.12.15", optional = true, features = ["json", "rustls-tls"] }
+tokio = { version = "1.0", optional = true, features = ["full"] }
+
+embedded-io = { version = "0.6.1", optional = true }
+embedded-io-async = { version = "0.6.1", optional = true }
+esp-alloc = { version = "0.7.0", optional = true }
+esp-backtrace = { version = "0.15.1", features = [
+  "defmt",
+  "esp32c3",
+  "exception-handler",
+  "panic-handler",
+], optional = true  }
+esp-hal = { version = "=1.0.0-beta.0", default-features = false, features = [
+  "defmt",
+  "esp32c3",
+  "unstable",
+], optional = true }
+esp-println = { version = "0.13.0", features = [
+  "defmt-espflash",
+  "esp32c3",
+  "log",
+], optional = true }
+embassy-executor = { version = "0.7.0", features = [
+  "defmt",
+  "task-arena-size-40960",
+], optional = true }
+embassy-time = { version = "0.4.0", features = ["generic-queue-8"], optional = true }
+esp-hal-embassy = { version = "0.7.0", features = ["esp32c3"], optional = true }
+esp-wifi = { version = "0.13.0", features = [
+  "builtin-scheduler",
+  "defmt",
+  "esp-alloc",
+  "esp32c3",
+  "wifi",
+], optional = true }
+heapless = { version = "0.8.0", default-features = false }
+static_cell = { version = "2.1.0", optional = true, features = ["nightly"] }
+serde = { version = "1.0.219", default-features = false, features = ["alloc"] }
+serde-json-core = "0.6.0"
+reqwless = { version = "0.13.0", default-features = false, optional = true,  features = ["log"] }
+log = "0.4.26"
+esp-mbedtls = { git = "https://github.com/esp-rs/esp-mbedtls.git", rev = "03458c34e6c5cd8578010bb4429dc362b9358185", optional = true, features = ["esp32c3"] }
+rustls = { version = "0.23.26", optional = true }
+tokio-rustls = { version = "0.26.2", optional = true }
+rustls-pemfile = { version = "2.2.0", optional = true }
+
+[profile.dev]
+# Rust debug is too slow.
+# For debug builds always builds with some optimization
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1        # LLVM can perform better optimizations using a single thread
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false

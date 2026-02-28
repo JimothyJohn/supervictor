@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+if [[ "${TRACE-0}" == "1" ]]; then
+    set -o xtrace
+fi
+
+# Display help information
+if [[ "${1-}" =~ ^-*h(elp)?$ ]]; then
+    cat << EOF
+ESP32 WiFi Project Quickstart Script
+
+Usage:
+  ./Quickstart [options]
+
+Options:
+  -h, --help     Show this help message
+  -r, --release  Build in release mode with clippy checks
+  -d, --desktop  Run desktop version instead of embedded
+  -t, --test     Run library unit tests (requires 'desktop' feature)
+
+Environment variables (set in .env file):
+  SSID           WiFi network name
+  PASSWORD       WiFi password
+  HOST           Target host for HTTP requests
+
+Examples:
+  ./Quickstart              # Run embedded version in debug mode
+  ./Quickstart --release    # Run embedded version in release mode
+  ./Quickstart --desktop    # Run desktop version in debug mode
+  ./Quickstart -rd          # Run desktop version in release mode
+EOF
+    exit 0
+fi
+
+install_dependencies() {
+    rustup component add clippy rustfmt
+}
+
+main() {
+    source ../.env.dev
+    export SSID=${SSID}
+    export PASSWORD=${PASSWORD}
+    export API_PATH=${API_PATH}
+    export HOST=${HOST}
+
+    # Default to embedded version
+    local BIN="supervictor-embedded"
+    local FEATURES="embedded"
+    local TARGET="riscv32imc-unknown-none-elf"
+    local RELEASE=""
+
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            -r|--release)
+                RELEASE="--release"
+                ;;
+            -d|--desktop)
+                BIN="supervictor-desktop"
+                FEATURES="desktop"
+                TARGET="x86_64-unknown-linux-gnu"
+                ;;
+            -t|--test)
+                echo "Running library unit tests..."
+                if cargo test src --features=$FEATURES; then
+                    echo "Tests passed."
+                    exit 0
+                else
+                    echo "Tests failed."
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "Unknown parameter passed: $1"
+                exit 1
+                ;;
+        esac
+        shift
+    done
+
+    install_dependencies
+
+    # Run clippy in release mode
+    if [ -n "$RELEASE" ]; then
+        cargo build --release
+        cargo fmt --all -- --check
+        cargo clippy --all-features --workspace -- -D warnings
+    fi
+
+    cargo run $RELEASE --features=$FEATURES --bin $BIN --target $TARGET
+}
+
+main "$@"

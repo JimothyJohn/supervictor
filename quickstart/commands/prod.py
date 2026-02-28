@@ -52,7 +52,7 @@ def run_prod(args: argparse.Namespace, config: ProjectConfig) -> int:
 
     # Verify: run remote mTLS tests against prod custom domain
     runner.step("Running mTLS verification tests against production")
-    certs_dir = str(config.cloud_dir / config.certs_dir_name)
+    certs_dir = str(config.repo_root / config.certs_dir_name)
     test_env = make_env({
         "API_ENDPOINT": config.prod_api_endpoint,
         "TEST_CERT_DIR": certs_dir,
