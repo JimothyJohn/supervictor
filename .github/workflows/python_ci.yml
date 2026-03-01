@@ -4,16 +4,16 @@ on:
   push:
     paths:
       - "cloud/**"
+      - "quickstart/**"
+      - "ruff.toml"
       - ".github/workflows/python_ci.yml"
   pull_request:
     paths:
       - "cloud/**"
+      - "quickstart/**"
+      - "ruff.toml"
       - ".github/workflows/python_ci.yml"
   workflow_dispatch:
-
-defaults:
-  run:
-    working-directory: cloud
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -31,8 +31,11 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Run unit tests
-        run: uv run pytest tests/unit/ -v
+      - name: Run cloud unit tests
+        run: uv run pytest cloud/tests/unit/ -v
+
+      - name: Run quickstart tests
+        run: uv run pytest quickstart/tests/ -v
 
   # ---------------------------------------------------------------------------
   # Tier 2: Integration tests — requires Docker + SAM CLI
@@ -61,20 +64,22 @@ jobs:
           use-installer: true
 
       - name: Build SAM artifacts
+        working-directory: cloud
         run: sam build --use-container
 
       - name: Start sam local
+        working-directory: cloud
         run: |
           sam local start-api --port 3000 --log-file /tmp/sam.log &
           echo $! > /tmp/sam.pid
           for i in $(seq 1 120); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/hello 2>/dev/null) || true
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ 2>/dev/null) || true
             [ "$status" != "000" ] && break
             sleep 1
           done
 
       - name: Run integration tests
-        run: SAM_LOCAL_URL=http://localhost:3000 uv run pytest tests/integration/ -m local -v
+        run: SAM_LOCAL_URL=http://localhost:3000 uv run pytest cloud/tests/integration/ -m local -v
 
       - name: Stop sam local
         if: always()

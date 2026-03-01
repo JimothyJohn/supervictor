@@ -1,10 +1,12 @@
 [project]
-name = "supervictor-cloud"
+name = "supervictor"
 version = "0.1.0"
-description = "Companion API endpoint for Supervictor edge device with mTLS authentication"
-readme = "README.md"
+description = "Supervictor monorepo — edge device, cloud API, and CLI orchestrator"
 requires-python = ">=3.12"
 dependencies = []
+
+[tool.uv.workspace]
+members = ["cloud/hello_world"]
 
 [dependency-groups]
 dev = [
@@ -17,8 +19,8 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
-testpaths = ["tests"]
+pythonpath = ["cloud"]
+testpaths = ["cloud/tests"]
 markers = [
     "local: integration tests against sam local (requires SAM_LOCAL_URL)",
     "remote: integration tests against deployed endpoint (requires API_ENDPOINT)",

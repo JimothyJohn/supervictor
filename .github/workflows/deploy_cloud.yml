@@ -1,0 +1,87 @@
+name: Deploy Cloud (dev)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gate: unit + integration tests must pass before deploy
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Run unit tests
+        run: uv run pytest cloud/tests/unit/ -v
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Export Lambda dependencies
+        working-directory: cloud/hello_world
+        run: uv export --no-dev --no-hashes -o requirements.txt
+
+      - name: Build SAM artifacts
+        working-directory: cloud
+        run: sam build --use-container
+
+      - name: Start sam local
+        working-directory: cloud
+        run: |
+          sam local start-api --port 3000 --log-file /tmp/sam.log &
+          echo $! > /tmp/sam.pid
+          for i in $(seq 1 120); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ 2>/dev/null) || true
+            [ "$status" != "000" ] && break
+            sleep 1
+          done
+
+      - name: Run integration tests
+        run: SAM_LOCAL_URL=http://localhost:3000 uv run pytest cloud/tests/integration/ -m local -v
+
+      - name: Stop sam local
+        if: always()
+        run: kill $(cat /tmp/sam.pid) 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # Deploy to dev stack (only after tests pass)
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy (dev)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Export Lambda dependencies
+        working-directory: cloud/hello_world
+        run: uv export --no-dev --no-hashes -o requirements.txt
+
+      - name: Build SAM artifacts
+        working-directory: cloud
+        run: sam build
+
+      - name: Deploy
+        working-directory: cloud
+        run: sam deploy --config-env dev --no-confirm-changeset
