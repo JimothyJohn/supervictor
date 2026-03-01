@@ -19,6 +19,11 @@ def step(msg: str) -> None:
     print(f"\n{_BOLD}{_CYAN}=> {msg}{_RESET}")
 
 
+def milestone(msg: str, *, emoji: str = "") -> None:
+    """Print a major milestone header with optional emoji."""
+    print(f"\n{_BOLD}{_GREEN}{emoji}== {msg} =={_RESET}")
+
+
 def success(msg: str) -> None:
     """Print a success message."""
     print(f"{_GREEN}{msg}{_RESET}")
@@ -38,6 +43,7 @@ def run(
     capture: bool = False,
     verbose: bool = False,
     dry_run: bool = False,
+    log_to: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command synchronously. Raises CalledProcessError on non-zero if check=True."""
     cmd_str = " ".join(cmd)
@@ -49,7 +55,11 @@ def run(
         print(f"  $ {cmd_str}")
 
     kwargs: dict = dict(cwd=cwd, env=env, check=check)
-    if capture:
+    if log_to:
+        log_to.parent.mkdir(parents=True, exist_ok=True)
+        kwargs["stdout"] = open(log_to, "w")
+        kwargs["stderr"] = subprocess.STDOUT
+    elif capture:
         kwargs["capture_output"] = True
         kwargs["text"] = True
 

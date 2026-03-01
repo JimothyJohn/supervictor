@@ -1,4 +1,4 @@
-"""Unit tests for hello_world Lambda handler.
+"""Unit tests for uplink Lambda handler.
 
 Follows TDD Red-Green-Refactor cycle. Tests are written before implementation.
 mTLS enforcement is at the API Gateway/domain level; handler tests validate
@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from hello_world import app
+from uplink import app
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -22,7 +22,7 @@ def apigw_event_with_cert() -> dict[str, Any]:
     """API Gateway proxy event including a mTLS client certificate context."""
     return {
         "httpMethod": "GET",
-        "path": "/hello",
+        "path": "/",
         "queryStringParameters": None,
         "headers": {
             "Accept": "application/json",
@@ -33,7 +33,7 @@ def apigw_event_with_cert() -> dict[str, Any]:
         "requestContext": {
             "resourceId": "abc123",
             "apiId": "xyz789",
-            "resourcePath": "/hello",
+            "resourcePath": "/",
             "httpMethod": "GET",
             "requestId": "test-request-id-001",
             "stage": "prod",
@@ -62,7 +62,7 @@ def apigw_post_event() -> dict[str, Any]:
     """API Gateway POST event with a valid UplinkMessage body."""
     return {
         "httpMethod": "POST",
-        "path": "/hello",
+        "path": "/",
         "queryStringParameters": None,
         "headers": {
             "Content-Type": "application/json",
@@ -73,7 +73,7 @@ def apigw_post_event() -> dict[str, Any]:
         "requestContext": {
             "resourceId": "abc123",
             "apiId": "xyz789",
-            "resourcePath": "/hello",
+            "resourcePath": "/",
             "httpMethod": "POST",
             "requestId": "test-request-id-003",
             "stage": "dev",
@@ -113,7 +113,7 @@ def apigw_event_no_cert() -> dict[str, Any]:
     """API Gateway proxy event without a client certificate (local/dev testing)."""
     return {
         "httpMethod": "GET",
-        "path": "/hello",
+        "path": "/",
         "queryStringParameters": None,
         "headers": {
             "Accept": "application/json",
@@ -124,7 +124,7 @@ def apigw_event_no_cert() -> dict[str, Any]:
         "requestContext": {
             "resourceId": "abc123",
             "apiId": "xyz789",
-            "resourcePath": "/hello",
+            "resourcePath": "/",
             "httpMethod": "GET",
             "requestId": "test-request-id-002",
             "stage": "dev",
@@ -208,7 +208,7 @@ class TestLambdaHandlerWithoutCert:
 
 
 class TestPostUplink:
-    """Tests for POST /hello (device uplink)."""
+    """Tests for POST / (device uplink)."""
 
     def test_returns_200(self, apigw_post_event: dict[str, Any]) -> None:
         response = app.lambda_handler(apigw_post_event, None)

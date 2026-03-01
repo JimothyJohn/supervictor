@@ -23,47 +23,43 @@ class TestLocalSamIntegration:
     """
 
     def test_get_hello_returns_200(self, sam_local_url: str) -> None:
-        response = requests.get(f"{sam_local_url}/hello", timeout=10)
+        response = requests.get(f"{sam_local_url}/", timeout=10)
         assert response.status_code == 200
 
     def test_response_body_has_message_key(self, sam_local_url: str) -> None:
-        response = requests.get(f"{sam_local_url}/hello", timeout=10)
+        response = requests.get(f"{sam_local_url}/", timeout=10)
         body = response.json()
         assert "message" in body
 
-    def test_response_body_message_is_non_empty_string(
-        self, sam_local_url: str
-    ) -> None:
-        response = requests.get(f"{sam_local_url}/hello", timeout=10)
+    def test_response_body_message_is_non_empty_string(self, sam_local_url: str) -> None:
+        response = requests.get(f"{sam_local_url}/", timeout=10)
         body = response.json()
         assert isinstance(body["message"], str)
         assert len(body["message"]) > 0
 
     def test_response_content_type_is_json(self, sam_local_url: str) -> None:
-        response = requests.get(f"{sam_local_url}/hello", timeout=10)
+        response = requests.get(f"{sam_local_url}/", timeout=10)
         assert "application/json" in response.headers.get("Content-Type", "")
 
-    def test_no_client_subject_in_response_without_cert(
-        self, sam_local_url: str
-    ) -> None:
+    def test_no_client_subject_in_response_without_cert(self, sam_local_url: str) -> None:
         """sam local passes no cert context — client_subject must be absent."""
-        response = requests.get(f"{sam_local_url}/hello", timeout=10)
+        response = requests.get(f"{sam_local_url}/", timeout=10)
         body = response.json()
         assert "client_subject" not in body
 
     def test_post_uplink_returns_200(self, sam_local_url: str) -> None:
         payload = {"id": "1234567890", "current": 100}
-        response = requests.post(f"{sam_local_url}/hello", json=payload, timeout=10)
+        response = requests.post(f"{sam_local_url}/", json=payload, timeout=10)
         assert response.status_code == 200
 
     def test_post_uplink_echoes_device_id(self, sam_local_url: str) -> None:
         payload = {"id": "1234567890", "current": 100}
-        response = requests.post(f"{sam_local_url}/hello", json=payload, timeout=10)
+        response = requests.post(f"{sam_local_url}/", json=payload, timeout=10)
         body = response.json()
         assert body["device_id"] == "1234567890"
 
     def test_post_uplink_missing_body_returns_400(self, sam_local_url: str) -> None:
-        response = requests.post(f"{sam_local_url}/hello", timeout=10)
+        response = requests.post(f"{sam_local_url}/", timeout=10)
         assert response.status_code == 400
 
 
@@ -86,7 +82,7 @@ class TestMtlsDeployedIntegration:
     ) -> None:
         """Full mTLS handshake — API Gateway validates cert against S3 truststore."""
         response = requests.get(
-            f"{remote_api_url}/hello",
+            f"{remote_api_url}/",
             cert=test_device_cert,
             timeout=10,
         )
@@ -100,7 +96,7 @@ class TestMtlsDeployedIntegration:
     ) -> None:
         """API Gateway injects subjectDN into requestContext; Lambda echoes it."""
         response = requests.get(
-            f"{remote_api_url}/hello",
+            f"{remote_api_url}/",
             cert=test_device_cert,
             timeout=10,
         )
@@ -121,7 +117,7 @@ class TestMtlsDeployedIntegration:
         Both are valid; either satisfies the "no cert → rejected" contract.
         """
         try:
-            response = requests.get(f"{remote_api_url}/hello", timeout=10)
+            response = requests.get(f"{remote_api_url}/", timeout=10)
             assert response.status_code == 403, (
                 f"Expected 403 rejection, got {response.status_code}"
             )

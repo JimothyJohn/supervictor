@@ -1,7 +1,7 @@
 {
   "body": "{\"message\": \"hello world\"}",
-  "resource": "/hello",
-  "path": "/hello",
+  "resource": "/",
+  "path": "/",
   "httpMethod": "GET",
   "isBase64Encoded": false,
   "queryStringParameters": {
@@ -53,8 +53,8 @@
       "userAgent": "Custom User Agent String",
       "user": null
     },
-    "path": "/prod/hello",
-    "resourcePath": "/hello",
+    "path": "/prod/",
+    "resourcePath": "/",
     "httpMethod": "POST",
     "apiId": "1234567890",
     "protocol": "HTTP/1.1"

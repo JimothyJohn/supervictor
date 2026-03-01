@@ -1,0 +1,25 @@
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "I",    # isort (import sorting)
+  "UP",   # pyupgrade (modernize syntax)
+  "B",    # flake8-bugbear (common pitfalls)
+  "S",    # flake8-bandit (security)
+  "SIM",  # flake8-simplify
+]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["S101"]           # allow assert in tests
+"quickstart/runner.py" = ["S603", "SIM115"]  # subprocess runner, Popen needs long-lived fd
+"quickstart/commands/**" = [
+  "S603",   # subprocess calls are the point of the CLI
+  "S607",   # partial paths (rustc, docker, sam, etc.) are expected
+  "SIM105", # try/except KeyboardInterrupt is clearer than suppress for blocking
+]
+"quickstart/preflight.py" = ["S607"]  # checks for docker/sam/cargo
+"quickstart/config.py" = ["S108"]     # /tmp paths are intentional
+"quickstart/sam.py" = ["S310"]        # urlopen on localhost health probe

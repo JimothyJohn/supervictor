@@ -645,7 +645,7 @@ fn error_debug_generic_parse() {
 #[test]
 fn roundtrip_post_then_parse() {
     let msg = make_msg("device-001", 42);
-    let _req = post_request("supervictor.advin.io", &msg, Some("/hello"));
+    let _req = post_request("supervictor.advin.io", &msg, None);
 
     // Simulate what API Gateway would return
     let response = concat!(
@@ -670,7 +670,7 @@ fn roundtrip_post_then_parse() {
 
 #[test]
 fn roundtrip_get_then_parse() {
-    let _req = get_request("supervictor.advin.io", Some("/hello"));
+    let _req = get_request("supervictor.advin.io", None);
 
     let response = concat!(
         "HTTP/1.1 200 OK\r\n",

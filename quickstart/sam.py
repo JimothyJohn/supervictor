@@ -33,33 +33,44 @@ class SamLocal:
     def url(self) -> str:
         return f"http://localhost:{self._config.sam_local_port}"
 
-    def build(self) -> None:
+    def build(self, *, no_cache: bool = False) -> None:
         """Export runtime deps and run sam build."""
+        log_dir = self._config.log_dir
+
         runner.step("Exporting runtime dependencies")
         runner.run(
             ["uv", "export", "--no-dev", "--no-hashes", "-o", "requirements.txt"],
-            cwd=self._config.cloud_dir / "hello_world",
+            cwd=self._config.cloud_dir / "uplink",
             env=self._env,
             verbose=self._verbose,
             dry_run=self._dry_run,
+            log_to=log_dir / "uv_export.log",
         )
 
         runner.step("Building SAM artifacts")
+        cmd = ["sam", "build", "--skip-pull-image"]
+        if no_cache:
+            cmd.append("--no-cached")
         runner.run(
-            ["sam", "build", "--skip-pull-image"],
+            cmd,
             cwd=self._config.cloud_dir,
             env=self._env,
             verbose=self._verbose,
             dry_run=self._dry_run,
+            log_to=log_dir / "sam_build.log",
         )
+        runner.success("SAM build complete")
 
     def start(self) -> None:
         """Start sam local start-api in background."""
         runner.step(f"Starting sam local on port {self._config.sam_local_port}")
         self._proc = runner.start_background(
             [
-                "sam", "local", "start-api",
-                "--port", str(self._config.sam_local_port),
+                "sam",
+                "local",
+                "start-api",
+                "--port",
+                str(self._config.sam_local_port),
                 "--skip-pull-image",
             ],
             cwd=self._config.cloud_dir,
@@ -110,24 +121,31 @@ class SamLocal:
             self._proc.kill()
             self._proc.wait()
 
-    def deploy(self, config_env: str) -> None:
-        """Run sam deploy --config-env <env>. Treats 'no changes' as success."""
+    def deploy(self, config_env: str, *, force_upload: bool = False) -> bool:
+        """Run sam deploy --config-env <env>. Returns True if changes deployed."""
+        log_path = self._config.log_dir / f"sam_deploy_{config_env}.log"
         runner.step(f"Deploying to {config_env} stack")
+        cmd = ["sam", "deploy", "--config-env", config_env]
+        if force_upload:
+            cmd.append("--force-upload")
         result = runner.run(
-            ["sam", "deploy", "--config-env", config_env],
+            cmd,
             cwd=self._config.cloud_dir,
             env=self._env,
             verbose=self._verbose,
             dry_run=self._dry_run,
             check=False,
-            capture=True,
+            log_to=log_path,
         )
         if result.returncode != 0:
             if "No changes to deploy" in (result.stderr or "") + (result.stdout or ""):
-                runner.success("  Stack is already up to date.")
+                runner.success("Stack is already up to date.")
+                return False
             else:
-                runner.error(result.stderr or result.stdout or "sam deploy failed")
+                runner.error(f"sam deploy failed (see {log_path})")
                 raise subprocess.CalledProcessError(result.returncode, result.args)
+        runner.success(f"Deployed to {config_env}")
+        return True
 
     def __enter__(self) -> SamLocal:
         self.start()

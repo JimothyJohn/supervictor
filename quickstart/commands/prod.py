@@ -17,7 +17,7 @@ def run_prod(args: argparse.Namespace, config: ProjectConfig) -> int:
     dry_run = getattr(args, "dry_run", False)
 
     # Gate 1: dev
-    runner.step("Running dev gate")
+    runner.milestone("Running dev gate", emoji="\U0001f6aa ")
     dev_args = argparse.Namespace(verbose=verbose, dry_run=dry_run, serve=False)
     rc = dev.run_dev(dev_args, config)
     if rc != 0:
@@ -25,7 +25,7 @@ def run_prod(args: argparse.Namespace, config: ProjectConfig) -> int:
         return rc
 
     # Gate 2: staging (skip dev gate since we already ran it)
-    runner.step("Running staging gate")
+    runner.milestone("Running staging gate", emoji="\U0001f6aa ")
     staging_args = argparse.Namespace(verbose=verbose, dry_run=dry_run)
     rc = staging.run_staging(staging_args, config, skip_dev_gate=True)
     if rc != 0:
@@ -41,8 +41,11 @@ def run_prod(args: argparse.Namespace, config: ProjectConfig) -> int:
     # Deploy to prod
     env = make_env({})
     sam = SamLocal(config, env=env, verbose=verbose, dry_run=dry_run)
-    sam.build()
-    sam.deploy(config.sam_config_env_prod)
+    sam.build(no_cache=True)
+    deployed = sam.deploy(config.sam_config_env_prod, force_upload=True)
 
-    runner.success("\nProduction deployment complete.")
+    if deployed:
+        runner.success("\nProduction deployment complete.")
+    else:
+        runner.success("\nNothing to deploy. Production stack is up to date.")
     return 0

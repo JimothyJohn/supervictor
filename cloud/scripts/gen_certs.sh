@@ -142,7 +142,7 @@ cmd_issue() {
     echo "  Valid for   : $days days"
     echo ""
     echo "To use with curl:"
-    echo "  curl --cert $out_dir/client.pem --key $out_dir/client.key https://supervictor.advin.io/hello"
+    echo "  curl --cert $out_dir/client.pem --key $out_dir/client.key https://supervictor.advin.io/"
 }
 
 cmd_list() {

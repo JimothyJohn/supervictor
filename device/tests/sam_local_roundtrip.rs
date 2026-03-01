@@ -57,12 +57,12 @@ fn sam_local_get_hello() {
         }
     };
     let (addr, host) = parse_url(&url);
-    let request = get_request(&host, Some("/hello"));
+    let request = get_request(&host, None);
     let response_str = send_and_receive(&addr, request.as_str().as_bytes());
     let parsed = parse_response(&response_str).expect("parse_response failed on SAM local GET");
     assert!(
         !parsed.body.is_empty(),
-        "SAM local GET /hello returned empty body"
+        "SAM local GET / returned empty body"
     );
 }
 
@@ -80,12 +80,12 @@ fn sam_local_post_hello() {
         id: "sam-test-device".try_into().unwrap(),
         current: 42,
     };
-    let request = post_request(&host, &msg, Some("/hello"));
+    let request = post_request(&host, &msg, None);
     let response_str = send_and_receive(&addr, request.as_str().as_bytes());
     let parsed = parse_response(&response_str).expect("parse_response failed on SAM local POST");
     assert!(
         !parsed.body.is_empty(),
-        "SAM local POST /hello returned empty body"
+        "SAM local POST / returned empty body"
     );
 }
 
@@ -103,7 +103,7 @@ fn sam_local_post_i32_max_current() {
         id: "i32-max-test".try_into().unwrap(),
         current: i32::MAX,
     };
-    let request = post_request(&host, &msg, Some("/hello"));
+    let request = post_request(&host, &msg, None);
     let response_str = send_and_receive(&addr, request.as_str().as_bytes());
     let parsed = parse_response(&response_str).expect("parse_response failed on i32::MAX POST");
     assert!(
@@ -146,7 +146,7 @@ fn sam_local_post_empty_id() {
         id: heapless::String::new(),
         current: 0,
     };
-    let request = post_request(&host, &msg, Some("/hello"));
+    let request = post_request(&host, &msg, None);
     let response_str = send_and_receive(&addr, request.as_str().as_bytes());
     // Server may accept or reject empty id — either way parse_response should work
     let parsed = parse_response(&response_str).expect("parse_response failed on empty id POST");

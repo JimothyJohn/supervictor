@@ -11,12 +11,12 @@
             "WebFetch(domain:docs.espressif.com)",
             "WebSearch"
         ],
-        "deny": [
-            "Bash(rm -rf *)",
-            "Bash(sam deploy *)",
-            "Bash(git push *)",
-            "Bash(git commit *)"
-        ],
-        "ask": ["Bash(mv *)", "Bash(qs prod *)"]
+        "deny": ["Bash(sam deploy *)", "Bash(git push *)"],
+        "ask": [
+            "Bash(git commit *)",
+            "Bash(rm *)",
+            "Bash(mv *)",
+            "Bash(qs prod *)"
+        ]
     }
 }

@@ -67,24 +67,23 @@ def run_staging(
     # Run integration tests against the deployed dev stack.
     # The dev stack has no mTLS/custom domain (those are prod-only), so we reuse
     # the "local" marker tests against the execute-api HTTPS endpoint.
-    # Tests do f"{sam_local_url}/hello", so the base URL must include the stage
-    # prefix (e.g. https://host/dev) derived from API_PATH (e.g. /dev/hello).
+    # execute-api URL format: https://{api-id}.execute-api.{region}.amazonaws.com/{stage}
     runner.step("Running integration tests against deployed dev stack")
     host = staging_vars.get("HOST", "")
-    api_path = staging_vars.get("API_PATH", "")
-    # Strip /hello from API_PATH to get the stage prefix (e.g. /dev/hello → /dev)
-    stage_prefix = api_path.rsplit("/hello", 1)[0]
-    sam_local_url = f"https://{host}{stage_prefix}"
+    sam_local_url = f"https://{host}/{config.sam_config_env_dev}"
 
     test_env = make_env({**staging_vars, "SAM_LOCAL_URL": sam_local_url})
 
+    log_dir = config.log_dir
     try:
         runner.run(
             ["uv", "run", "pytest", "tests/integration/", "-m", "local", "-v"],
             cwd=config.cloud_dir, env=test_env, verbose=verbose, dry_run=dry_run,
+            log_to=log_dir / "staging_integration_tests.log",
         )
+        runner.success("Staging integration tests passed")
     except Exception:
-        runner.error("Staging integration tests failed.")
+        runner.error(f"Staging integration tests failed (see {log_dir / 'staging_integration_tests.log'})")
         return 1
 
     # Run Rust device integration tests against the deployed dev stack.
@@ -133,9 +132,11 @@ def run_staging(
         runner.run(
             ["uv", "run", "pytest", "tests/integration/", "-m", "remote", "-v"],
             cwd=config.cloud_dir, env=mtls_env, verbose=verbose, dry_run=dry_run,
+            log_to=log_dir / "mtls_tests.log",
         )
+        runner.success("mTLS verification passed")
     except Exception:
-        runner.error("mTLS verification against prod failed.")
+        runner.error(f"mTLS verification failed (see {log_dir / 'mtls_tests.log'})")
         return 1
 
     runner.success("\nStaging pipeline passed.")

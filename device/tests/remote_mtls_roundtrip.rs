@@ -23,7 +23,7 @@
 #![cfg(feature = "desktop")]
 
 #[test]
-fn remote_get_hello_with_mtls() {
+fn remote_get_with_mtls() {
     let endpoint = match std::env::var("API_ENDPOINT") {
         Ok(v) => v,
         Err(_) => {
@@ -49,7 +49,7 @@ fn remote_get_hello_with_mtls() {
     // 6. TLS handshake via tokio_rustls::TlsConnector
     // 7. Send get_request() bytes
     // 8. Read response, parse with parse_response()
-    // 9. Assert body contains "Hello from Supervictor!"
+    // 9. Assert response body is valid
 }
 
 #[test]

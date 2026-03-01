@@ -11,7 +11,8 @@ _repo_root = str(Path(__file__).resolve().parent.parent)
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
-from quickstart.commands import dev, edge, staging, prod  # noqa: E402
+from quickstart import output  # noqa: E402
+from quickstart.commands import dev, edge, prod, staging  # noqa: E402
 from quickstart.config import ProjectConfig  # noqa: E402
 
 
@@ -36,8 +37,12 @@ def main() -> int:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    dev_p = sub.add_parser("dev", help="Local dev cycle: unit tests + sam local + integration tests")
-    dev_p.add_argument("--serve", action="store_true", help="Leave sam local running for manual testing")
+    dev_p = sub.add_parser(
+        "dev", help="Local dev cycle: unit tests + sam local + integration tests"
+    )
+    dev_p.add_argument(
+        "--serve", action="store_true", help="Leave sam local running for manual testing"
+    )
 
     sub.add_parser("edge", help="Build, flash, and monitor the embedded device")
 
@@ -46,6 +51,7 @@ def main() -> int:
     sub.add_parser("prod", help="Full pipeline + confirmation + prod deployment")
 
     args = parser.parse_args()
+    output.set_verbose(getattr(args, "verbose", False))
     config = ProjectConfig.from_repo_root(_find_repo_root())
 
     dispatch = {

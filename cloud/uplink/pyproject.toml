@@ -1,7 +1,7 @@
 [project]
-name = "hello-world"
+name = "uplink"
 version = "0.1.0"
-description = "Supervictor hello-world Lambda function"
+description = "Supervictor uplink Lambda function"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",

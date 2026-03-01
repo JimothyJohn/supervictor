@@ -1,6 +1,6 @@
-"""Supervictor hello-world Lambda handler.
+"""Supervictor uplink Lambda handler.
 
-Provides a simple health/greeting endpoint for the Supervictor edge device.
+Provides the uplink endpoint for the Supervictor edge device.
 mTLS enforcement is handled at the API Gateway custom domain level; this handler
 extracts the client certificate subject DN for logging and response enrichment.
 """
@@ -28,14 +28,14 @@ class UplinkMessage(BaseModel):
 
 
 class HelloResponse(BaseModel):
-    """Response payload for the /hello endpoint."""
+    """Response payload for the root endpoint."""
 
     message: str
     client_subject: str | None = None
 
 
 class UplinkResponse(BaseModel):
-    """Response payload for POST /hello (uplink from device)."""
+    """Response payload for POST / (uplink from device)."""
 
     message: str
     device_id: str
@@ -58,7 +58,7 @@ def openapi_spec() -> dict[str, Any]:
             "description": "Companion API for Supervictor edge device.",
         },
         "paths": {
-            "/hello": {
+            "/": {
                 "get": {
                     "summary": "Health check / greeting",
                     "operationId": "getHello",
@@ -132,7 +132,7 @@ def _extract_client_subject(event: dict[str, Any]) -> str | None:
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Handle incoming API Gateway requests on /hello.
+    """Handle incoming API Gateway requests.
 
     GET  — health/greeting response.
     POST — accept UplinkMessage JSON from edge device.
@@ -175,7 +175,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 def _handle_post(
     event: dict[str, Any], client_subject: str | None
 ) -> dict[str, Any]:
-    """Handle POST /hello — parse UplinkMessage from device."""
+    """Handle POST / — parse UplinkMessage from device."""
     raw_body = event.get("body")
     if not raw_body:
         return {

@@ -14,6 +14,9 @@ class ProjectConfig:
     env_dev: Path
     env_staging: Path
 
+    # Logs
+    log_dir: Path = Path("/tmp/supervictor/logs")
+
     # SAM local
     sam_local_port: int = 3000
     sam_ready_timeout: int = 120

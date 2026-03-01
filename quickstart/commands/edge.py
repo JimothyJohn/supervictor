@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 
 from quickstart import runner
 from quickstart.config import ProjectConfig
@@ -21,8 +22,9 @@ def run_edge(args: argparse.Namespace, config: ProjectConfig) -> int:
     env_vars = load_env(config.env_dev)
     env = make_env(env_vars)
 
-    runner.step("Building and flashing embedded firmware")
-    port = env_vars.get("ESPFLASH_PORT", "")
+    runner.milestone("Building and flashing embedded firmware", emoji="\u26a1 ")
+    # .env.dev takes priority, fall back to OS environment
+    port = env_vars.get("ESPFLASH_PORT") or os.environ.get("ESPFLASH_PORT", "")
     if port:
         runner.step(f"Using serial port {port}")
     try:

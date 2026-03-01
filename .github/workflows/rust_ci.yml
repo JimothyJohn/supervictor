@@ -1,4 +1,4 @@
-name: Continuous Integration
+name: Rust CI
 
 on:
   push:
@@ -22,6 +22,9 @@ env:
   HOST: fake_host
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Lint: fmt + clippy + build (matrix)
+  # ---------------------------------------------------------------------------
   rust-checks:
     name: Rust Checks
     runs-on: ubuntu-latest
@@ -48,3 +51,18 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Run command
         run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
+
+  # ---------------------------------------------------------------------------
+  # Security: dependency vulnerability audit
+  # ---------------------------------------------------------------------------
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run dependency audit
+        working-directory: device
+        run: cargo audit

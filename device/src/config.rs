@@ -55,3 +55,12 @@ pub const JSON_MAP_VALUE_CAPACITY: usize = 16;
 pub const JSON_MAP_ENTRIES_CAPACITY: usize = 2;
 // AI-Generated comment: Max size of the serialized JSON string payload.
 pub const JSON_SERIALIZED_CAPACITY: usize = 128;
+
+// --- Portal (AP mode) ---
+pub const DEVICE_ID: &str = "supervictor";
+pub const AP_SSID: &str = "Supervictor";
+pub const AP_GATEWAY: [u8; 4] = [192, 168, 4, 1];
+pub const PORTAL_PORT: u16 = 80;
+pub const PORTAL_TX_BUFFER_SIZE: usize = 4096;
+pub const PORTAL_RX_BUFFER_SIZE: usize = 512;
+pub const PORTAL_TIMEOUT: Duration = Duration::from_secs(30);

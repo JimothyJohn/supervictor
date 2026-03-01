@@ -10,7 +10,7 @@ use supervictor::network::http::{get_request, parse_response, post_request};
 
 // ── Mock server infrastructure ───────────────────────────────
 
-/// Canned AWS API Gateway 200 response for GET /hello
+/// Canned AWS API Gateway 200 response for GET /
 const MOCK_GET_RESPONSE: &str = concat!(
     "HTTP/1.1 200 OK\r\n",
     "Date: Thu, 27 Feb 2025 19:30:00 GMT\r\n",
@@ -23,7 +23,7 @@ const MOCK_GET_RESPONSE: &str = concat!(
     r#"{"message":"Hello from Supervictor!"}"#,
 );
 
-/// Canned AWS API Gateway 200 response for POST /hello
+/// Canned AWS API Gateway 200 response for POST /
 const MOCK_POST_RESPONSE: &str = concat!(
     "HTTP/1.1 200 OK\r\n",
     "Date: Thu, 27 Feb 2025 19:30:00 GMT\r\n",
@@ -89,7 +89,7 @@ fn get_roundtrip_through_mock_server() {
     let (addr, server_handle) = one_shot_server(MOCK_GET_RESPONSE);
 
     let host = addr.as_str();
-    let request = get_request(host, Some("/hello"));
+    let request = get_request(host, None);
     let response_str = send_and_receive(&addr, request.as_str());
 
     let parsed = parse_response(&response_str).expect("parse_response failed");
@@ -100,7 +100,7 @@ fn get_roundtrip_through_mock_server() {
     // Verify server received a valid GET request
     let received = server_handle.join().unwrap();
     let received_str = String::from_utf8(received).unwrap();
-    assert!(received_str.starts_with("GET /hello HTTP/1.0"));
+    assert!(received_str.starts_with("GET / HTTP/1.0"));
     assert!(received_str.contains(&format!("Host: {}", host)));
 }
 
@@ -113,7 +113,7 @@ fn post_roundtrip_through_mock_server() {
         id: "device-001".try_into().unwrap(),
         current: 42,
     };
-    let request = post_request(host, &msg, Some("/hello"));
+    let request = post_request(host, &msg, None);
     let response_str = send_and_receive(&addr, request.as_str());
 
     let parsed = parse_response(&response_str).expect("parse_response failed");
@@ -123,7 +123,7 @@ fn post_roundtrip_through_mock_server() {
     // Verify server received valid POST with correct JSON body
     let received = server_handle.join().unwrap();
     let received_str = String::from_utf8(received).unwrap();
-    assert!(received_str.starts_with("POST /hello HTTP/1.1"));
+    assert!(received_str.starts_with("POST / HTTP/1.1"));
     assert!(received_str.contains(r#"{"id":"device-001","current":42}"#));
 }
 
@@ -169,7 +169,7 @@ fn post_content_length_matches_actual_body_on_wire() {
         id: "cl-verify".try_into().unwrap(),
         current: 12345,
     };
-    let request = post_request(&addr_clone, &msg, Some("/hello"));
+    let request = post_request(&addr_clone, &msg, None);
     let _ = send_and_receive(&addr, request.as_str());
     server_handle.join().unwrap();
 }

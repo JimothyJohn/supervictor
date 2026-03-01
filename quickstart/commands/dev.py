@@ -54,6 +54,8 @@ def run_dev(args: argparse.Namespace, config: ProjectConfig) -> int:
     # Preflight
     require(["uv", "sam", "docker", "cargo"], need_docker=True)
 
+    log_dir = cfg.log_dir
+
     # Rust library tests (host-side unit tests; no Docker or network required)
     runner.step("Running Rust library tests")
     try:
@@ -61,9 +63,11 @@ def run_dev(args: argparse.Namespace, config: ProjectConfig) -> int:
         runner.run(
             ["cargo", "test", "--lib", "--target", host_target],
             cwd=cfg.device_dir, env=env, verbose=verbose, dry_run=dry_run,
+            log_to=log_dir / "rust_tests.log",
         )
+        runner.success("Rust library tests passed")
     except Exception:
-        runner.error("Rust library tests failed.")
+        runner.error(f"Rust library tests failed (see {log_dir / 'rust_tests.log'})")
         return 1
 
     # Python unit tests
@@ -72,9 +76,11 @@ def run_dev(args: argparse.Namespace, config: ProjectConfig) -> int:
         runner.run(
             ["uv", "run", "pytest", "tests/unit/", "-v"],
             cwd=cfg.cloud_dir, env=env, verbose=verbose, dry_run=dry_run,
+            log_to=log_dir / "python_unit_tests.log",
         )
+        runner.success("Python unit tests passed")
     except Exception:
-        runner.error("Python unit tests failed.")
+        runner.error(f"Python unit tests failed (see {log_dir / 'python_unit_tests.log'})")
         return 1
 
     # SAM build
@@ -99,12 +105,14 @@ def run_dev(args: argparse.Namespace, config: ProjectConfig) -> int:
                 runner.run(
                     ["uv", "run", "pytest", "tests/integration/", "-m", "local", "-v"],
                     cwd=cfg.cloud_dir, env=test_env, verbose=verbose, dry_run=dry_run,
+                    log_to=log_dir / "integration_tests.log",
                 )
+                runner.success("Integration tests passed")
     except TimeoutError as e:
         runner.error(str(e))
         return 1
     except Exception:
-        runner.error("Integration tests failed.")
+        runner.error(f"Integration tests failed (see {log_dir / 'integration_tests.log'})")
         return 1
 
     runner.success("\nDev pipeline passed.")
