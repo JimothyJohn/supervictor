@@ -6,7 +6,6 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 from quickstart import runner
 from quickstart.config import ProjectConfig
