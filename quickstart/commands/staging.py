@@ -87,6 +87,35 @@ def run_staging(
         runner.error("Staging integration tests failed.")
         return 1
 
+    # Run Rust device integration tests against the deployed dev stack.
+    # Uses reqwest (HTTPS) from the desktop feature to validate that the
+    # device's JSON payloads are accepted by the live Lambda.
+    runner.step("Running Rust device integration tests against deployed stack")
+    from quickstart.rust import host_target
+
+    try:
+        rust_target = host_target()
+        device_test_env = make_env({**staging_vars, "DEPLOYED_URL": sam_local_url})
+        runner.run(
+            [
+                "cargo", "test",
+                "--test", "deployed_roundtrip",
+                "--target", rust_target,
+            ],
+            cwd=config.device_dir,
+            env=device_test_env,
+            verbose=verbose,
+            dry_run=dry_run,
+            log_to=log_dir / "device_deployed_tests.log",
+        )
+        runner.success("Rust device integration tests passed")
+    except Exception:
+        runner.error(
+            f"Rust device integration tests failed "
+            f"(see {log_dir / 'device_deployed_tests.log'})"
+        )
+        return 1
+
     # Verify mTLS against prod custom domain (certs, not code).
     # The dev stack's execute-api URL has no mTLS — only the prod custom domain
     # (supervictor.advin.io) enforces client certificates via S3 truststore.
