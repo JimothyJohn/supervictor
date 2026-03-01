@@ -2,7 +2,7 @@
 name = "supervictor"
 version = "0.1.0"
 description = "Supervictor monorepo — edge device, cloud API, and CLI orchestrator"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = []
 
 [tool.uv.sources]
