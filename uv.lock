@@ -270,7 +270,7 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest", specifier = ">=9.0,<10" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "uplink", virtual = "cloud/uplink" },
 ]
@@ -305,7 +305,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.0" }]
+requires-dist = [{ name = "pydantic", specifier = ">=2.12,<3" }]
 
 [[package]]
 name = "urllib3"

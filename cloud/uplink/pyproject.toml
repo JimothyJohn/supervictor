@@ -4,5 +4,5 @@ version = "0.1.0"
 description = "Supervictor uplink Lambda function"
 requires-python = ">=3.12"
 dependencies = [
-    "pydantic>=2.0",
+    "pydantic>=2.12,<3",
 ]

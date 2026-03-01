@@ -13,7 +13,7 @@ members = ["cloud/uplink"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0",
+    "pytest>=9.0,<10",
     "requests>=2.32.5",
     "uplink",
 ]
