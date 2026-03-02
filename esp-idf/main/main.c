@@ -10,6 +10,8 @@
 static const char *TAG = "main";
 
 void app_main(void) {
+    ESP_LOGI(TAG, "Supervictor %s booting...", SV_FW_VERSION);
+
     // Initialize NVS (required by WiFi driver)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
@@ -30,7 +32,7 @@ void app_main(void) {
     }
 
     // Spawn uplink task
-    xTaskCreate(uplink_task, "uplink", 8192, NULL, 5, NULL);
+    xTaskCreate(uplink_task, "uplink", 16384, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "Supervictor started (ESP-IDF)");
+    ESP_LOGI(TAG, "WiFi init OK, uplink task spawned, host=%s", SV_HOST);
 }

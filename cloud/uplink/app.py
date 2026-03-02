@@ -1,223 +1,44 @@
-"""Supervictor uplink Lambda handler.
+"""Starlette ASGI application for the Supervictor uplink API.
 
-Provides the uplink endpoint for the Supervictor edge device.
-mTLS enforcement is handled at the API Gateway custom domain level; this handler
-extracts the client certificate subject DN for logging and response enrichment.
+Thin HTTP adapter — routes requests to handlers, serializes responses.
+Runs on Lambda (via Web Adapter), Fargate, K8s, or docker run.
 """
 
 import json
-import logging
-from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
+from uplink.handlers import handle_hello, handle_uplink
+from uplink.middleware import extract_client_subject
 
 
-class UplinkMessage(BaseModel):
-    """Incoming payload from Supervictor edge device."""
-
-    id: str
-    current: int
-
-
-class HelloResponse(BaseModel):
-    """Response payload for the root endpoint."""
-
-    message: str
-    client_subject: str | None = None
-
-
-class UplinkResponse(BaseModel):
-    """Response payload for POST / (uplink from device)."""
-
-    message: str
-    device_id: str
-    current: int
-    client_subject: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# OpenAPI
-# ---------------------------------------------------------------------------
-
-
-def openapi_spec() -> dict[str, Any]:
-    """Generate an OpenAPI 3.1.0 spec from the Pydantic models."""
-    return {
-        "openapi": "3.1.0",
-        "info": {
-            "title": "Supervictor API",
-            "version": "0.1.0",
-            "description": "Companion API for Supervictor edge device.",
-        },
-        "paths": {
-            "/": {
-                "get": {
-                    "summary": "Health check / greeting",
-                    "operationId": "getHello",
-                    "responses": {
-                        "200": {
-                            "description": "Greeting response",
-                            "content": {
-                                "application/json": {
-                                    "schema": HelloResponse.model_json_schema(),
-                                }
-                            },
-                        }
-                    },
-                },
-                "post": {
-                    "summary": "Device uplink",
-                    "operationId": "postUplink",
-                    "requestBody": {
-                        "required": True,
-                        "content": {
-                            "application/json": {
-                                "schema": UplinkMessage.model_json_schema(),
-                            }
-                        },
-                    },
-                    "responses": {
-                        "200": {
-                            "description": "Uplink accepted",
-                            "content": {
-                                "application/json": {
-                                    "schema": UplinkResponse.model_json_schema(),
-                                }
-                            },
-                        },
-                        "400": {
-                            "description": "Missing request body",
-                        },
-                        "422": {
-                            "description": "Invalid payload",
-                        },
-                    },
-                },
-            }
-        },
-    }
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _extract_client_subject(event: dict[str, Any]) -> str | None:
-    """Extract the mTLS client certificate subject DN from the API Gateway event.
-
-    Args:
-        event: API Gateway Lambda proxy input event.
-
-    Returns:
-        The subjectDN string when a client certificate is present, else None.
-    """
-    try:
-        return event["requestContext"]["identity"]["clientCert"]["subjectDN"]
-    except (KeyError, TypeError):
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Handler
-# ---------------------------------------------------------------------------
-
-
-def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Handle incoming API Gateway requests.
-
-    GET  — health/greeting response.
-    POST — accept UplinkMessage JSON from edge device.
-
-    Args:
-        event: API Gateway Lambda proxy input event.
-        context: Lambda context runtime object.
-
-    Returns:
-        API Gateway Lambda proxy response dict with statusCode, headers, and body.
-    """
-    client_subject = _extract_client_subject(event)
-    http_method = event.get("httpMethod", "GET")
-
-    logger.info(
-        "Request received",
-        extra={
-            "path": event.get("path"),
-            "method": http_method,
-            "client_subject": client_subject,
-            "request_id": event.get("requestContext", {}).get("requestId"),
-        },
+async def hello(request: Request) -> JSONResponse:
+    client_subject = extract_client_subject(request)
+    result = handle_hello(client_subject=client_subject)
+    return JSONResponse(
+        json.loads(result.model_dump_json(exclude_none=True)),
+        status_code=200,
     )
 
-    if http_method == "POST":
-        return _handle_post(event, client_subject)
 
-    response = HelloResponse(
-        message="Hello from Supervictor!",
-        client_subject=client_subject,
-    )
-
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
-        "body": response.model_dump_json(exclude_none=True),
-    }
+async def uplink(request: Request) -> JSONResponse:
+    client_subject = extract_client_subject(request)
+    raw_body = (await request.body()).decode()
+    result, status = handle_uplink(raw_body, client_subject=client_subject)
+    if isinstance(result, BaseModel):
+        body = json.loads(result.model_dump_json(exclude_none=True))
+    else:
+        body = result
+    return JSONResponse(body, status_code=status)
 
 
-def _handle_post(
-    event: dict[str, Any], client_subject: str | None
-) -> dict[str, Any]:
-    """Handle POST / — parse UplinkMessage from device."""
-    raw_body = (event.get("body") or "").strip() or None
-    if not raw_body:
-        return {
-            "statusCode": 400,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"error": "Missing request body"}),
-        }
-
-    try:
-        parsed = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
-    except json.JSONDecodeError as exc:
-        logger.warning("Malformed JSON in uplink payload", extra={"error": str(exc)})
-        return {
-            "statusCode": 422,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"error": "Invalid payload", "detail": str(exc)}),
-        }
-
-    try:
-        uplink = UplinkMessage.model_validate(parsed)
-    except ValidationError as exc:
-        logger.warning("Invalid uplink payload", extra={"errors": exc.errors()})
-        return {
-            "statusCode": 422,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"error": "Invalid payload", "detail": exc.errors()}),
-        }
-
-    logger.info(
-        "Uplink received",
-        extra={"device_id": uplink.id, "current": uplink.current},
-    )
-
-    response = UplinkResponse(
-        message="Uplink received",
-        device_id=uplink.id,
-        current=uplink.current,
-        client_subject=client_subject,
-    )
-
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
-        "body": response.model_dump_json(exclude_none=True),
-    }
+app = Starlette(
+    routes=[
+        Route("/", hello, methods=["GET"]),
+        Route("/", uplink, methods=["POST"]),
+    ],
+)

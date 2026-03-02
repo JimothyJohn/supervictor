@@ -1,272 +1,104 @@
-"""Unit tests for uplink Lambda handler.
+"""Unit tests for uplink handlers.
 
-Follows TDD Red-Green-Refactor cycle. Tests are written before implementation.
-mTLS enforcement is at the API Gateway/domain level; handler tests validate
-response structure and cert context extraction.
+Tests pure business logic — no API Gateway event dicts, no Lambda runtime.
 """
 
-import json
-from typing import Any
-
-import pytest
-
-from uplink import app
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def apigw_event_with_cert() -> dict[str, Any]:
-    """API Gateway proxy event including a mTLS client certificate context."""
-    return {
-        "httpMethod": "GET",
-        "path": "/",
-        "queryStringParameters": None,
-        "headers": {
-            "Accept": "application/json",
-            "Host": "supervictor.advin.io",
-        },
-        "body": None,
-        "isBase64Encoded": False,
-        "requestContext": {
-            "resourceId": "abc123",
-            "apiId": "xyz789",
-            "resourcePath": "/",
-            "httpMethod": "GET",
-            "requestId": "test-request-id-001",
-            "stage": "prod",
-            "identity": {
-                "clientCert": {
-                    "clientCertPem": (
-                        "-----BEGIN CERTIFICATE-----\nMIIBxxx\n-----END CERTIFICATE-----"
-                    ),
-                    "subjectDN": "CN=device-001,O=Supervictor",
-                    "issuerDN": "CN=SupervictorCA,O=Supervictor",
-                    "serialNumber": "1",
-                    "validity": {
-                        "notBefore": "Jan 1 00:00:00 2024 GMT",
-                        "notAfter": "Dec 31 23:59:59 2099 GMT",
-                    },
-                },
-                "sourceIp": "10.0.0.1",
-                "userAgent": "SupervictorDevice/1.0",
-            },
-        },
-    }
-
-
-@pytest.fixture()
-def apigw_post_event() -> dict[str, Any]:
-    """API Gateway POST event with a valid UplinkMessage body."""
-    return {
-        "httpMethod": "POST",
-        "path": "/",
-        "queryStringParameters": None,
-        "headers": {
-            "Content-Type": "application/json",
-            "Host": "supervictor.advin.io",
-        },
-        "body": '{"id":"1234567890","current":100}',
-        "isBase64Encoded": False,
-        "requestContext": {
-            "resourceId": "abc123",
-            "apiId": "xyz789",
-            "resourcePath": "/",
-            "httpMethod": "POST",
-            "requestId": "test-request-id-003",
-            "stage": "dev",
-            "identity": {
-                "sourceIp": "10.0.0.1",
-                "userAgent": "Uplink/0.1.0 (Platform; ESP32-C3)",
-            },
-        },
-    }
-
-
-@pytest.fixture()
-def apigw_post_event_with_cert(apigw_post_event: dict[str, Any]) -> dict[str, Any]:
-    """POST event with mTLS client certificate context."""
-    event = apigw_post_event.copy()
-    event["requestContext"] = {
-        **event["requestContext"],
-        "identity": {
-            **event["requestContext"]["identity"],
-            "clientCert": {
-                "clientCertPem": "-----BEGIN CERTIFICATE-----\nMIIBxxx\n-----END CERTIFICATE-----",
-                "subjectDN": "CN=device-001,O=Supervictor",
-                "issuerDN": "CN=SupervictorCA,O=Supervictor",
-                "serialNumber": "1",
-                "validity": {
-                    "notBefore": "Jan 1 00:00:00 2024 GMT",
-                    "notAfter": "Dec 31 23:59:59 2099 GMT",
-                },
-            },
-        },
-    }
-    return event
-
-
-@pytest.fixture()
-def apigw_event_no_cert() -> dict[str, Any]:
-    """API Gateway proxy event without a client certificate (local/dev testing)."""
-    return {
-        "httpMethod": "GET",
-        "path": "/",
-        "queryStringParameters": None,
-        "headers": {
-            "Accept": "application/json",
-            "Host": "localhost",
-        },
-        "body": None,
-        "isBase64Encoded": False,
-        "requestContext": {
-            "resourceId": "abc123",
-            "apiId": "xyz789",
-            "resourcePath": "/",
-            "httpMethod": "GET",
-            "requestId": "test-request-id-002",
-            "stage": "dev",
-            "identity": {
-                "sourceIp": "127.0.0.1",
-                "userAgent": "pytest",
-            },
-        },
-    }
+from uplink.handlers import handle_hello, handle_uplink
+from uplink.models import HelloResponse, UplinkResponse
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# GET / — handle_hello
 # ---------------------------------------------------------------------------
 
 
-class TestLambdaHandlerWithCert:
-    """Tests for requests that include a client certificate context."""
+class TestHandleHello:
+    """Tests for handle_hello (GET / logic)."""
 
-    def test_returns_200(self, apigw_event_with_cert: dict[str, Any]) -> None:
-        response = app.lambda_handler(apigw_event_with_cert, None)
-        assert response["statusCode"] == 200
+    def test_returns_hello_response(self) -> None:
+        result = handle_hello()
+        assert isinstance(result, HelloResponse)
 
-    def test_response_body_is_valid_json(
-        self, apigw_event_with_cert: dict[str, Any]
-    ) -> None:
-        response = app.lambda_handler(apigw_event_with_cert, None)
-        body = json.loads(response["body"])
-        assert isinstance(body, dict)
+    def test_message_is_non_empty(self) -> None:
+        result = handle_hello()
+        assert isinstance(result.message, str)
+        assert len(result.message) > 0
 
-    def test_response_body_contains_message_key(
-        self, apigw_event_with_cert: dict[str, Any]
-    ) -> None:
-        response = app.lambda_handler(apigw_event_with_cert, None)
-        body = json.loads(response["body"])
-        assert "message" in body
+    def test_client_subject_omitted_by_default(self) -> None:
+        result = handle_hello()
+        assert result.client_subject is None
 
-    def test_response_body_message_is_non_empty(
-        self, apigw_event_with_cert: dict[str, Any]
-    ) -> None:
-        response = app.lambda_handler(apigw_event_with_cert, None)
-        body = json.loads(response["body"])
-        assert isinstance(body["message"], str)
-        assert len(body["message"]) > 0
+    def test_includes_client_subject_when_provided(self) -> None:
+        result = handle_hello(client_subject="CN=device-001,O=Supervictor")
+        assert result.client_subject == "CN=device-001,O=Supervictor"
 
-    def test_response_body_includes_client_subject(
-        self, apigw_event_with_cert: dict[str, Any]
-    ) -> None:
-        response = app.lambda_handler(apigw_event_with_cert, None)
-        body = json.loads(response["body"])
-        assert body.get("client_subject") == "CN=device-001,O=Supervictor"
-
-    def test_response_has_json_content_type_header(
-        self, apigw_event_with_cert: dict[str, Any]
-    ) -> None:
-        response = app.lambda_handler(apigw_event_with_cert, None)
-        assert response.get("headers", {}).get("Content-Type") == "application/json"
+    def test_exclude_none_omits_client_subject(self) -> None:
+        """When serialized with exclude_none, client_subject must be absent."""
+        result = handle_hello()
+        dumped = result.model_dump(exclude_none=True)
+        assert "client_subject" not in dumped
 
 
-class TestLambdaHandlerWithoutCert:
-    """Tests for requests without a client certificate (dev/local use)."""
-
-    def test_returns_200(self, apigw_event_no_cert: dict[str, Any]) -> None:
-        response = app.lambda_handler(apigw_event_no_cert, None)
-        assert response["statusCode"] == 200
-
-    def test_response_body_omits_client_subject(
-        self, apigw_event_no_cert: dict[str, Any]
-    ) -> None:
-        """client_subject must be absent (not null) when no cert is present."""
-        response = app.lambda_handler(apigw_event_no_cert, None)
-        body = json.loads(response["body"])
-        assert "client_subject" not in body
-
-    def test_response_body_contains_message_key(
-        self, apigw_event_no_cert: dict[str, Any]
-    ) -> None:
-        response = app.lambda_handler(apigw_event_no_cert, None)
-        body = json.loads(response["body"])
-        assert "message" in body
+# ---------------------------------------------------------------------------
+# POST / — handle_uplink
+# ---------------------------------------------------------------------------
 
 
-class TestPostUplink:
-    """Tests for POST / (device uplink)."""
+class TestHandleUplink:
+    """Tests for handle_uplink (POST / logic)."""
 
-    def test_returns_200(self, apigw_post_event: dict[str, Any]) -> None:
-        response = app.lambda_handler(apigw_post_event, None)
-        assert response["statusCode"] == 200
+    def test_valid_payload_returns_200(self) -> None:
+        result, status = handle_uplink('{"id":"1234567890","current":100}')
+        assert status == 200
 
-    def test_response_echoes_device_id(self, apigw_post_event: dict[str, Any]) -> None:
-        response = app.lambda_handler(apigw_post_event, None)
-        body = json.loads(response["body"])
-        assert body["device_id"] == "1234567890"
+    def test_valid_payload_returns_uplink_response(self) -> None:
+        result, status = handle_uplink('{"id":"1234567890","current":100}')
+        assert isinstance(result, UplinkResponse)
 
-    def test_response_echoes_current(self, apigw_post_event: dict[str, Any]) -> None:
-        response = app.lambda_handler(apigw_post_event, None)
-        body = json.loads(response["body"])
-        assert body["current"] == 100
+    def test_echoes_device_id(self) -> None:
+        result, status = handle_uplink('{"id":"1234567890","current":100}')
+        assert result.device_id == "1234567890"
 
-    def test_response_has_message(self, apigw_post_event: dict[str, Any]) -> None:
-        response = app.lambda_handler(apigw_post_event, None)
-        body = json.loads(response["body"])
-        assert body["message"] == "Uplink received"
+    def test_echoes_current(self) -> None:
+        result, status = handle_uplink('{"id":"1234567890","current":100}')
+        assert result.current == 100
 
-    def test_response_omits_client_subject_without_cert(
-        self, apigw_post_event: dict[str, Any]
-    ) -> None:
-        response = app.lambda_handler(apigw_post_event, None)
-        body = json.loads(response["body"])
-        assert "client_subject" not in body
+    def test_response_has_message(self) -> None:
+        result, status = handle_uplink('{"id":"1234567890","current":100}')
+        assert result.message == "Uplink received"
 
-    def test_response_includes_client_subject_with_cert(
-        self, apigw_post_event_with_cert: dict[str, Any]
-    ) -> None:
-        response = app.lambda_handler(apigw_post_event_with_cert, None)
-        body = json.loads(response["body"])
-        assert body["client_subject"] == "CN=device-001,O=Supervictor"
+    def test_omits_client_subject_without_cert(self) -> None:
+        result, status = handle_uplink('{"id":"1234567890","current":100}')
+        dumped = result.model_dump(exclude_none=True)
+        assert "client_subject" not in dumped
 
-    def test_missing_body_returns_400(self, apigw_post_event: dict[str, Any]) -> None:
-        event = {**apigw_post_event, "body": None}
-        response = app.lambda_handler(event, None)
-        assert response["statusCode"] == 400
+    def test_includes_client_subject_with_cert(self) -> None:
+        result, status = handle_uplink(
+            '{"id":"1234567890","current":100}',
+            client_subject="CN=device-001,O=Supervictor",
+        )
+        assert result.client_subject == "CN=device-001,O=Supervictor"
 
-    def test_invalid_schema_returns_422(self, apigw_post_event: dict[str, Any]) -> None:
-        event = {**apigw_post_event, "body": '{"bad": "payload"}'}
-        response = app.lambda_handler(event, None)
-        assert response["statusCode"] == 422
+    def test_missing_body_returns_400(self) -> None:
+        result, status = handle_uplink(None)
+        assert status == 400
+        assert result["error"] == "Missing request body"
 
-    def test_malformed_json_returns_422(self, apigw_post_event: dict[str, Any]) -> None:
-        event = {**apigw_post_event, "body": '{"id": "device-1"'}
-        response = app.lambda_handler(event, None)
-        assert response["statusCode"] == 422
-        body = json.loads(response["body"])
-        assert body["error"] == "Invalid payload"
-        assert isinstance(body["detail"], str)
+    def test_empty_body_returns_400(self) -> None:
+        result, status = handle_uplink("")
+        assert status == 400
 
-    def test_empty_body_returns_400(self, apigw_post_event: dict[str, Any]) -> None:
-        event = {**apigw_post_event, "body": ""}
-        response = app.lambda_handler(event, None)
-        assert response["statusCode"] == 400
+    def test_whitespace_body_returns_400(self) -> None:
+        result, status = handle_uplink("   ")
+        assert status == 400
 
-    def test_whitespace_body_returns_400(self, apigw_post_event: dict[str, Any]) -> None:
-        event = {**apigw_post_event, "body": "   "}
-        response = app.lambda_handler(event, None)
-        assert response["statusCode"] == 400
+    def test_invalid_schema_returns_422(self) -> None:
+        result, status = handle_uplink('{"bad": "payload"}')
+        assert status == 422
+        assert result["error"] == "Invalid payload"
+
+    def test_malformed_json_returns_422(self) -> None:
+        result, status = handle_uplink('{"id": "device-1"')
+        assert status == 422
+        assert result["error"] == "Invalid payload"
+        assert isinstance(result["detail"], str)

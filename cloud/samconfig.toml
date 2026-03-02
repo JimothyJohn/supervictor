@@ -8,7 +8,6 @@ region = "us-east-1"
 [default.build.parameters]
 cached = true
 parallel = true
-use_container = true
 
 [default.validate.parameters]
 lint = true
@@ -34,6 +33,7 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 fail_on_empty_changeset = false
 resolve_s3 = true
+resolve_image_repos = true
 s3_prefix = "supervictor-dev"
 stack_name = "supervictor-dev"
 region = "us-east-1"
@@ -48,6 +48,7 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 fail_on_empty_changeset = false
 resolve_s3 = true
+resolve_image_repos = true
 s3_prefix = "supervictor-prod"
 stack_name = "supervictor-prod"
 region = "us-east-1"

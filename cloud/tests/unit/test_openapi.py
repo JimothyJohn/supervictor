@@ -11,12 +11,13 @@ from typing import Any
 
 import pytest
 
-from uplink import app
+from uplink.handlers import handle_hello, handle_uplink
+from uplink.models import openapi_spec
 
 
 @pytest.fixture()
 def spec() -> dict[str, Any]:
-    return app.openapi_spec()
+    return openapi_spec()
 
 
 class TestOpenApiStructure:
@@ -68,17 +69,12 @@ class TestGetHelloSchema:
         assert "message" in schema["required"]
 
     def test_get_response_conforms_to_schema(self, spec: dict[str, Any]) -> None:
-        """Actual GET handler output must include all required fields from spec."""
+        """Actual handler output must include all required fields from spec."""
         schema = spec["paths"]["/"]["get"]["responses"]["200"]["content"][
             "application/json"
         ]["schema"]
-        event = {
-            "httpMethod": "GET",
-            "path": "/",
-            "requestContext": {"identity": {}},
-        }
-        result = app.lambda_handler(event, None)
-        body = json.loads(result["body"])
+        result = handle_hello()
+        body = json.loads(result.model_dump_json(exclude_none=True))
         for field in schema["required"]:
             assert field in body, f"Required field '{field}' missing from GET response"
 
@@ -123,17 +119,11 @@ class TestPostUplinkSchema:
         assert "422" in spec["paths"]["/"]["post"]["responses"]
 
     def test_post_response_conforms_to_schema(self, spec: dict[str, Any]) -> None:
-        """Actual POST handler output must include all required fields from spec."""
+        """Actual handler output must include all required fields from spec."""
         schema = spec["paths"]["/"]["post"]["responses"]["200"]["content"][
             "application/json"
         ]["schema"]
-        event = {
-            "httpMethod": "POST",
-            "path": "/",
-            "body": '{"id":"test-123","current":42}',
-            "requestContext": {"identity": {}},
-        }
-        result = app.lambda_handler(event, None)
-        body = json.loads(result["body"])
+        result, status = handle_uplink('{"id":"test-123","current":42}')
+        body = json.loads(result.model_dump_json(exclude_none=True))
         for field in schema["required"]:
             assert field in body, f"Required field '{field}' missing from POST response"

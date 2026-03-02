@@ -1,178 +1,180 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  supervictor-cloud
-  Companion API endpoint for Supervictor edge device with mTLS authentication.
+    supervictor-cloud
+    Companion API endpoint for Supervictor edge device with mTLS authentication.
 
 Parameters:
-  Environment:
-    Type: String
-    Default: dev
-    AllowedValues:
-      - dev
-      - prod
+    Environment:
+        Type: String
+        Default: dev
+        AllowedValues:
+            - dev
+            - prod
 
-  StackName:
-    Type: String
-    Default: supervictor-dev
-    Description: The name of the CloudFormation stack (used for SSM parameter lookup).
+    StackName:
+        Type: String
+        Default: supervictor-dev
+        Description: The name of the CloudFormation stack (used for SSM parameter lookup).
 
-  AppName:
-    Type: String
-    Default: supervictor
-    Description: The application name (used for SSM paths and resource naming).
-
+    AppName:
+        Type: String
+        Default: supervictor
+        Description: The application name (used for SSM paths and resource naming).
 
 Conditions:
-  IsProd: !Equals [!Ref Environment, prod]
+    IsProd: !Equals [!Ref Environment, prod]
 
 Globals:
-  Function:
-    Timeout: 10
-    MemorySize: 256
-    Tracing: Active
-    LoggingConfig:
-      LogFormat: JSON
-  Api:
-    TracingEnabled: true
+    Function:
+        Timeout: 10
+        MemorySize: 256
+        Tracing: Active
+        LoggingConfig:
+            LogFormat: JSON
+    Api:
+        TracingEnabled: true
 
 Resources:
+    # -------------------------------------------------------------------------
+    # API Gateway (Regional REST API)
+    # -------------------------------------------------------------------------
+    SupervictorApi:
+        Type: AWS::Serverless::Api
+        Properties:
+            StageName: !Ref Environment
+            EndpointConfiguration: REGIONAL
+            Cors:
+                AllowMethods: "'GET,OPTIONS'"
+                AllowHeaders: "'Content-Type'"
+                AllowOrigin: "'*'"
 
-  # -------------------------------------------------------------------------
-  # API Gateway (Regional REST API)
-  # -------------------------------------------------------------------------
-  SupervictorApi:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: !Ref Environment
-      EndpointConfiguration: REGIONAL
-      Cors:
-        AllowMethods: "'GET,OPTIONS'"
-        AllowHeaders: "'Content-Type'"
-        AllowOrigin: "'*'"
+    # -------------------------------------------------------------------------
+    # Lambda Function
+    # -------------------------------------------------------------------------
+    HelloWorldFunction:
+        Type: AWS::Serverless::Function
+        Properties:
+            PackageType: Image
+            Architectures:
+                - arm64
+            MemorySize: 256
+            Timeout: 10
+            Environment:
+                Variables:
+                    ENVIRONMENT: !Ref Environment
+                    APP_NAME: !Ref AppName
+                    LOG_LEVEL: INFO
+                    AWS_LWA_PORT: "8000"
+                    AWS_LWA_READINESS_CHECK_PATH: "/"
+            Policies:
+                - Statement:
+                      - Effect: Allow
+                        Action:
+                            - logs:CreateLogGroup
+                            - logs:CreateLogStream
+                            - logs:PutLogEvents
+                        Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+            Events:
+                HelloGet:
+                    Type: Api
+                    Properties:
+                        RestApiId: !Ref SupervictorApi
+                        Path: /
+                        Method: get
+                HelloPost:
+                    Type: Api
+                    Properties:
+                        RestApiId: !Ref SupervictorApi
+                        Path: /
+                        Method: post
+        Metadata:
+            Dockerfile: Dockerfile
+            DockerContext: ./uplink
+            DockerTag: latest
 
-  # -------------------------------------------------------------------------
-  # Lambda Function
-  # -------------------------------------------------------------------------
-  HelloWorldFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: uplink/
-      Handler: app.lambda_handler
-      Runtime: python3.13
-      Architectures:
-        - arm64
-      MemorySize: 256
-      Timeout: 10
-      Environment:
-        Variables:
-          ENVIRONMENT: !Ref Environment
-          APP_NAME: !Ref AppName
-          LOG_LEVEL: INFO
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - logs:CreateLogGroup
-                - logs:CreateLogStream
-                - logs:PutLogEvents
-              Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
-      Events:
-        HelloGet:
-          Type: Api
-          Properties:
+    # -------------------------------------------------------------------------
+    # ACM Certificate (prod only — must be in same region as REGIONAL API)
+    # -------------------------------------------------------------------------
+    ApiCertificate:
+        Type: AWS::CertificateManager::Certificate
+        Condition: IsProd
+        Properties:
+            DomainName: supervictor.advin.io
+            ValidationMethod: DNS
+            DomainValidationOptions:
+                - DomainName: supervictor.advin.io
+                  HostedZoneId: !Sub "{{resolve:ssm:/${AppName}/${StackName}/hosted_zone_id}}"
+
+    # -------------------------------------------------------------------------
+    # Custom Domain with mTLS (prod only)
+    # Truststore CA certificates are stored in s3://supervictor/truststore.pem
+    # -------------------------------------------------------------------------
+    SupervictorDomainName:
+        Type: AWS::ApiGateway::DomainName
+        Condition: IsProd
+        Properties:
+            DomainName: supervictor.advin.io
+            RegionalCertificateArn: !Ref ApiCertificate
+            MutualTlsAuthentication:
+                TruststoreUri: s3://supervictor/truststore.pem
+            SecurityPolicy: TLS_1_2
+            EndpointConfiguration:
+                Types:
+                    - REGIONAL
+
+    ApiBasePathMapping:
+        Type: AWS::ApiGateway::BasePathMapping
+        Condition: IsProd
+        Properties:
+            DomainName: !Ref SupervictorDomainName
             RestApiId: !Ref SupervictorApi
-            Path: /
-            Method: get
-        HelloPost:
-          Type: Api
-          Properties:
-            RestApiId: !Ref SupervictorApi
-            Path: /
-            Method: post
+            Stage: !Ref Environment
 
-  # -------------------------------------------------------------------------
-  # ACM Certificate (prod only — must be in same region as REGIONAL API)
-  # -------------------------------------------------------------------------
-  ApiCertificate:
-    Type: AWS::CertificateManager::Certificate
-    Condition: IsProd
-    Properties:
-      DomainName: supervictor.advin.io
-      ValidationMethod: DNS
-      DomainValidationOptions:
-        - DomainName: supervictor.advin.io
-          HostedZoneId: !Sub "{{resolve:ssm:/${AppName}/${StackName}/hosted_zone_id}}"
+    # -------------------------------------------------------------------------
+    # Route53 (prod only)
+    # -------------------------------------------------------------------------
+    Route53RecordSet:
+        Type: AWS::Route53::RecordSet
+        Condition: IsProd
+        Properties:
+            HostedZoneId: !Sub "{{resolve:ssm:/${AppName}/${StackName}/hosted_zone_id}}"
+            Name: supervictor.advin.io
+            Type: A
+            AliasTarget:
+                HostedZoneId: !GetAtt SupervictorDomainName.RegionalHostedZoneId
+                DNSName: !GetAtt SupervictorDomainName.RegionalDomainName
 
-  # -------------------------------------------------------------------------
-  # Custom Domain with mTLS (prod only)
-  # Truststore CA certificates are stored in s3://supervictor/truststore.pem
-  # -------------------------------------------------------------------------
-  SupervictorDomainName:
-    Type: AWS::ApiGateway::DomainName
-    Condition: IsProd
-    Properties:
-      DomainName: supervictor.advin.io
-      RegionalCertificateArn: !Ref ApiCertificate
-      MutualTlsAuthentication:
-        TruststoreUri: s3://supervictor/truststore.pem
-      SecurityPolicy: TLS_1_2
-      EndpointConfiguration:
-        Types:
-          - REGIONAL
+    # -------------------------------------------------------------------------
+    # Observability
+    # -------------------------------------------------------------------------
+    ApplicationResourceGroup:
+        Type: AWS::ResourceGroups::Group
+        Properties:
+            Name: !Sub "ApplicationInsights-SAM-${AWS::StackName}"
+            ResourceQuery:
+                Type: CLOUDFORMATION_STACK_1_0
 
-  ApiBasePathMapping:
-    Type: AWS::ApiGateway::BasePathMapping
-    Condition: IsProd
-    Properties:
-      DomainName: !Ref SupervictorDomainName
-      RestApiId: !Ref SupervictorApi
-      Stage: !Ref Environment
-
-  # -------------------------------------------------------------------------
-  # Route53 (prod only)
-  # -------------------------------------------------------------------------
-  Route53RecordSet:
-    Type: AWS::Route53::RecordSet
-    Condition: IsProd
-    Properties:
-      HostedZoneId: !Sub "{{resolve:ssm:/${AppName}/${StackName}/hosted_zone_id}}"
-      Name: supervictor.advin.io
-      Type: A
-      AliasTarget:
-        HostedZoneId: !GetAtt SupervictorDomainName.RegionalHostedZoneId
-        DNSName: !GetAtt SupervictorDomainName.RegionalDomainName
-
-  # -------------------------------------------------------------------------
-  # Observability
-  # -------------------------------------------------------------------------
-  ApplicationResourceGroup:
-    Type: AWS::ResourceGroups::Group
-    Properties:
-      Name: !Sub "ApplicationInsights-SAM-${AWS::StackName}"
-      ResourceQuery:
-        Type: CLOUDFORMATION_STACK_1_0
-
-  ApplicationInsightsMonitoring:
-    Type: AWS::ApplicationInsights::Application
-    Properties:
-      ResourceGroupName: !Ref ApplicationResourceGroup
-      AutoConfigurationEnabled: true
+    ApplicationInsightsMonitoring:
+        Type: AWS::ApplicationInsights::Application
+        Properties:
+            ResourceGroupName: !Ref ApplicationResourceGroup
+            AutoConfigurationEnabled: true
 
 Outputs:
-  SupervictorApiEndpoint:
-    Description: API Gateway endpoint URL
-    Value: !Sub "https://${SupervictorApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/"
+    SupervictorApiEndpoint:
+        Description: API Gateway endpoint URL
+        Value: !Sub "https://${SupervictorApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/"
 
-  HelloWorldFunctionArn:
-    Description: Hello World Lambda Function ARN
-    Value: !GetAtt HelloWorldFunction.Arn
+    HelloWorldFunctionArn:
+        Description: Hello World Lambda Function ARN
+        Value: !GetAtt HelloWorldFunction.Arn
 
-  HelloWorldFunctionIamRole:
-    Description: Implicit IAM Role ARN for Hello World function
-    Value: !GetAtt HelloWorldFunctionRole.Arn
+    HelloWorldFunctionIamRole:
+        Description: Implicit IAM Role ARN for Hello World function
+        Value: !GetAtt HelloWorldFunctionRole.Arn
 
-  CustomDomainUrl:
-    Description: Custom domain endpoint (prod only)
-    Condition: IsProd
-    Value: "https://supervictor.advin.io/"
+    CustomDomainUrl:
+        Description: Custom domain endpoint (prod only)
+        Condition: IsProd
+        Value: "https://supervictor.advin.io/"
