@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Supervictor ESP-IDF Firmware</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           max-width: 720px; margin: 0 auto; padding: 2rem; color: #1a1a1a; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.5rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+    p, li { line-height: 1.6; }
+    ul { padding-left: 1.5rem; margin-bottom: 1rem; }
+    code { background: #f4f4f4; padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9em; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow-x: auto; margin: 0.5rem 0 1rem; }
+    pre code { padding: 0; background: none; }
+    table { border-collapse: collapse; width: 100%; margin: 0.5rem 0 1rem; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; font-size: 0.9rem; }
+    th { background: #f8f8f8; }
+    .badge { display: inline-block; background: #2d6a4f; color: white; padding: 0.15rem 0.5rem;
+             border-radius: 3px; font-size: 0.8rem; margin-right: 0.3rem; }
+  </style>
+</head>
+<body>
+  <h1>Supervictor ESP-IDF Firmware</h1>
+  <p><span class="badge">ESP32-C3</span><span class="badge">ESP-IDF v5.4</span><span class="badge">mTLS</span></p>
+  <p>C-based firmware for ESP32-C3 that sends mTLS-authenticated uplink messages to the Supervictor cloud API.</p>
+
+  <h2>Quick Start</h2>
+  <pre><code>cd esp-idf
+idf.py set-target esp32c3
+idf.py menuconfig          # Set WiFi SSID/Password, Host
+idf.py build flash monitor</code></pre>
+
+  <h2>Architecture</h2>
+  <table>
+    <tr><th>Component</th><th>File</th><th>ESP-IDF API</th></tr>
+    <tr><td>Entry point</td><td><code>main.c</code></td><td><code>app_main()</code></td></tr>
+    <tr><td>WiFi STA</td><td><code>app/wifi_sta.c</code></td><td><code>esp_wifi</code> + event loop</td></tr>
+    <tr><td>WiFi AP</td><td><code>app/wifi_ap.c</code></td><td><code>esp_wifi</code> AP mode</td></tr>
+    <tr><td>Uplink loop</td><td><code>app/uplink_task.c</code></td><td>FreeRTOS task</td></tr>
+    <tr><td>HTTP client</td><td><code>network/http.c</code></td><td>Hand-rolled (snprintf)</td></tr>
+    <tr><td>TLS / mTLS</td><td><code>network/tls.c</code></td><td><code>esp_tls</code></td></tr>
+    <tr><td>DNS hijack</td><td><code>network/dns.c</code></td><td>lwIP UDP socket</td></tr>
+    <tr><td>Portal server</td><td><code>network/server.c</code></td><td><code>esp_http_server</code></td></tr>
+    <tr><td>JSON</td><td><code>models/uplink.c</code></td><td>cJSON (bundled)</td></tr>
+  </table>
+
+  <h2>Application Flow</h2>
+  <ol>
+    <li>Initialize NVS, WiFi STA, event handlers</li>
+    <li>Spawn <code>uplink_task</code> (FreeRTOS)</li>
+    <li>Wait for WiFi + DHCP IP</li>
+    <li>Loop every 5s: serialize JSON, open TLS to <code>HOST:443</code>, POST, parse response</li>
+  </ol>
+
+  <h2>Configuration</h2>
+  <p>Set via <code>idf.py menuconfig</code> &rarr; Supervictor:</p>
+  <ul>
+    <li><code>SV_HOST</code> &mdash; Cloud API hostname</li>
+    <li><code>SV_WIFI_SSID</code> &mdash; WiFi network name</li>
+    <li><code>SV_WIFI_PASSWORD</code> &mdash; WiFi password</li>
+  </ul>
+  <p>Constants (buffer sizes, timeouts) in <code>main/config.h</code>.</p>
+
+  <h2>Certificates</h2>
+  <p>Embedded at build time via CMake <code>EMBED_TXTFILES</code>. Place certs at:</p>
+  <ul>
+    <li><code>../certs/AmazonRootCA1.pem</code> (CA)</li>
+    <li><code>../cloud/certs/devices/test-device/client.pem</code> (device cert)</li>
+    <li><code>../cloud/certs/devices/test-device/client.key</code> (device key)</li>
+  </ul>
+  <p>Generate with: <code>./cloud/scripts/gen_certs.sh device &lt;name&gt;</code></p>
+
+  <h2>Testing</h2>
+  <p>Unit tests use Unity (bundled with ESP-IDF). Pure-function tests run on the Linux host target:</p>
+  <pre><code>cd esp-idf/host_test
+idf.py --preview set-target linux
+idf.py build
+./build/host_test.elf</code></pre>
+</body>
+</html>
