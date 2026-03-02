@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from quickstart.output import is_verbose
+
 # ANSI colors
 _BOLD = "\033[1m"
 _CYAN = "\033[36m"
@@ -15,7 +17,9 @@ _RESET = "\033[0m"
 
 
 def step(msg: str) -> None:
-    """Print a step header."""
+    """Print a step header. Suppressed unless verbose."""
+    if not is_verbose():
+        return
     print(f"\n{_BOLD}{_CYAN}=> {msg}{_RESET}")
 
 
@@ -57,9 +61,21 @@ def run(
     kwargs: dict = dict(cwd=cwd, env=env, check=check)
     if log_to:
         log_to.parent.mkdir(parents=True, exist_ok=True)
-        kwargs["stdout"] = open(log_to, "w")
+        kwargs["stdout"] = subprocess.PIPE
         kwargs["stderr"] = subprocess.STDOUT
-    elif capture:
+        kwargs["text"] = True
+        kwargs["check"] = False
+        result = subprocess.run(cmd, **kwargs)
+        log_to.write_text(result.stdout or "")
+        if verbose:
+            print(result.stdout, end="")
+        if check and result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode, cmd, result.stdout, result.stderr
+            )
+        return result
+
+    if capture:
         kwargs["capture_output"] = True
         kwargs["text"] = True
 

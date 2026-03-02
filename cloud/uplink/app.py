@@ -176,7 +176,7 @@ def _handle_post(
     event: dict[str, Any], client_subject: str | None
 ) -> dict[str, Any]:
     """Handle POST / — parse UplinkMessage from device."""
-    raw_body = event.get("body")
+    raw_body = (event.get("body") or "").strip() or None
     if not raw_body:
         return {
             "statusCode": 400,
@@ -186,8 +186,17 @@ def _handle_post(
 
     try:
         parsed = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
+    except json.JSONDecodeError as exc:
+        logger.warning("Malformed JSON in uplink payload", extra={"error": str(exc)})
+        return {
+            "statusCode": 422,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "Invalid payload", "detail": str(exc)}),
+        }
+
+    try:
         uplink = UplinkMessage.model_validate(parsed)
-    except (json.JSONDecodeError, ValidationError) as exc:
+    except ValidationError as exc:
         logger.warning("Invalid uplink payload", extra={"errors": exc.errors()})
         return {
             "statusCode": 422,

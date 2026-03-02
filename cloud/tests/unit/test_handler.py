@@ -248,7 +248,25 @@ class TestPostUplink:
         response = app.lambda_handler(event, None)
         assert response["statusCode"] == 400
 
-    def test_invalid_json_returns_422(self, apigw_post_event: dict[str, Any]) -> None:
+    def test_invalid_schema_returns_422(self, apigw_post_event: dict[str, Any]) -> None:
         event = {**apigw_post_event, "body": '{"bad": "payload"}'}
         response = app.lambda_handler(event, None)
         assert response["statusCode"] == 422
+
+    def test_malformed_json_returns_422(self, apigw_post_event: dict[str, Any]) -> None:
+        event = {**apigw_post_event, "body": '{"id": "device-1"'}
+        response = app.lambda_handler(event, None)
+        assert response["statusCode"] == 422
+        body = json.loads(response["body"])
+        assert body["error"] == "Invalid payload"
+        assert isinstance(body["detail"], str)
+
+    def test_empty_body_returns_400(self, apigw_post_event: dict[str, Any]) -> None:
+        event = {**apigw_post_event, "body": ""}
+        response = app.lambda_handler(event, None)
+        assert response["statusCode"] == 400
+
+    def test_whitespace_body_returns_400(self, apigw_post_event: dict[str, Any]) -> None:
+        event = {**apigw_post_event, "body": "   "}
+        response = app.lambda_handler(event, None)
+        assert response["statusCode"] == 400
