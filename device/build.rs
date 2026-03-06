@@ -1,4 +1,9 @@
 fn main() {
+    // Re-run when compile-time env vars used by env!() change
+    for var in ["HOST", "PORT", "SSID", "PASSWORD", "DEVICE_NAME", "CA_PATH"] {
+        println!("cargo:rerun-if-env-changed={var}");
+    }
+
     // Only use embedded linker scripts for ESP32 target
     let target = std::env::var("TARGET").unwrap_or_default();
     // Enable builds on both desktop and embedded

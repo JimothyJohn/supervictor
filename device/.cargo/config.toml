@@ -6,6 +6,7 @@ build-std = "alloc,core"
 
 [env]
 DEFMT_LOG="info"
+DEVICE_NAME = "factory-01"
 
 [build]
 target = "riscv32imc-unknown-none-elf"

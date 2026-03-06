@@ -67,6 +67,9 @@ Resources:
                     LOG_LEVEL: INFO
                     AWS_LWA_PORT: "8000"
                     AWS_LWA_READINESS_CHECK_PATH: "/"
+                    STORE_BACKEND: dynamo
+                    DEVICES_TABLE: !Ref DevicesTable
+                    MESSAGES_TABLE: !Ref UplinkTable
             Policies:
                 - Statement:
                       - Effect: Allow
@@ -75,6 +78,16 @@ Resources:
                             - logs:CreateLogStream
                             - logs:PutLogEvents
                         Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+                - Statement:
+                      - Effect: Allow
+                        Action:
+                            - dynamodb:PutItem
+                            - dynamodb:GetItem
+                            - dynamodb:Scan
+                            - dynamodb:Query
+                        Resource:
+                            - !GetAtt DevicesTable.Arn
+                            - !GetAtt UplinkTable.Arn
             Events:
                 HelloGet:
                     Type: Api
@@ -88,10 +101,65 @@ Resources:
                         RestApiId: !Ref SupervictorApi
                         Path: /
                         Method: post
+                DevicesPost:
+                    Type: Api
+                    Properties:
+                        RestApiId: !Ref SupervictorApi
+                        Path: /devices
+                        Method: post
+                DevicesGet:
+                    Type: Api
+                    Properties:
+                        RestApiId: !Ref SupervictorApi
+                        Path: /devices
+                        Method: get
+                DeviceGet:
+                    Type: Api
+                    Properties:
+                        RestApiId: !Ref SupervictorApi
+                        Path: /devices/{device_id}
+                        Method: get
+                DeviceUplinksGet:
+                    Type: Api
+                    Properties:
+                        RestApiId: !Ref SupervictorApi
+                        Path: /devices/{device_id}/uplinks
+                        Method: get
         Metadata:
             Dockerfile: Dockerfile
             DockerContext: ./uplink
             DockerTag: latest
+
+    # -------------------------------------------------------------------------
+    # DynamoDB Tables
+    # -------------------------------------------------------------------------
+    DevicesTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+            TableName: !Sub "${AWS::StackName}-devices"
+            BillingMode: PAY_PER_REQUEST
+            AttributeDefinitions:
+                - AttributeName: device_id
+                  AttributeType: S
+            KeySchema:
+                - AttributeName: device_id
+                  KeyType: HASH
+
+    UplinkTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+            TableName: !Sub "${AWS::StackName}-uplinks"
+            BillingMode: PAY_PER_REQUEST
+            AttributeDefinitions:
+                - AttributeName: device_id
+                  AttributeType: S
+                - AttributeName: received_at
+                  AttributeType: S
+            KeySchema:
+                - AttributeName: device_id
+                  KeyType: HASH
+                - AttributeName: received_at
+                  KeyType: RANGE
 
     # -------------------------------------------------------------------------
     # ACM Certificate (prod only — must be in same region as REGIONAL API)

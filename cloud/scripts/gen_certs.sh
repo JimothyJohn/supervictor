@@ -2,23 +2,27 @@
 # gen_certs.sh — Generate mTLS certificates for Supervictor
 #
 # Usage:
-#   ./scripts/gen_certs.sh ca                      Initialize the root CA
-#   ./scripts/gen_certs.sh device <name> [days]    Issue a device certificate
-#   ./scripts/gen_certs.sh person <name> [days]    Issue a person certificate
-#   ./scripts/gen_certs.sh list                    List all issued certificates
+#   ./scripts/gen_certs.sh ca                              Initialize the root CA
+#   ./scripts/gen_certs.sh device <name> [days]            Issue a device certificate
+#   ./scripts/gen_certs.sh person <name> [days]            Issue a person certificate
+#   ./scripts/gen_certs.sh server <name> [host_ip] [days]  Issue a server/TLS certificate
+#   ./scripts/gen_certs.sh list                            List all issued certificates
 #
 # Outputs:
-#   certs/ca/ca.pem               CA certificate — upload to s3://supervictor/truststore.pem
-#   certs/ca/ca.key               CA private key  — keep secret, never commit
+#   certs/ca/ca.pem                    CA certificate — upload to s3://supervictor/truststore.pem
+#   certs/ca/ca.key                    CA private key  — keep secret, never commit
 #   certs/devices/<name>/client.pem
 #   certs/devices/<name>/client.key
 #   certs/people/<name>/client.pem
 #   certs/people/<name>/client.key
+#   certs/servers/<name>/server.pem
+#   certs/servers/<name>/server.key
 #
 # Examples:
 #   ./scripts/gen_certs.sh ca
 #   ./scripts/gen_certs.sh device factory-floor-01
 #   ./scripts/gen_certs.sh person alice --days 90
+#   ./scripts/gen_certs.sh server caddy 10.0.0.44
 #   ./scripts/gen_certs.sh list
 
 set -euo pipefail
@@ -145,6 +149,65 @@ cmd_issue() {
     echo "  curl --cert $out_dir/client.pem --key $out_dir/client.key https://supervictor.advin.io/"
 }
 
+cmd_server() {
+    local name="$1"
+    local host_ip="${2:-127.0.0.1}"
+    local days="${3:-$DAYS_CLIENT}"
+
+    if [[ ! -f "$CA_DIR/ca.key" ]]; then
+        echo "Error: CA not found — run first: ./scripts/gen_certs.sh ca" >&2
+        exit 1
+    fi
+
+    local out_dir="$CERTS_DIR/servers/$name"
+    mkdir -p "$out_dir"
+
+    if [[ -f "$out_dir/server.key" ]]; then
+        echo "Error: Server certificate for '$name' already exists at $out_dir" >&2
+        echo "Delete the directory and re-run to reissue." >&2
+        exit 1
+    fi
+
+    # Build SAN extension with localhost + provided IP
+    local san="DNS:localhost,IP:${host_ip}"
+    local ext_file
+    ext_file="$(mktemp)"
+    cat > "$ext_file" <<SANEOF
+[v3_req]
+subjectAltName = ${san}
+SANEOF
+
+    echo "Issuing server certificate for '$name' (SAN: $san)..."
+    openssl genrsa -out "$out_dir/server.key" 2048 2>/dev/null
+    openssl req -new \
+        -key "$out_dir/server.key" \
+        -out "$out_dir/server.csr" \
+        -subj "/CN=${name}/O=Supervictor/OU=Servers" \
+        2>/dev/null
+    openssl x509 -req -days "$days" \
+        -in "$out_dir/server.csr" \
+        -CA "$CA_DIR/ca.pem" \
+        -CAkey "$CA_DIR/ca.key" \
+        -CAcreateserial \
+        -extfile "$ext_file" \
+        -extensions v3_req \
+        -out "$out_dir/server.pem" \
+        2>/dev/null
+    rm "$out_dir/server.csr" "$ext_file"
+
+    chmod 600 "$out_dir/server.key"
+    chmod 644 "$out_dir/server.pem"
+
+    echo ""
+    echo "Server certificate issued."
+    echo "  Name        : $name"
+    echo "  Subject DN  : CN=${name},O=Supervictor,OU=Servers"
+    echo "  SAN         : $san"
+    echo "  Certificate : $out_dir/server.pem"
+    echo "  Private key : $out_dir/server.key"
+    echo "  Valid for   : $days days"
+}
+
 cmd_list() {
     if [[ ! -d "$CERTS_DIR" ]]; then
         echo "No certs directory found at $CERTS_DIR"
@@ -152,12 +215,16 @@ cmd_list() {
     fi
 
     local found=0
-    for type_dir in "$CERTS_DIR"/devices "$CERTS_DIR"/people; do
+    for type_dir in "$CERTS_DIR"/devices "$CERTS_DIR"/people "$CERTS_DIR"/servers; do
         [[ -d "$type_dir" ]] || continue
         local entity_type
         entity_type="$(basename "$type_dir")"
 
-        for cert in "$type_dir"/*/client.pem; do
+        # Client certs use client.pem, server certs use server.pem
+        local cert_name="client.pem"
+        [[ "$entity_type" == "servers" ]] && cert_name="server.pem"
+
+        for cert in "$type_dir"/*/$cert_name; do
             [[ -f "$cert" ]] || continue
             found=1
             local name
@@ -189,6 +256,10 @@ case "${1:-}" in
     device|person)
         [[ -n "${2:-}" ]] || { echo "Usage: gen_certs.sh $1 <name> [days]"; exit 1; }
         cmd_issue "$1" "$2" "${3:-}"
+        ;;
+    server)
+        [[ -n "${2:-}" ]] || { echo "Usage: gen_certs.sh server <name> [host_ip] [days]"; exit 1; }
+        cmd_server "$2" "${3:-}" "${4:-}"
         ;;
     list)
         cmd_list

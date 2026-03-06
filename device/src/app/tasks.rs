@@ -146,14 +146,18 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
                 Mode::Client {
                     servername: host_cstr, // AI-Generated comment: Pass the host_cstr variable here.
                 },
-                TlsVersion::Tls1_3, // Using TLS 1.3 as per the code
-                certs,              // AI-Generated comment: Pass the loaded certificates.
-                tls.reference(),    // AI-Generated comment: Pass a reference to the Tls context.
+                match option_env!("TLS_VERSION") {
+                    Some("1.3") => TlsVersion::Tls1_3,
+                    _ => TlsVersion::Tls1_2,
+                },
+                certs,           // AI-Generated comment: Pass the loaded certificates.
+                tls.reference(), // AI-Generated comment: Pass a reference to the Tls context.
             ) {
                 Ok(s) => s,
                 Err(e) => {
                     println!("   ❌ Failed to create TLS session: {:?}", e);
-                    panic!("Failed to create TLS session: {:?}", e);
+                    Timer::after(MAIN_LOOP_DELAY).await;
+                    continue;
                 }
             };
 
@@ -166,12 +170,14 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
             {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
-                    println!("TLS connect error: {:?}", e);
-                    panic!("TLS connect error: {:?}", e);
+                    println!("   ❌ TLS connect error: {:?}", e);
+                    Timer::after(MAIN_LOOP_DELAY).await;
+                    continue;
                 }
                 Err(_) => {
-                    println!("TLS connect timed out after 15 seconds");
-                    panic!("TLS connect timed out after 15 seconds");
+                    println!("   ❌ TLS connect timed out after 15 seconds");
+                    Timer::after(MAIN_LOOP_DELAY).await;
+                    continue;
                 }
             };
 

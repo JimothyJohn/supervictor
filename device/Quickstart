@@ -40,11 +40,9 @@ install_dependencies() {
 }
 
 main() {
+    set -a
     source ../.env.dev
-    export SSID=${SSID}
-    export PASSWORD=${PASSWORD}
-    export API_PATH=${API_PATH}
-    export HOST=${HOST}
+    set +a
 
     # Default to embedded version
     local BIN="supervictor-embedded"

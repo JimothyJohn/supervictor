@@ -4,7 +4,7 @@
 use embassy_time::Duration;
 
 pub const HOST: &str = env!("HOST");
-pub const CA_PATH: &str = "../../certs/AmazonRootCA1.pem";
+pub const CA_PATH: &str = env!("CA_PATH");
 pub const CERT_PATH: &str = "../../certs/temp-250423.crt";
 pub const KEY_PATH: &str = "../../certs/temp-250423.key";
 

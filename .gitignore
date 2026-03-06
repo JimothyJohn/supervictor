@@ -264,6 +264,7 @@ $RECYCLE.BIN/
 .env*
 *venv*
 logs/
+.logs/
 certs/
 .vscode/
 .aws-sam/

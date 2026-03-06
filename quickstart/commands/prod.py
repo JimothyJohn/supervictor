@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import argparse
+import logging
 
 from quickstart import runner
 from quickstart.commands import dev, staging
 from quickstart.config import ProjectConfig
 from quickstart.env import make_env
 from quickstart.sam import SamLocal
+
+logger = logging.getLogger(__name__)
+
+_TRUSTSTORE_DOMAIN = "supervictor.advin.io"
+_TRUSTSTORE_BUCKET = "supervictor"
+_TRUSTSTORE_KEY = "truststore.pem"
+_TRUSTSTORE_URI = f"s3://{_TRUSTSTORE_BUCKET}/{_TRUSTSTORE_KEY}"
+_TRUSTSTORE_TEMP_KEY = "truststore-reload.pem"
+_TRUSTSTORE_TEMP_URI = f"s3://{_TRUSTSTORE_BUCKET}/{_TRUSTSTORE_TEMP_KEY}"
 
 
 def run_prod(args: argparse.Namespace, config: ProjectConfig) -> int:
@@ -44,8 +54,71 @@ def run_prod(args: argparse.Namespace, config: ProjectConfig) -> int:
     sam.build(no_cache=True)
     deployed = sam.deploy(config.sam_config_env_prod, force_upload=True)
 
+    # Reload API Gateway mTLS truststore so it picks up any CA changes
+    _reload_truststore(verbose=verbose, dry_run=dry_run)
+
     if deployed:
         runner.success("\nProduction deployment complete.")
     else:
         runner.success("\nNothing to deploy. Production stack is up to date.")
     return 0
+
+
+def _reload_truststore(*, verbose: bool, dry_run: bool) -> None:
+    """Force API Gateway to re-read the mTLS truststore from S3.
+
+    API Gateway ignores update-domain-name when the URI hasn't changed,
+    so we swap to a temp copy and back to force a real reload.
+    """
+    import subprocess
+
+    runner.step("Reloading API Gateway mTLS truststore")
+    if dry_run:
+        logger.info("[dry-run] truststore reload skipped")
+        return
+
+    def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    # Copy truststore to temp key
+    cp = _run(["aws", "s3", "cp", _TRUSTSTORE_URI, _TRUSTSTORE_TEMP_URI])
+    if cp.returncode != 0:
+        runner.error(f"Truststore copy failed: {cp.stderr.strip()}")
+        return
+
+    # Point domain to temp URI
+    swap = _run(
+        [
+            "aws",
+            "apigateway",
+            "update-domain-name",
+            "--domain-name",
+            _TRUSTSTORE_DOMAIN,
+            "--patch-operations",
+            f"op=replace,path=/mutualTlsAuthentication/truststoreUri,value={_TRUSTSTORE_TEMP_URI}",
+        ]
+    )
+    if swap.returncode != 0:
+        runner.error(f"Truststore swap failed: {swap.stderr.strip()}")
+        return
+
+    # Point domain back to canonical URI
+    restore = _run(
+        [
+            "aws",
+            "apigateway",
+            "update-domain-name",
+            "--domain-name",
+            _TRUSTSTORE_DOMAIN,
+            "--patch-operations",
+            f"op=replace,path=/mutualTlsAuthentication/truststoreUri,value={_TRUSTSTORE_URI}",
+        ]
+    )
+    if restore.returncode != 0:
+        runner.error(f"Truststore restore failed: {restore.stderr.strip()}")
+        return
+
+    # Clean up temp key
+    _run(["aws", "s3", "rm", _TRUSTSTORE_TEMP_URI])
+
+    runner.success("mTLS truststore reloaded")

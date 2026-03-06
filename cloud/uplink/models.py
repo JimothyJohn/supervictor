@@ -28,6 +28,24 @@ class UplinkResponse(BaseModel):
     client_subject: str | None = None
 
 
+class RegisterDeviceRequest(BaseModel):
+    """Incoming payload for device registration."""
+
+    device_id: str
+    owner_id: str
+    subject_dn: str | None = None
+
+
+class DeviceResponse(BaseModel):
+    """Response payload for device endpoints."""
+
+    device_id: str
+    owner_id: str
+    subject_dn: str | None = None
+    status: str
+    created_at: str
+
+
 def openapi_spec() -> dict[str, Any]:
     """Generate an OpenAPI 3.1.0 spec from the Pydantic models."""
     return {

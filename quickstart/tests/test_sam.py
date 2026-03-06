@@ -91,15 +91,37 @@ class TestSamStart:
         assert sam_dry._proc is None
 
     @patch("quickstart.runner.start_background")
-    def test_starts_background_process(
-        self, mock_bg: MagicMock, sam: SamLocal
-    ) -> None:
+    def test_starts_background_process(self, mock_bg: MagicMock, sam: SamLocal) -> None:
         mock_bg.return_value = MagicMock()
         sam.start()
         mock_bg.assert_called_once()
         cmd = mock_bg.call_args.args[0]
         assert "sam" in cmd
         assert "start-api" in cmd
+
+    @patch("quickstart.runner.start_background")
+    def test_passes_env_vars_flag(self, mock_bg: MagicMock, sam: SamLocal) -> None:
+        mock_bg.return_value = MagicMock()
+        sam.start()
+        cmd = mock_bg.call_args.args[0]
+        assert "--env-vars" in cmd
+        env_file = Path(cmd[cmd.index("--env-vars") + 1])
+        import json
+
+        overrides = json.loads(env_file.read_text())
+        assert overrides["HelloWorldFunction"]["STORE_BACKEND"] == "sqlite"
+        sam.stop()
+
+    @patch("quickstart.runner.start_background")
+    def test_env_file_cleaned_up_on_stop(self, mock_bg: MagicMock, sam: SamLocal) -> None:
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_bg.return_value = mock_proc
+        sam.start()
+        env_file = sam._env_file
+        assert env_file.exists()
+        sam.stop()
+        assert not env_file.exists()
 
 
 class TestSamWaitReady:
@@ -113,18 +135,14 @@ class TestSamWaitReady:
         assert "dry-run" in captured.out
 
     @patch("urllib.request.urlopen")
-    def test_succeeds_on_http_200(
-        self, mock_urlopen: MagicMock, sam: SamLocal
-    ) -> None:
+    def test_succeeds_on_http_200(self, mock_urlopen: MagicMock, sam: SamLocal) -> None:
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_urlopen.return_value = mock_resp
         sam.wait_ready()
 
     @patch("urllib.request.urlopen")
-    def test_succeeds_on_http_403(
-        self, mock_urlopen: MagicMock, sam: SamLocal
-    ) -> None:
+    def test_succeeds_on_http_403(self, mock_urlopen: MagicMock, sam: SamLocal) -> None:
         mock_urlopen.side_effect = urllib.error.HTTPError(
             "http://localhost", 403, "Forbidden", {}, None
         )
@@ -188,18 +206,14 @@ class TestSamDeploy:
         assert "dev" in cmd
 
     @patch("quickstart.runner.run")
-    def test_deploy_no_changes_treated_as_success(
-        self, mock_run: MagicMock, sam: SamLocal
-    ) -> None:
+    def test_deploy_no_changes_treated_as_success(self, mock_run: MagicMock, sam: SamLocal) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             [], 1, stdout="", stderr="No changes to deploy"
         )
         sam.deploy("dev")
 
     @patch("quickstart.runner.run")
-    def test_deploy_failure_raises(
-        self, mock_run: MagicMock, sam: SamLocal
-    ) -> None:
+    def test_deploy_failure_raises(self, mock_run: MagicMock, sam: SamLocal) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             [], 1, stdout="", stderr="Error: stack failed"
         )
@@ -214,7 +228,10 @@ class TestSamContextManager:
     @patch.object(SamLocal, "start")
     @patch.object(SamLocal, "stop")
     def test_enter_starts_and_waits(
-        self, mock_stop: MagicMock, mock_start: MagicMock, mock_wait: MagicMock,
+        self,
+        mock_stop: MagicMock,
+        mock_start: MagicMock,
+        mock_wait: MagicMock,
         sam: SamLocal,
     ) -> None:
         with sam:
@@ -226,10 +243,12 @@ class TestSamContextManager:
     @patch.object(SamLocal, "start")
     @patch.object(SamLocal, "stop")
     def test_exit_stops_on_exception(
-        self, mock_stop: MagicMock, mock_start: MagicMock, mock_wait: MagicMock,
+        self,
+        mock_stop: MagicMock,
+        mock_start: MagicMock,
+        mock_wait: MagicMock,
         sam: SamLocal,
     ) -> None:
-        with pytest.raises(ValueError):
-            with sam:
-                raise ValueError("boom")
+        with pytest.raises(ValueError), sam:
+            raise ValueError("boom")
         mock_stop.assert_called_once()

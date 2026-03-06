@@ -1,0 +1,12 @@
+# Endpoint (no https://, no trailing /)
+host = "10.0.0.44"
+# host = "supervictor.advin.io"
+
+# Certificate paths (relative to repo root, with trailing /)
+cert_path = "certs/"
+# ca_path = "ca/AmazonRootCA1.pem"
+ca_path = "ca/ca.pem"
+
+# Device identity
+# device_name = "factory-01"
+device_name = "test-device"

@@ -14,14 +14,14 @@ class ProjectConfig:
     env_dev: Path
     env_staging: Path
 
-    # Logs
-    log_dir: Path = Path("/tmp/supervictor/logs")
+    # Logs — set dynamically in from_repo_root()
+    log_dir: Path = Path(".logs")
 
-    # SAM local
+    # SAM local — set dynamically in from_repo_root()
     sam_local_port: int = 3000
     sam_ready_timeout: int = 120
-    sam_log_file: str = "/tmp/supervictor_sam_local.log"
-    sam_pid_file: str = "/tmp/supervictor_sam_local.pid"
+    sam_log_file: str = ".logs/sam_local.log"
+    sam_pid_file: str = ".logs/sam_local.pid"
 
     # SAM deploy config-env names (match samconfig.toml sections)
     sam_config_env_dev: str = "dev"
@@ -36,10 +36,14 @@ class ProjectConfig:
 
     @classmethod
     def from_repo_root(cls, root: Path) -> ProjectConfig:
+        log_dir = root / ".logs"
         return cls(
             repo_root=root,
             device_dir=root / "device",
             cloud_dir=root / "cloud",
             env_dev=root / ".env.dev",
             env_staging=root / ".env.staging",
+            log_dir=log_dir,
+            sam_log_file=str(log_dir / "sam_local.log"),
+            sam_pid_file=str(log_dir / "sam_local.pid"),
         )

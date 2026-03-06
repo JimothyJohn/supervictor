@@ -1,0 +1,27 @@
+services:
+  uplink:
+    build: ./uplink
+    expose:
+      - "8000"
+    environment:
+      STORE_BACKEND: sqlite
+      SQLITE_DB_PATH: /tmp/supervictor.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../certs/ca/ca.pem:/etc/caddy/certs/ca.pem:ro
+      - ../certs/servers/caddy/server.pem:/etc/caddy/certs/server.pem:ro
+      - ../certs/servers/caddy/server.key:/etc/caddy/certs/server.key:ro
+    depends_on:
+      uplink:
+        condition: service_healthy

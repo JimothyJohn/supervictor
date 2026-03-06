@@ -6,9 +6,17 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from quickstart import runner
 from quickstart.config import ProjectConfig
+
+# Lambda env var overrides for sam local (no DynamoDB available locally)
+_LOCAL_ENV_OVERRIDES = {
+    "HelloWorldFunction": {
+        "STORE_BACKEND": "sqlite",
+    }
+}
 
 
 class SamLocal:
@@ -60,18 +68,33 @@ class SamLocal:
         )
         runner.success("SAM build complete")
 
-    def start(self) -> None:
+    def _write_env_overrides(self) -> Path:
+        """Write Lambda env var overrides to a temp JSON file for --env-vars."""
+        import json
+        import tempfile
+
+        env_file = Path(tempfile.mktemp(suffix=".json", prefix="sam_env_"))
+        env_file.write_text(json.dumps(_LOCAL_ENV_OVERRIDES))
+        return env_file
+
+    def start(self, *, extra_args: list[str] | None = None) -> None:
         """Start sam local start-api in background."""
         runner.step(f"Starting sam local on port {self._config.sam_local_port}")
+        self._env_file = self._write_env_overrides()
+        cmd = [
+            "sam",
+            "local",
+            "start-api",
+            "--port",
+            str(self._config.sam_local_port),
+            "--skip-pull-image",
+            "--env-vars",
+            str(self._env_file),
+        ]
+        if extra_args:
+            cmd.extend(extra_args)
         self._proc = runner.start_background(
-            [
-                "sam",
-                "local",
-                "start-api",
-                "--port",
-                str(self._config.sam_local_port),
-                "--skip-pull-image",
-            ],
+            cmd,
             cwd=self._config.cloud_dir,
             env=self._env,
             log_file=self._config.sam_log_file,
@@ -109,16 +132,17 @@ class SamLocal:
         )
 
     def stop(self) -> None:
-        """Terminate sam local process."""
-        if self._proc is None or self._proc.poll() is not None:
-            return
-        print("  Stopping sam local...")
-        self._proc.terminate()
-        try:
-            self._proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self._proc.kill()
-            self._proc.wait()
+        """Terminate sam local process and clean up temp files."""
+        if self._proc is not None and self._proc.poll() is None:
+            print("  Stopping sam local...")
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+                self._proc.wait()
+        if hasattr(self, "_env_file") and self._env_file.exists():
+            self._env_file.unlink()
 
     def deploy(self, config_env: str, *, force_upload: bool = False) -> bool:
         """Run sam deploy --config-env <env>. Returns True if changes deployed."""
