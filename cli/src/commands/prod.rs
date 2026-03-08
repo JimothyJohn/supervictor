@@ -7,23 +7,15 @@ use crate::error::CliError;
 use crate::runner::{self, Runner};
 use crate::sam::SamLocal;
 
-use super::{dev, staging};
-
-const TRUSTSTORE_DOMAIN: &str = "supervictor.advin.io";
-const TRUSTSTORE_BUCKET: &str = "supervictor";
-const TRUSTSTORE_KEY: &str = "truststore.pem";
-const TRUSTSTORE_TEMP_KEY: &str = "truststore-reload.pem";
+use super::{dev, staging, truststore};
+use truststore::{TRUSTSTORE_BUCKET, TRUSTSTORE_DOMAIN, TRUSTSTORE_KEY, TRUSTSTORE_TEMP_KEY};
 
 pub struct ProdArgs {
     pub verbose: bool,
     pub dry_run: bool,
 }
 
-pub fn run_prod(
-    args: &ProdArgs,
-    config: &ProjectConfig,
-    r: &dyn Runner,
-) -> Result<i32, CliError> {
+pub fn run_prod(args: &ProdArgs, config: &ProjectConfig, r: &dyn Runner) -> Result<i32, CliError> {
     // Gate 1: dev
     runner::milestone("Running dev gate");
     let dev_args = dev::DevArgs {
@@ -66,7 +58,7 @@ pub fn run_prod(
     let deployed = sam.deploy(r, &config.sam_config_env_prod, true)?;
 
     // Reload truststore
-    reload_truststore(args.verbose, args.dry_run)?;
+    truststore::reload(r, args.verbose, args.dry_run)?;
 
     if deployed {
         runner::success("\nProduction deployment complete.");

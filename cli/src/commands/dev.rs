@@ -12,11 +12,7 @@ pub struct DevArgs {
     pub serve: bool,
 }
 
-pub fn run_dev(
-    args: &DevArgs,
-    config: &ProjectConfig,
-    r: &dyn Runner,
-) -> Result<i32, CliError> {
+pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result<i32, CliError> {
     // Load env
     runner::step("Loading .env.dev");
     let env_vars = env::load_env(&config.env_dev)?;
@@ -89,7 +85,10 @@ pub fn run_dev(
         let url = sam.url();
         println!("\n  sam local running at {}", url);
         println!("  GET  {}/hello", url);
-        println!("  POST {}/hello  -d '{{\"id\":\"test\",\"current\":42}}'", url);
+        println!(
+            "  POST {}/hello  -d '{{\"id\":\"test\",\"current\":42}}'",
+            url
+        );
         println!("\n  Press Ctrl+C to stop.");
         guard.wait()?;
     } else {
@@ -100,7 +99,13 @@ pub fn run_dev(
 
         if let Err(_) = r.run(
             &[
-                "uv", "run", "pytest", "tests/integration/", "-m", "local", "-v",
+                "uv",
+                "run",
+                "pytest",
+                "tests/integration/",
+                "-m",
+                "local",
+                "-v",
             ],
             &RunOptions {
                 cwd: Some(cfg.cloud_dir.clone()),
@@ -123,3 +128,7 @@ pub fn run_dev(
     runner::success("\nDev pipeline passed.");
     Ok(0)
 }
+
+#[cfg(test)]
+#[path = "dev_tests.rs"]
+mod tests;

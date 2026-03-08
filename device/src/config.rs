@@ -32,9 +32,11 @@ pub const SOCKET_TIMEOUT: Duration = Duration::from_secs(10);
 // --- TLS ---
 // AI-Generated comment: Port for AWS IoT HTTPS endpoint with mTLS authentication.
 pub const AWS_IOT_PORT: u16 = 443;
-// AI-Generated comment: mbedTLS debug level (0=off, 1=Error, 2=StateChanges, 3=Info, 4=Verbose).
-// TODO: Set to 0 for release builds.
-pub const TLS_DEBUG_LEVEL: u32 = 4;
+// mbedTLS debug level (0=off, 1=Error, 2=StateChanges, 3=Info, 4=Verbose).
+#[cfg(debug_assertions)]
+pub const TLS_DEBUG_LEVEL: u32 = 2;
+#[cfg(not(debug_assertions))]
+pub const TLS_DEBUG_LEVEL: u32 = 0;
 // AI-Generated comment: Timeout for the TLS handshake (session.connect) process.
 pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 

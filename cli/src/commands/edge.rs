@@ -9,11 +9,7 @@ pub struct EdgeArgs {
     pub dry_run: bool,
 }
 
-pub fn run_edge(
-    args: &EdgeArgs,
-    config: &ProjectConfig,
-    r: &dyn Runner,
-) -> Result<i32, CliError> {
+pub fn run_edge(args: &EdgeArgs, config: &ProjectConfig, r: &dyn Runner) -> Result<i32, CliError> {
     preflight::require(&["cargo", "espflash"], false, r)?;
 
     runner::step("Loading .env.dev");
@@ -62,3 +58,7 @@ pub fn run_edge(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "edge_tests.rs"]
+mod tests;

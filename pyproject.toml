@@ -17,6 +17,7 @@ members = ["cloud/uplink"]
 dev = [
     "httpx>=0.28,<1",
     "esptool>=5.2.0",
+    "moto[dynamodb]>=5.0,<6",
     "pytest>=9.0,<10",
     "requests>=2.32.5",
     "uplink",

@@ -24,15 +24,14 @@ pub fn check_docker_running(runner: &dyn Runner) -> bool {
         check: false,
         ..Default::default()
     };
-    matches!(runner.run(&["docker", "info"], &opts), Ok(CommandOutput { status: 0, .. }))
+    matches!(
+        runner.run(&["docker", "info"], &opts),
+        Ok(CommandOutput { status: 0, .. })
+    )
 }
 
 /// Exit with an error if any required tools are missing or Docker is down.
-pub fn require(
-    tools: &[&str],
-    need_docker: bool,
-    runner: &dyn Runner,
-) -> Result<(), CliError> {
+pub fn require(tools: &[&str], need_docker: bool, runner: &dyn Runner) -> Result<(), CliError> {
     let missing = check_tools(tools);
     if !missing.is_empty() {
         return Err(CliError::MissingTools(missing));
@@ -42,3 +41,7 @@ pub fn require(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "preflight_tests.rs"]
+mod tests;

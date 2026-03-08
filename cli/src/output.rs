@@ -52,14 +52,6 @@ pub fn error(msg: &str) {
     eprintln!("{RED}{msg}{RESET}");
 }
 
-/// Detail — verbose only.
-pub fn detail(msg: &str) {
-    if !is_verbose() {
-        return;
-    }
-    println!("  {msg}");
-}
-
 /// Info — always visible, no color.
 pub fn info(msg: &str) {
     println!("{msg}");

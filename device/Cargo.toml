@@ -13,11 +13,6 @@ name = "supervictor-desktop"
 path = "./src/bin/desktop_main.rs"
 required-features = ["desktop"]
 
-[[bin]]
-name = "supervictor-portal"
-path = "./src/bin/portal_main.rs"
-required-features = ["portal"]
-
 [features]
 portal = ["embedded", "embassy-net/udp"]
 desktop = ["reqwest", "tokio", "rustls", "tokio-rustls", "rustls-pemfile"]

@@ -10,8 +10,7 @@ use crate::error::CliError;
 use crate::runner::{self, BackgroundOptions, RunOptions, Runner};
 
 /// Lambda env var overrides for sam local (no DynamoDB available locally).
-const LOCAL_ENV_OVERRIDES: &str =
-    r#"{"HelloWorldFunction":{"STORE_BACKEND":"sqlite"}}"#;
+const LOCAL_ENV_OVERRIDES: &str = r#"{"HelloWorldFunction":{"STORE_BACKEND":"sqlite"}}"#;
 
 /// SAM local lifecycle manager.
 pub struct SamLocal<'a> {
@@ -73,16 +72,19 @@ impl<'a> SamLocal<'a> {
     }
 
     /// Export runtime deps and run sam build.
-    pub fn build(
-        &self,
-        r: &dyn Runner,
-        no_cache: bool,
-    ) -> Result<(), CliError> {
+    pub fn build(&self, r: &dyn Runner, no_cache: bool) -> Result<(), CliError> {
         let log_dir = &self.config.log_dir;
 
         runner::step("Exporting runtime dependencies");
         r.run(
-            &["uv", "export", "--no-dev", "--no-hashes", "-o", "requirements.txt"],
+            &[
+                "uv",
+                "export",
+                "--no-dev",
+                "--no-hashes",
+                "-o",
+                "requirements.txt",
+            ],
             &RunOptions {
                 cwd: Some(self.config.cloud_dir.join("uplink")),
                 env: self.env.clone(),
@@ -115,11 +117,7 @@ impl<'a> SamLocal<'a> {
 
     /// Start sam local start-api in background and wait for readiness.
     /// Returns a guard that stops the process on drop.
-    pub fn start(
-        &mut self,
-        r: &dyn Runner,
-        extra_args: &[&str],
-    ) -> Result<SamGuard, CliError> {
+    pub fn start(&mut self, r: &dyn Runner, extra_args: &[&str]) -> Result<SamGuard, CliError> {
         runner::step(&format!(
             "Starting sam local on port {}",
             self.config.sam_local_port
@@ -216,15 +214,12 @@ impl<'a> SamLocal<'a> {
         let contents = fs::read_to_string(&samconfig).map_err(|e| {
             CliError::Config(format!("failed to read {}: {}", samconfig.display(), e))
         })?;
-        let data: toml::Value = contents.parse().map_err(|e| {
-            CliError::Config(format!("failed to parse samconfig.toml: {}", e))
-        })?;
+        let data: toml::Value = contents
+            .parse()
+            .map_err(|e| CliError::Config(format!("failed to parse samconfig.toml: {}", e)))?;
 
         // Try deploy.parameters first, then global.parameters
-        let paths = [
-            &["deploy", "parameters"][..],
-            &["global", "parameters"][..],
-        ];
+        let paths = [&["deploy", "parameters"][..], &["global", "parameters"][..]];
         for path in &paths {
             let mut section = data.get(config_env);
             for key in *path {
@@ -244,11 +239,7 @@ impl<'a> SamLocal<'a> {
     }
 
     /// Query CloudFormation for the deployed API endpoint URL.
-    pub fn stack_endpoint(
-        &self,
-        r: &dyn Runner,
-        config_env: &str,
-    ) -> Result<String, CliError> {
+    pub fn stack_endpoint(&self, r: &dyn Runner, config_env: &str) -> Result<String, CliError> {
         if self.dry_run {
             return Ok(format!(
                 "https://DRY-RUN.execute-api.us-east-1.amazonaws.com/{}",
@@ -294,7 +285,10 @@ impl<'a> SamLocal<'a> {
         config_env: &str,
         force_upload: bool,
     ) -> Result<bool, CliError> {
-        let log_path = self.config.log_dir.join(format!("sam_deploy_{}.log", config_env));
+        let log_path = self
+            .config
+            .log_dir
+            .join(format!("sam_deploy_{}.log", config_env));
         runner::step(&format!("Deploying to {} stack", config_env));
 
         let mut cmd_parts: Vec<String> = vec![
@@ -306,13 +300,22 @@ impl<'a> SamLocal<'a> {
 
         // Override samconfig values from env vars
         let env = self.env.as_ref();
-        if let Some(v) = env.and_then(|e| e.get("SAM_STACK_NAME")).filter(|v| !v.is_empty()) {
+        if let Some(v) = env
+            .and_then(|e| e.get("SAM_STACK_NAME"))
+            .filter(|v| !v.is_empty())
+        {
             cmd_parts.extend(["--stack-name".into(), v.clone()]);
         }
-        if let Some(v) = env.and_then(|e| e.get("SAM_REGION")).filter(|v| !v.is_empty()) {
+        if let Some(v) = env
+            .and_then(|e| e.get("SAM_REGION"))
+            .filter(|v| !v.is_empty())
+        {
             cmd_parts.extend(["--region".into(), v.clone()]);
         }
-        if let Some(v) = env.and_then(|e| e.get("SAM_S3_PREFIX")).filter(|v| !v.is_empty()) {
+        if let Some(v) = env
+            .and_then(|e| e.get("SAM_S3_PREFIX"))
+            .filter(|v| !v.is_empty())
+        {
             cmd_parts.extend(["--s3-prefix".into(), v.clone()]);
         }
 
@@ -377,3 +380,7 @@ impl<'a> SamLocal<'a> {
         Ok(path)
     }
 }
+
+#[cfg(test)]
+#[path = "sam_tests.rs"]
+mod tests;
