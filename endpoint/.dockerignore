@@ -1,0 +1,7 @@
+target/
+.git/
+.logs/
+tests/
+*.md
+.env*
+certs/
