@@ -73,6 +73,7 @@ fn test_dev_happy_path() {
         verbose: false,
         dry_run: true,
         serve: false,
+        stop: false,
     };
     let code = run_dev(&args, &cfg, &runner).unwrap();
     assert_eq!(code, 0);
@@ -108,6 +109,7 @@ fn test_dev_rust_tests_fail_returns_1() {
         verbose: false,
         dry_run: false,
         serve: false,
+        stop: false,
     };
     let code = run_dev(&args, &cfg, &runner).unwrap();
     assert_eq!(code, 1);
@@ -136,6 +138,7 @@ fn test_dev_python_unit_tests_fail_returns_1() {
         verbose: false,
         dry_run: false,
         serve: false,
+        stop: false,
     };
     let code = run_dev(&args, &cfg, &runner).unwrap();
     assert_eq!(code, 1);
@@ -169,6 +172,7 @@ fn test_dev_serve_skips_integration() {
         verbose: false,
         dry_run: true,
         serve: true,
+        stop: false,
     };
 
     let code = run_dev(&args, &cfg, &runner).unwrap();
@@ -183,6 +187,58 @@ fn test_dev_serve_skips_integration() {
     assert!(!calls
         .iter()
         .any(|c| c.contains(&"tests/integration/".to_string())));
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_dev_stop_no_pid_returns_1() {
+    let tmp = std::env::temp_dir().join("qs_dev_stop_no_pid");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let cfg = setup(&tmp);
+
+    let runner = MockRunner::new();
+    let args = DevArgs {
+        verbose: false,
+        dry_run: false,
+        serve: false,
+        stop: true,
+    };
+    let code = run_dev(&args, &cfg, &runner).unwrap();
+    // No PID file exists → returns 1
+    assert_eq!(code, 1);
+
+    // No subprocess calls should have been made
+    assert_eq!(runner.call_count(), 0);
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_dev_stop_with_stale_pid_returns_1() {
+    let tmp = std::env::temp_dir().join("qs_dev_stop_stale");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let mut cfg = setup(&tmp);
+    cfg.sam_pid_file = tmp.join(".logs/sam_local.pid");
+
+    // Write a PID that (almost certainly) doesn't exist
+    std::fs::write(&cfg.sam_pid_file, "999999999").unwrap();
+
+    let runner = MockRunner::new();
+    let args = DevArgs {
+        verbose: false,
+        dry_run: false,
+        serve: false,
+        stop: true,
+    };
+    let code = run_dev(&args, &cfg, &runner).unwrap();
+    // kill(999999999) should fail → returns 1
+    assert_eq!(code, 1);
+
+    // PID file should be cleaned up
+    assert!(!cfg.sam_pid_file.exists());
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

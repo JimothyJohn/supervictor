@@ -41,8 +41,7 @@ impl Default for RunOptions {
 }
 
 /// Options for starting a background process.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct BackgroundOptions {
     pub cwd: Option<PathBuf>,
     pub env: Option<HashMap<String, String>>,
@@ -50,7 +49,6 @@ pub struct BackgroundOptions {
     pub verbose: bool,
     pub dry_run: bool,
 }
-
 
 /// Trait abstracting subprocess execution for testability.
 pub trait Runner {
@@ -150,6 +148,9 @@ impl Runner for RealRunner {
             command.envs(env);
         }
 
+        // Background processes must never read from the terminal
+        command.stdin(Stdio::null());
+
         if let Some(log_path) = &opts.log_file {
             if let Some(parent) = log_path.parent() {
                 fs::create_dir_all(parent)?;
@@ -177,6 +178,8 @@ fn run_with_log(
         fs::create_dir_all(parent)?;
     }
 
+    // Logged commands run non-interactively — don't read from terminal
+    command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
@@ -281,11 +284,7 @@ pub mod mock {
 
             self.calls.borrow_mut().push(cmd_vec);
 
-            let result = self
-                .results
-                .borrow_mut()
-                .pop_front()
-                .unwrap_or_default();
+            let result = self.results.borrow_mut().pop_front().unwrap_or_default();
 
             if opts.check && result.status != 0 {
                 return Err(CliError::Command {

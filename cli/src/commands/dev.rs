@@ -4,15 +4,21 @@ use crate::error::CliError;
 use crate::preflight;
 use crate::runner::{self, RunOptions, Runner};
 use crate::rust_tools;
-use crate::sam::SamLocal;
+use crate::sam::{self, SamLocal};
 
 pub struct DevArgs {
     pub verbose: bool,
     pub dry_run: bool,
     pub serve: bool,
+    pub stop: bool,
 }
 
 pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result<i32, CliError> {
+    // Handle --stop: kill any running SAM process and exit
+    if args.stop {
+        return stop_server(config);
+    }
+
     // Load env
     runner::step("Loading .env.dev");
     let env_vars = env::load_env(&config.env_dev)?;
@@ -43,7 +49,9 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
             log_to: Some(log_dir.join("rust_tests.log")),
             ..Default::default()
         },
-    ).is_err() {
+    )
+    .is_err()
+    {
         runner::error(&format!(
             "Rust library tests failed (see {})",
             log_dir.join("rust_tests.log").display()
@@ -64,7 +72,9 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
             log_to: Some(log_dir.join("python_unit_tests.log")),
             ..Default::default()
         },
-    ).is_err() {
+    )
+    .is_err()
+    {
         runner::error(&format!(
             "Python unit tests failed (see {})",
             log_dir.join("python_unit_tests.log").display()
@@ -78,19 +88,23 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
     sam.build(r, false)?;
 
     // Start sam local
-    let mut guard = sam.start(r, &[])?;
+    let guard = sam.start(r, &[])?;
     sam.wait_ready()?;
 
     if args.serve {
+        // Stop any previously-running SAM server first
+        let _ = sam::stop_from_pid_file(&cfg.sam_pid_file);
+
         let url = sam.url();
-        println!("\n  sam local running at {}", url);
-        println!("  GET  {}/hello", url);
-        println!(
-            "  POST {}/hello  -d '{{\"id\":\"test\",\"current\":42}}'",
-            url
-        );
-        println!("\n  Press Ctrl+C to stop.");
-        guard.wait()?;
+        if args.dry_run {
+            println!("  [dry-run] detach SAM process");
+        } else {
+            let pid = guard.detach(&cfg.sam_pid_file)?;
+            runner::success(&format!("sam local running (PID {}) at {}", pid, url));
+        }
+
+        println!("  Logs: {}", cfg.sam_log_file.display());
+        println!("  Stop: qs dev --stop");
     } else {
         runner::step("Running local integration tests");
         let mut test_vars = env_vars.clone();
@@ -115,7 +129,9 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
                 log_to: Some(log_dir.join("integration_tests.log")),
                 ..Default::default()
             },
-        ).is_err() {
+        )
+        .is_err()
+        {
             runner::error(&format!(
                 "Integration tests failed (see {})",
                 log_dir.join("integration_tests.log").display()
@@ -127,6 +143,19 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
 
     runner::success("\nDev pipeline passed.");
     Ok(0)
+}
+
+fn stop_server(config: &ProjectConfig) -> Result<i32, CliError> {
+    match sam::stop_from_pid_file(&config.sam_pid_file)? {
+        true => {
+            runner::success("Stopped sam local.");
+            Ok(0)
+        }
+        false => {
+            runner::error("No running sam local found.");
+            Ok(1)
+        }
+    }
 }
 
 #[cfg(test)]

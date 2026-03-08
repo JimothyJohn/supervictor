@@ -9,7 +9,10 @@ use qs::output;
 use qs::runner::{self, RealRunner};
 
 #[derive(Parser)]
-#[command(name = "qs", about = "Supervictor CLI — dev, staging, and prod pipelines")]
+#[command(
+    name = "qs",
+    about = "Supervictor CLI — dev, staging, and prod pipelines"
+)]
 struct Cli {
     #[arg(short, long, global = true, help = "Show full command output")]
     verbose: bool,
@@ -25,8 +28,10 @@ struct Cli {
 enum Commands {
     /// Local dev cycle: unit tests + sam local + integration tests
     Dev {
-        #[arg(long, help = "Leave sam local running for manual testing")]
+        #[arg(long, help = "Start sam local as a background daemon")]
         serve: bool,
+        #[arg(long, help = "Stop a running sam local daemon")]
+        stop: bool,
     },
 
     /// Build, flash, and monitor the embedded device
@@ -148,11 +153,12 @@ fn main() {
 
 fn run(cli: Cli, config: &ProjectConfig, r: &dyn runner::Runner) -> Result<i32, error::CliError> {
     match cli.command {
-        Commands::Dev { serve } => dev::run_dev(
+        Commands::Dev { serve, stop } => dev::run_dev(
             &dev::DevArgs {
                 verbose: cli.verbose,
                 dry_run: cli.dry_run,
                 serve,
+                stop,
             },
             config,
             r,
@@ -189,9 +195,7 @@ fn run(cli: Cli, config: &ProjectConfig, r: &dyn runner::Runner) -> Result<i32, 
         Commands::Certs { command } => {
             let certs_cmd = match command {
                 CertsCommands::Ca => certs::CertsCommand::Ca,
-                CertsCommands::Device { name, days } => {
-                    certs::CertsCommand::Device { name, days }
-                }
+                CertsCommands::Device { name, days } => certs::CertsCommand::Device { name, days },
                 CertsCommands::Server {
                     name,
                     host_ip,

@@ -26,6 +26,7 @@ pub fn run_staging(
             verbose: args.verbose,
             dry_run: args.dry_run,
             serve: false,
+            stop: false,
         };
         let rc = dev::run_dev(&dev_args, config, r)?;
         if rc != 0 {
@@ -57,7 +58,13 @@ pub fn run_staging(
     let log_dir = &config.log_dir;
     if r.run(
         &[
-            "uv", "run", "pytest", "tests/integration/", "-m", "local", "-v",
+            "uv",
+            "run",
+            "pytest",
+            "tests/integration/",
+            "-m",
+            "local",
+            "-v",
         ],
         &RunOptions {
             cwd: Some(config.cloud_dir.clone()),
@@ -67,7 +74,9 @@ pub fn run_staging(
             log_to: Some(log_dir.join("staging_integration_tests.log")),
             ..Default::default()
         },
-    ).is_err() {
+    )
+    .is_err()
+    {
         runner::error(&format!(
             "Staging integration tests failed (see {})",
             log_dir.join("staging_integration_tests.log").display()
@@ -100,7 +109,9 @@ pub fn run_staging(
             log_to: Some(log_dir.join("device_deployed_tests.log")),
             ..Default::default()
         },
-    ).is_err() {
+    )
+    .is_err()
+    {
         runner::error(&format!(
             "Rust device integration tests failed (see {})",
             log_dir.join("device_deployed_tests.log").display()
@@ -121,7 +132,13 @@ pub fn run_staging(
 
     if r.run(
         &[
-            "uv", "run", "pytest", "tests/integration/", "-m", "remote", "-v",
+            "uv",
+            "run",
+            "pytest",
+            "tests/integration/",
+            "-m",
+            "remote",
+            "-v",
         ],
         &RunOptions {
             cwd: Some(config.cloud_dir.clone()),
@@ -131,7 +148,9 @@ pub fn run_staging(
             log_to: Some(log_dir.join("mtls_tests.log")),
             ..Default::default()
         },
-    ).is_err() {
+    )
+    .is_err()
+    {
         runner::error(&format!(
             "mTLS verification failed (see {})",
             log_dir.join("mtls_tests.log").display()

@@ -18,6 +18,7 @@ pub fn run_prod(args: &ProdArgs, config: &ProjectConfig, r: &dyn Runner) -> Resu
         verbose: args.verbose,
         dry_run: args.dry_run,
         serve: false,
+        stop: false,
     };
     let rc = dev::run_dev(&dev_args, config, r)?;
     if rc != 0 {

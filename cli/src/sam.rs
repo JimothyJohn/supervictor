@@ -41,13 +41,64 @@ impl Drop for SamGuard {
 }
 
 impl SamGuard {
-    /// Access the underlying process (e.g. for `--serve` mode).
+    /// Block until the process exits.
     pub fn wait(&mut self) -> Result<(), CliError> {
         if let Some(ref mut child) = self.proc {
             child.wait()?;
         }
         Ok(())
     }
+
+    /// Detach the process so it keeps running after this guard is dropped.
+    /// Writes the PID to `pid_file` for later cleanup.
+    pub fn detach(mut self, pid_file: &std::path::Path) -> Result<u32, CliError> {
+        let child = self
+            .proc
+            .take()
+            .ok_or_else(|| CliError::Config("no SAM process to detach (dry-run?)".to_string()))?;
+        let pid = child.id();
+
+        if let Some(parent) = pid_file.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(pid_file, pid.to_string())?;
+
+        // Leak the Child so Drop doesn't kill it
+        std::mem::forget(child);
+        Ok(pid)
+    }
+}
+
+/// Kill a previously-detached SAM process using its PID file.
+/// Returns Ok(true) if the process was killed, Ok(false) if it wasn't running.
+pub fn stop_from_pid_file(pid_file: &std::path::Path) -> Result<bool, CliError> {
+    let contents = match fs::read_to_string(pid_file) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(false);
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    let pid = contents.trim().to_string();
+    if pid.is_empty() {
+        let _ = fs::remove_file(pid_file);
+        return Ok(false);
+    }
+
+    // Use kill(1) to send SIGTERM — no libc dependency needed
+    let status = std::process::Command::new("kill")
+        .arg(&pid)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    let killed = status.is_ok_and(|s| s.success());
+
+    // Clean up PID file regardless
+    let _ = fs::remove_file(pid_file);
+
+    Ok(killed)
 }
 
 impl<'a> SamLocal<'a> {
