@@ -197,10 +197,13 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
             match embassy_time::with_timeout(HTTP_READ_TIMEOUT, session.read(&mut buffer)).await {
                 Ok(Ok(n)) => {
                     if n > 0 {
+                        #[cfg(debug_assertions)]
                         match core::str::from_utf8(&buffer[..n]) {
                             Ok(s) => println!("Received response:\n---\n{}\n---", s),
                             Err(_) => println!("   Response not UTF-8 (binary data)"),
                         }
+                        #[cfg(not(debug_assertions))]
+                        println!("   Response received ({} bytes)", n);
                     } else {
                         println!("   Empty response (0 bytes)");
                     }

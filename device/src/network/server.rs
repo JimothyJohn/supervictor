@@ -26,6 +26,27 @@ pub fn extract_body(request: &str) -> &str {
         .unwrap_or("")
 }
 
+// --- JSON helpers ---
+
+/// Push `value` into `s`, escaping `"` and `\` for safe JSON string embedding.
+fn push_json_str<const N: usize>(s: &mut HString<N>, value: &str) {
+    for ch in value.chars() {
+        match ch {
+            '"' => {
+                s.push('\\').ok();
+                s.push('"').ok();
+            }
+            '\\' => {
+                s.push('\\').ok();
+                s.push('\\').ok();
+            }
+            _ => {
+                s.push(ch).ok();
+            }
+        }
+    }
+}
+
 // --- Response building ---
 
 /// Write a usize as decimal digits into an HString.
@@ -71,22 +92,27 @@ pub fn build_redirect(location: &str) -> HString<256> {
     let mut h = HString::<256>::new();
     h.push_str("HTTP/1.0 302 Found\r\nLocation: ").ok();
     h.push_str(location).ok();
-    h.push_str("\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").ok();
+    h.push_str("\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        .ok();
     h
 }
 
 /// Build an HTTP error response with a JSON body.
 pub fn build_error_response(status: u16, message: &str) -> HString<256> {
+    // Build body first so Content-Length accounts for escaped chars
+    let mut body = HString::<128>::new();
+    body.push_str("{\"error\":\"").ok();
+    push_json_str(&mut body, message);
+    body.push_str("\"}").ok();
+
     let mut h = HString::<256>::new();
     h.push_str("HTTP/1.0 ").ok();
     write_usize(&mut h, status as usize);
-    h.push_str(" Error\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: ").ok();
-    // Body: {"error":"<message>"}
-    let body_len = 10 + message.len() + 2;
-    write_usize(&mut h, body_len);
-    h.push_str("\r\n\r\n{\"error\":\"").ok();
-    h.push_str(message).ok();
-    h.push_str("\"}").ok();
+    h.push_str(" Error\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: ")
+        .ok();
+    write_usize(&mut h, body.len());
+    h.push_str("\r\n\r\n").ok();
+    h.push_str(body.as_str()).ok();
     h
 }
 
@@ -97,13 +123,13 @@ pub fn build_error_response(status: u16, message: &str) -> HString<256> {
 pub fn build_status_json(device_id: &str, ip: &str, state: &str) -> HString<256> {
     let mut body = HString::<256>::new();
     body.push_str("{\"device_id\":\"").ok();
-    body.push_str(device_id).ok();
+    push_json_str(&mut body, device_id);
     body.push_str("\",\"fw_version\":\"").ok();
-    body.push_str(env!("CARGO_PKG_VERSION")).ok();
+    push_json_str(&mut body, env!("CARGO_PKG_VERSION"));
     body.push_str("\",\"ip\":\"").ok();
-    body.push_str(ip).ok();
+    push_json_str(&mut body, ip);
     body.push_str("\",\"state\":\"").ok();
-    body.push_str(state).ok();
+    push_json_str(&mut body, state);
     body.push_str("\"}").ok();
     body
 }
@@ -128,7 +154,7 @@ pub fn build_configure_response(ok: bool, message: &str) -> HString<256> {
     body.push_str("{\"ok\":").ok();
     body.push_str(if ok { "true" } else { "false" }).ok();
     body.push_str(",\"message\":\"").ok();
-    body.push_str(message).ok();
+    push_json_str(&mut body, message);
     body.push_str("\"}").ok();
     body
 }
@@ -154,8 +180,7 @@ const INDEX_HTML: &[u8] = include_bytes!("../../../portal/dist/index.html");
 #[cfg(feature = "portal")]
 const PORTAL_JS: &[u8] = include_bytes!("../../../portal/dist/supervictor_portal.js");
 #[cfg(feature = "portal")]
-const PORTAL_WASM_GZ: &[u8] =
-    include_bytes!("../../../portal/dist/supervictor_portal_bg.wasm.gz");
+const PORTAL_WASM_GZ: &[u8] = include_bytes!("../../../portal/dist/supervictor_portal_bg.wasm.gz");
 
 #[cfg(feature = "portal")]
 #[embassy_executor::task]
@@ -229,12 +254,9 @@ pub async fn serve(stack: embassy_net::Stack<'static>) {
                     Some((ssid, _password)) => {
                         // TODO: write to NVS when TODO #2 (NVS) is done
                         println!("WiFi config received: ssid={}", ssid.as_str());
-                        let resp = build_configure_response(
-                            true,
-                            "Configuration saved. Rebooting...",
-                        );
-                        let header =
-                            build_response_header("application/json", resp.len(), None);
+                        let resp =
+                            build_configure_response(true, "Configuration saved. Rebooting...");
+                        let header = build_response_header("application/json", resp.len(), None);
                         let _ = socket.write_all(header.as_bytes()).await;
                         let _ = socket.write_all(resp.as_bytes()).await;
                     }

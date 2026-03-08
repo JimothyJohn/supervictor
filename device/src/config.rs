@@ -5,8 +5,8 @@ use embassy_time::Duration;
 
 pub const HOST: &str = env!("HOST");
 pub const CA_PATH: &str = env!("CA_PATH");
-pub const CERT_PATH: &str = "../../certs/temp-250423.crt";
-pub const KEY_PATH: &str = "../../certs/temp-250423.key";
+pub const CERT_PATH: &str = env!("CERT_PATH");
+pub const KEY_PATH: &str = env!("KEY_PATH");
 
 // --- System ---
 // AI-Generated comment: Size of the heap allocator. Tuning might be needed based on memory usage.
