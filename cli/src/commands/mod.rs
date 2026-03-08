@@ -5,3 +5,4 @@ pub mod onboard;
 pub mod ping;
 pub mod prod;
 pub mod staging;
+pub mod truststore;
