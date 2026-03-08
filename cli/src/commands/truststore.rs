@@ -3,10 +3,10 @@ use std::time::{Duration, Instant};
 use crate::error::CliError;
 use crate::runner::{self, CommandOutput, RunOptions, Runner};
 
-pub(crate) const TRUSTSTORE_DOMAIN: &str = "supervictor.advin.io";
-pub(crate) const TRUSTSTORE_BUCKET: &str = "supervictor";
-pub(crate) const TRUSTSTORE_KEY: &str = "truststore.pem";
-pub(crate) const TRUSTSTORE_TEMP_KEY: &str = "truststore-reload.pem";
+const TRUSTSTORE_DOMAIN: &str = "supervictor.advin.io";
+const TRUSTSTORE_BUCKET: &str = "supervictor";
+const TRUSTSTORE_KEY: &str = "truststore.pem";
+const TRUSTSTORE_TEMP_KEY: &str = "truststore-reload.pem";
 
 const RETRIABLE_ERRORS: &[&str] = &[
     "TooManyRequests",
@@ -223,24 +223,17 @@ mod tests {
     #[test]
     fn happy_path_calls_all_six_steps() {
         let r = MockRunner::new();
-        // 1: s3 cp
-        r.push_result(ok(""));
-        // 2: update-domain-name (swap)
-        r.push_result(ok(""));
-        // 3: get-domain-name (poll) -> AVAILABLE
-        r.push_result(ok("AVAILABLE\n"));
-        // 4: update-domain-name (restore)
-        r.push_result(ok(""));
-        // 5: get-domain-name (verify)
-        r.push_result(ok("s3://supervictor/truststore.pem\n"));
-        // 6: s3 rm (cleanup)
-        r.push_result(ok(""));
+        r.push_result(ok("")); // s3 cp
+        r.push_result(ok("")); // swap
+        r.push_result(ok("AVAILABLE\n")); // poll
+        r.push_result(ok("")); // restore
+        r.push_result(ok("s3://supervictor/truststore.pem\n")); // verify
+        r.push_result(ok("")); // cleanup
 
         let result = reload(&r, false, false);
         assert!(result.is_ok());
         assert_eq!(r.call_count(), 6);
 
-        // Verify call sequence
         assert!(r.get_call(0).contains(&"cp".to_string()));
         assert!(r.get_call(1).contains(&"update-domain-name".to_string()));
         assert!(r.get_call(2).contains(&"get-domain-name".to_string()));
@@ -264,7 +257,7 @@ mod tests {
 
         let result = reload(&r, false, false);
         assert!(result.is_ok());
-        // Only the s3 cp call — no temp key was created, no cleanup needed
+        // Only the s3 cp call — no temp key was created
         assert_eq!(r.call_count(), 1);
     }
 
@@ -300,8 +293,8 @@ mod tests {
     fn conflict_exception_is_retried() {
         let r = MockRunner::new();
         r.push_result(ok("")); // s3 cp
-        r.push_result(fail("ConflictException: domain update in progress")); // swap fail 1
-        r.push_result(ok("")); // swap retry -> ok
+        r.push_result(fail("ConflictException: domain update in progress")); // swap fail
+        r.push_result(ok("")); // swap retry ok
         r.push_result(ok("AVAILABLE\n")); // poll
         r.push_result(ok("")); // restore
         r.push_result(ok("s3://supervictor/truststore.pem\n")); // verify
@@ -316,8 +309,8 @@ mod tests {
     fn throttling_exception_is_retried() {
         let r = MockRunner::new();
         r.push_result(ok("")); // s3 cp
-        r.push_result(fail("ThrottlingException: Rate exceeded")); // swap fail 1
-        r.push_result(ok("")); // swap retry -> ok
+        r.push_result(fail("ThrottlingException: Rate exceeded")); // swap fail
+        r.push_result(ok("")); // swap retry ok
         r.push_result(ok("AVAILABLE\n")); // poll
         r.push_result(ok("")); // restore
         r.push_result(ok("s3://supervictor/truststore.pem\n")); // verify
@@ -332,11 +325,10 @@ mod tests {
     fn retries_exhausted_on_persistent_throttle() {
         let r = MockRunner::new();
         r.push_result(ok("")); // s3 cp
-                               // swap: initial + 3 retries = 4 calls, all fail
-        r.push_result(fail("TooManyRequestsException"));
-        r.push_result(fail("TooManyRequestsException"));
-        r.push_result(fail("TooManyRequestsException"));
-        r.push_result(fail("TooManyRequestsException"));
+        r.push_result(fail("TooManyRequestsException")); // swap: initial
+        r.push_result(fail("TooManyRequestsException")); // retry 1
+        r.push_result(fail("TooManyRequestsException")); // retry 2
+        r.push_result(fail("TooManyRequestsException")); // retry 3
         r.push_result(ok("")); // cleanup
 
         let result = reload(&r, false, false);
@@ -352,7 +344,7 @@ mod tests {
         r.push_result(ok("")); // swap
         r.push_result(ok("AVAILABLE\n")); // poll
         r.push_result(ok("")); // restore
-        r.push_result(ok("s3://supervictor/truststore-reload.pem\n")); // verify -> wrong URI
+        r.push_result(ok("s3://supervictor/truststore-reload.pem\n")); // verify: wrong URI
         r.push_result(ok("")); // cleanup
 
         let result = reload(&r, false, false);
