@@ -2,6 +2,7 @@
 pub enum HttpError {
     Deserialization,
     GenericParseError,
+    BufferOverflow,
 }
 
 impl core::fmt::Display for HttpError {
@@ -9,6 +10,7 @@ impl core::fmt::Display for HttpError {
         match self {
             HttpError::Deserialization => write!(f, "Failed to deserialize response"),
             HttpError::GenericParseError => write!(f, "Failed to parse response"),
+            HttpError::BufferOverflow => write!(f, "Buffer capacity exceeded"),
         }
     }
 }

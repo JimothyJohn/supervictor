@@ -38,6 +38,19 @@ fn display_messages_are_distinct() {
 }
 
 #[test]
+fn buffer_overflow_variant_exists() {
+    let _e = HttpError::BufferOverflow;
+}
+
+#[test]
+fn buffer_overflow_display_message() {
+    let e = HttpError::BufferOverflow;
+    let mut buf: HString<64> = HString::new();
+    write!(buf, "{}", e).unwrap();
+    assert_eq!(buf.as_str(), "Buffer capacity exceeded");
+}
+
+#[test]
 fn display_messages_are_non_empty() {
     let mut buf: HString<64> = HString::new();
     write!(buf, "{}", HttpError::Deserialization).unwrap();
@@ -45,5 +58,9 @@ fn display_messages_are_non_empty() {
 
     buf.clear();
     write!(buf, "{}", HttpError::GenericParseError).unwrap();
+    assert!(!buf.is_empty());
+
+    buf.clear();
+    write!(buf, "{}", HttpError::BufferOverflow).unwrap();
     assert!(!buf.is_empty());
 }

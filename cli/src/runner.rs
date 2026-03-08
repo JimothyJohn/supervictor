@@ -42,6 +42,7 @@ impl Default for RunOptions {
 
 /// Options for starting a background process.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct BackgroundOptions {
     pub cwd: Option<PathBuf>,
     pub env: Option<HashMap<String, String>>,
@@ -50,17 +51,6 @@ pub struct BackgroundOptions {
     pub dry_run: bool,
 }
 
-impl Default for BackgroundOptions {
-    fn default() -> Self {
-        Self {
-            cwd: None,
-            env: None,
-            log_file: None,
-            verbose: false,
-            dry_run: false,
-        }
-    }
-}
 
 /// Trait abstracting subprocess execution for testability.
 pub trait Runner {

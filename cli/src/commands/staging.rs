@@ -55,7 +55,7 @@ pub fn run_staging(
     let test_env = env::make_env(&test_vars);
 
     let log_dir = &config.log_dir;
-    if let Err(_) = r.run(
+    if r.run(
         &[
             "uv", "run", "pytest", "tests/integration/", "-m", "local", "-v",
         ],
@@ -67,7 +67,7 @@ pub fn run_staging(
             log_to: Some(log_dir.join("staging_integration_tests.log")),
             ..Default::default()
         },
-    ) {
+    ).is_err() {
         runner::error(&format!(
             "Staging integration tests failed (see {})",
             log_dir.join("staging_integration_tests.log").display()
@@ -83,7 +83,7 @@ pub fn run_staging(
     device_vars.insert("DEPLOYED_URL".to_string(), sam_local_url);
     let device_env = env::make_env(&device_vars);
 
-    if let Err(_) = r.run(
+    if r.run(
         &[
             "cargo",
             "test",
@@ -100,7 +100,7 @@ pub fn run_staging(
             log_to: Some(log_dir.join("device_deployed_tests.log")),
             ..Default::default()
         },
-    ) {
+    ).is_err() {
         runner::error(&format!(
             "Rust device integration tests failed (see {})",
             log_dir.join("device_deployed_tests.log").display()
@@ -119,7 +119,7 @@ pub fn run_staging(
     mtls_vars.insert("TEST_CERT_DIR".to_string(), certs_dir_str);
     let mtls_env = env::make_env(&mtls_vars);
 
-    if let Err(_) = r.run(
+    if r.run(
         &[
             "uv", "run", "pytest", "tests/integration/", "-m", "remote", "-v",
         ],
@@ -131,7 +131,7 @@ pub fn run_staging(
             log_to: Some(log_dir.join("mtls_tests.log")),
             ..Default::default()
         },
-    ) {
+    ).is_err() {
         runner::error(&format!(
             "mTLS verification failed (see {})",
             log_dir.join("mtls_tests.log").display()

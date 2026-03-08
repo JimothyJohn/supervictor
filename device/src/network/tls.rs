@@ -88,6 +88,6 @@ pub fn load_certificates() -> Certificates<'static> {
         ca_chain: ca_chain,
         certificate: client_cert,
         private_key: private_key,
-        password: None, // AI-Generated comment: No password needed for these keys.
+        password: None,
     }
 }

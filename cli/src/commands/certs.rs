@@ -11,10 +11,20 @@ pub struct CertsArgs {
 
 pub enum CertsCommand {
     Ca,
-    Device { name: String, days: Option<u32> },
-    Server { name: String, host_ip: String, days: Option<u32> },
+    Device {
+        name: String,
+        days: Option<u32>,
+    },
+    Server {
+        name: String,
+        host_ip: String,
+        days: Option<u32>,
+    },
     List,
-    Verify { device_name: String, server_name: String },
+    Verify {
+        device_name: String,
+        server_name: String,
+    },
     Handshake {
         host: String,
         port: String,
@@ -42,7 +52,11 @@ pub fn run_certs(
             }
             run_gen(config, &gen_args, args.verbose, args.dry_run, r)
         }
-        CertsCommand::Server { name, host_ip, days } => {
+        CertsCommand::Server {
+            name,
+            host_ip,
+            days,
+        } => {
             let mut gen_args = vec!["server", name.as_str(), host_ip.as_str()];
             let days_str;
             if let Some(d) = days {
@@ -55,7 +69,14 @@ pub fn run_certs(
         CertsCommand::Verify {
             device_name,
             server_name,
-        } => cmd_verify(config, device_name, server_name, args.verbose, args.dry_run, r),
+        } => cmd_verify(
+            config,
+            device_name,
+            server_name,
+            args.verbose,
+            args.dry_run,
+            r,
+        ),
         CertsCommand::Handshake {
             host,
             port,
@@ -64,13 +85,15 @@ pub fn run_certs(
             test_no_client,
         } => cmd_handshake(
             config,
-            host,
-            port,
-            device_name,
-            tls_version.as_deref(),
-            *test_no_client,
-            args.verbose,
-            args.dry_run,
+            &HandshakeArgs {
+                host,
+                port,
+                device_name,
+                tls_version: tls_version.as_deref(),
+                test_no_client: *test_no_client,
+                verbose: args.verbose,
+                dry_run: args.dry_run,
+            },
             r,
         ),
     }
@@ -99,7 +122,11 @@ fn run_gen(
     ) {
         Ok(_) => Ok(0),
         Err(e) => {
-            runner::error(&format!("gen_certs.sh {} failed: {}", gen_args.join(" "), e));
+            runner::error(&format!(
+                "gen_certs.sh {} failed: {}",
+                gen_args.join(" "),
+                e
+            ));
             Ok(1)
         }
     }
@@ -188,9 +215,18 @@ fn cmd_verify(
     runner::step("Server cert SAN");
     if let Ok(result) = r.run(
         &[
-            "openssl", "x509", "-in", &server_str, "-noout", "-ext", "subjectAltName",
+            "openssl",
+            "x509",
+            "-in",
+            &server_str,
+            "-noout",
+            "-ext",
+            "subjectAltName",
         ],
-        &RunOptions { check: false, ..opts.clone() },
+        &RunOptions {
+            check: false,
+            ..opts.clone()
+        },
     ) {
         runner::success(&format!("  {}", result.stdout.trim()));
     }
@@ -198,10 +234,11 @@ fn cmd_verify(
     // 5. Client cert subject
     runner::step("Client cert subject");
     if let Ok(result) = r.run(
-        &[
-            "openssl", "x509", "-in", &client_str, "-noout", "-subject",
-        ],
-        &RunOptions { check: false, ..opts.clone() },
+        &["openssl", "x509", "-in", &client_str, "-noout", "-subject"],
+        &RunOptions {
+            check: false,
+            ..opts.clone()
+        },
     ) {
         runner::success(&format!("  {}", result.stdout.trim()));
     }
@@ -218,7 +255,10 @@ fn cmd_verify(
             "-ext",
             "extendedKeyUsage",
         ],
-        &RunOptions { check: false, ..opts.clone() },
+        &RunOptions {
+            check: false,
+            ..opts.clone()
+        },
     ) {
         Ok(result) if !dry_run => {
             if result.stdout.contains("clientAuth") {
@@ -240,10 +280,17 @@ fn cmd_verify(
 
     // 7. Expiry dates
     runner::step("Certificate expiry dates");
-    for (label, cert_path) in [("CA", &ca_str), ("Server", &server_str), ("Client", &client_str)] {
+    for (label, cert_path) in [
+        ("CA", &ca_str),
+        ("Server", &server_str),
+        ("Client", &client_str),
+    ] {
         match r.run(
             &["openssl", "x509", "-in", cert_path, "-noout", "-enddate"],
-            &RunOptions { check: false, ..opts.clone() },
+            &RunOptions {
+                check: false,
+                ..opts.clone()
+            },
         ) {
             Ok(result) if !dry_run => {
                 let expiry = result
@@ -270,17 +317,28 @@ fn cmd_verify(
     }
 }
 
-fn cmd_handshake(
-    config: &ProjectConfig,
-    host: &str,
-    port: &str,
-    device_name: &str,
-    tls_version: Option<&str>,
+struct HandshakeArgs<'a> {
+    host: &'a str,
+    port: &'a str,
+    device_name: &'a str,
+    tls_version: Option<&'a str>,
     test_no_client: bool,
     verbose: bool,
     dry_run: bool,
+}
+
+fn cmd_handshake(
+    config: &ProjectConfig,
+    ha: &HandshakeArgs<'_>,
     r: &dyn Runner,
 ) -> Result<i32, CliError> {
+    let host = ha.host;
+    let port = ha.port;
+    let device_name = ha.device_name;
+    let tls_version = ha.tls_version;
+    let test_no_client = ha.test_no_client;
+    let verbose = ha.verbose;
+    let dry_run = ha.dry_run;
     let certs = config.certs_dir();
     let ca_pem = certs.join("ca/ca.pem");
     let client_pem = certs.join(format!("devices/{}/client.pem", device_name));
@@ -347,12 +405,7 @@ fn cmd_handshake(
             target
         ));
         let mut no_client_cmd = vec![
-            "openssl",
-            "s_client",
-            "-connect",
-            &target,
-            "-CAfile",
-            &ca_str,
+            "openssl", "s_client", "-connect", &target, "-CAfile", &ca_str,
         ];
         if let Some(ref flag) = tls_flag {
             no_client_cmd.push(flag);
@@ -372,9 +425,7 @@ fn cmd_handshake(
             }
             Ok(_) => {}
             Err(_) => {
-                runner::success(
-                    "  Server rejected connection without client cert (mTLS enforced)",
-                );
+                runner::success("  Server rejected connection without client cert (mTLS enforced)");
             }
         }
     }

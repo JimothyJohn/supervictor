@@ -36,13 +36,12 @@ fn parse_env(contents: &str) -> HashMap<String, String> {
 }
 
 fn strip_quotes(s: &str) -> &str {
-    if s.len() >= 2 {
-        if (s.starts_with('"') && s.ends_with('"'))
-            || (s.starts_with('\'') && s.ends_with('\''))
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"'))
+            || (s.starts_with('\'') && s.ends_with('\'')))
         {
             return &s[1..s.len() - 1];
         }
-    }
     s
 }
 

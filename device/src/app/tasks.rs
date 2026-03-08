@@ -26,13 +26,31 @@ pub async fn connection(
             Timer::after(Duration::from_millis(5000)).await
         }
         if !matches!(controller.is_started(), Ok(true)) {
+            let Ok(ssid_hs) = ssid.try_into() else {
+                println!("SSID too long for heapless buffer, retrying...");
+                Timer::after(Duration::from_millis(5000)).await;
+                continue;
+            };
+            let Ok(password_hs) = password.try_into() else {
+                println!("Password too long for heapless buffer, retrying...");
+                Timer::after(Duration::from_millis(5000)).await;
+                continue;
+            };
             let client_config = Configuration::Client(ClientConfiguration {
-                ssid: ssid.try_into().unwrap(),
-                password: password.try_into().unwrap(),
+                ssid: ssid_hs,
+                password: password_hs,
                 ..Default::default()
             });
-            controller.set_configuration(&client_config).unwrap();
-            controller.start_async().await.unwrap();
+            if let Err(e) = controller.set_configuration(&client_config) {
+                println!("WiFi set_configuration failed: {e:?}");
+                Timer::after(Duration::from_millis(5000)).await;
+                continue;
+            }
+            if let Err(e) = controller.start_async().await {
+                println!("WiFi start_async failed: {e:?}");
+                Timer::after(Duration::from_millis(5000)).await;
+                continue;
+            }
         }
 
         match controller.connect_async().await {
@@ -75,9 +93,7 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
         current: 100,
     };
 
-    // AI-Generated comment: The main application loop. Each iteration will attempt to make a new connection and send a request.
     loop {
-        // AI-Generated comment: DNS resolution is performed in each loop iteration in case the IP changes.
         let address = match stack
             .dns_query(HOST, embassy_net::dns::DnsQueryType::A)
             .await
@@ -87,37 +103,31 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
                     *first_addr
                 } else {
                     println!("No addresses returned from DNS query for host: {}", HOST);
-                    // AI-Generated comment: Delay before retrying DNS to avoid spamming queries on persistent failure.
                     Timer::after(MAIN_LOOP_DELAY).await;
-                    continue; // AI-Generated comment: Skip to the next iteration of the loop.
+                    continue;
                 }
             }
             Err(e) => {
                 println!("DNS resolution failed for host {}: {:?}", HOST, e);
-                // AI-Generated comment: Delay before retrying DNS.
                 Timer::after(MAIN_LOOP_DELAY).await;
-                continue; // AI-Generated comment: Skip to the next iteration of the loop.
+                continue;
             }
         };
 
         let remote_endpoint = (address, AWS_IOT_PORT);
 
-        // AI-Generated comment: Buffers for the TCP socket are created in each iteration.
         // These need to be mutable and their lifetime is tied to the socket.
         let mut rx_buffer = [0u8; TCP_RX_BUFFER_SIZE];
         let mut tx_buffer = [0u8; TCP_TX_BUFFER_SIZE];
 
-        // AI-Generated comment: Load certificates. This could potentially be done outside the loop if certs don't change.
         // However, keeping it here simplifies state management per connection attempt.
         let certs = load_certificates();
 
-        // AI-Generated comment: Create the CStr for the servername *before* Session::new.
         // This ensures the CStr reference lives long enough for the Session::new call.
         let host_bytes_with_null = concat!(env!("HOST"), "\0").as_bytes();
         let host_cstr = match CStr::from_bytes_with_nul(&host_bytes_with_null) {
             Ok(cstr) => cstr,
             Err(e) => {
-                // AI-Generated comment: Log and panic if HOST env var is invalid (contains null bytes). This is a fatal configuration error.
                 println!("   ❌ FATAL: Invalid HOST environment variable ('{}'): Must not contain null bytes. Error: {:?}",
                         env!("HOST"), e);
                 panic!("FATAL: Invalid HOST environment variable ('{}'): Must not contain null bytes. Error: {:?}",
@@ -126,32 +136,28 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
         };
 
         loop {
-            // AI-Generated comment: A new TCP socket is created for each connection attempt.
             let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
             socket.set_timeout(Some(SOCKET_TIMEOUT));
 
-            // AI-Generated comment: Attempt to connect the TCP socket.
             if let Err(e) = socket.connect(remote_endpoint).await {
                 println!("   ❌ TCP connect error: {:?}", e);
-                // AI-Generated comment: Close the socket explicitly on error, though it might be implicitly closed on drop.
-                // socket.close(); // AI-Generated comment: esp-hal's TcpSocket doesn't have an explicit close, relies on drop.
-                Timer::after(MAIN_LOOP_DELAY).await; // AI-Generated comment: Wait before retrying.
-                continue; // AI-Generated comment: Skip to the next iteration of the loop.
+                // socket.close();
+                Timer::after(MAIN_LOOP_DELAY).await;
+                continue;
             }
 
-            // AI-Generated comment: Initialize the TLS session for each new connection.
             // The 'socket' is moved into the Session here.
             let mut session = match Session::new(
                 &mut socket,
                 Mode::Client {
-                    servername: host_cstr, // AI-Generated comment: Pass the host_cstr variable here.
+                    servername: host_cstr,
                 },
                 match option_env!("TLS_VERSION") {
                     Some("1.3") => TlsVersion::Tls1_3,
                     _ => TlsVersion::Tls1_2,
                 },
-                certs,           // AI-Generated comment: Pass the loaded certificates.
-                tls.reference(), // AI-Generated comment: Pass a reference to the Tls context.
+                certs,
+                tls.reference(),
             ) {
                 Ok(s) => s,
                 Err(e) => {
@@ -161,7 +167,6 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
                 }
             };
 
-            // AI-Generated comment: Connect with timeout handling.
             match embassy_time::with_timeout(
                 TLS_HANDSHAKE_TIMEOUT, // 15 second timeout
                 session.connect(),
@@ -181,8 +186,14 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
                 }
             };
 
-            // Try sending a simple HTTP request to verify the connection
-            let request = post_request(env!("HOST"), &uplink, None);
+            let request = match post_request(env!("HOST"), &uplink, None) {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("   ❌ Failed to build HTTP request: {}", e);
+                    Timer::after(MAIN_LOOP_DELAY).await;
+                    continue;
+                }
+            };
             match session.write(request.as_bytes()).await {
                 Ok(written) => {
                     if written != request.len() {

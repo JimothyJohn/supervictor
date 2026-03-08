@@ -16,68 +16,68 @@ fn make_msg(id: &str, current: i32) -> UplinkMessage {
 
 #[test]
 fn get_default_path_is_root() {
-    let req = get_request("host.example.com", None);
+    let req = get_request("host.example.com", None).unwrap();
     assert!(req.starts_with("GET / HTTP/1.0\r\n"));
 }
 
 #[test]
 fn get_explicit_root_path() {
-    let req = get_request("host.example.com", Some("/"));
+    let req = get_request("host.example.com", Some("/")).unwrap();
     assert!(req.starts_with("GET / HTTP/1.0\r\n"));
 }
 
 #[test]
 fn get_custom_path() {
-    let req = get_request("h", Some("/hello"));
+    let req = get_request("h", Some("/hello")).unwrap();
     assert!(req.starts_with("GET /hello HTTP/1.0\r\n"));
 }
 
 #[test]
 fn get_deep_nested_path() {
-    let req = get_request("h", Some("/a/b/c/d"));
+    let req = get_request("h", Some("/a/b/c/d")).unwrap();
     assert!(req.starts_with("GET /a/b/c/d HTTP/1.0\r\n"));
 }
 
 #[test]
 fn get_path_with_query_string() {
-    let req = get_request("h", Some("/search?q=test&page=1"));
+    let req = get_request("h", Some("/search?q=test&page=1")).unwrap();
     assert!(req.contains("GET /search?q=test&page=1 HTTP/1.0"));
 }
 
 #[test]
 fn get_host_header_present() {
-    let req = get_request("supervictor.advin.io", Some("/"));
+    let req = get_request("supervictor.advin.io", Some("/")).unwrap();
     assert!(req.contains("Host: supervictor.advin.io\r\n"));
 }
 
 #[test]
 fn get_user_agent_present() {
-    let req = get_request("h", None);
+    let req = get_request("h", None).unwrap();
     assert!(req.contains("User-Agent: Uplink/0.1.0 (Platform; ESP32-C3)\r\n"));
 }
 
 #[test]
 fn get_accept_header_present() {
-    let req = get_request("h", None);
+    let req = get_request("h", None).unwrap();
     assert!(req.contains("Accept: */*\r\n"));
 }
 
 #[test]
 fn get_terminates_with_double_crlf() {
-    let req = get_request("h", None);
+    let req = get_request("h", None).unwrap();
     assert!(req.ends_with("\r\n\r\n"));
 }
 
 #[test]
 fn get_uses_http_1_0() {
-    let req = get_request("h", Some("/"));
+    let req = get_request("h", Some("/")).unwrap();
     assert!(req.contains("HTTP/1.0"));
     assert!(!req.contains("HTTP/1.1"));
 }
 
 #[test]
 fn get_empty_host() {
-    let req = get_request("", Some("/"));
+    let req = get_request("", Some("/")).unwrap();
     assert!(req.contains("Host: \r\n"));
 }
 
@@ -87,50 +87,50 @@ fn get_empty_host() {
 
 #[test]
 fn post_default_path_is_root() {
-    let req = post_request("h", &make_msg("x", 0), None);
+    let req = post_request("h", &make_msg("x", 0), None).unwrap();
     assert!(req.starts_with("POST / HTTP/1.1\r\n"));
 }
 
 #[test]
 fn post_custom_path() {
-    let req = post_request("h", &make_msg("x", 0), Some("/hello"));
+    let req = post_request("h", &make_msg("x", 0), Some("/hello")).unwrap();
     assert!(req.starts_with("POST /hello HTTP/1.1\r\n"));
 }
 
 #[test]
 fn post_uses_http_1_1() {
-    let req = post_request("h", &make_msg("x", 0), Some("/"));
+    let req = post_request("h", &make_msg("x", 0), Some("/")).unwrap();
     assert!(req.contains("HTTP/1.1"));
     assert!(!req.contains("HTTP/1.0"));
 }
 
 #[test]
 fn post_host_header() {
-    let req = post_request("supervictor.advin.io", &make_msg("x", 0), Some("/"));
+    let req = post_request("supervictor.advin.io", &make_msg("x", 0), Some("/")).unwrap();
     assert!(req.contains("Host: supervictor.advin.io\r\n"));
 }
 
 #[test]
 fn post_content_type_json() {
-    let req = post_request("h", &make_msg("x", 0), Some("/"));
+    let req = post_request("h", &make_msg("x", 0), Some("/")).unwrap();
     assert!(req.contains("Content-Type: application/json\r\n"));
 }
 
 #[test]
 fn post_connection_close() {
-    let req = post_request("h", &make_msg("x", 0), Some("/"));
+    let req = post_request("h", &make_msg("x", 0), Some("/")).unwrap();
     assert!(req.contains("Connection: close\r\n"));
 }
 
 #[test]
 fn post_contains_json_body() {
-    let req = post_request("h", &make_msg("test-id", 99), Some("/"));
+    let req = post_request("h", &make_msg("test-id", 99), Some("/")).unwrap();
     assert!(req.contains(r#"{"id":"test-id","current":99}"#));
 }
 
 #[test]
 fn post_body_after_double_crlf() {
-    let req = post_request("h", &make_msg("x", 1), Some("/"));
+    let req = post_request("h", &make_msg("x", 1), Some("/")).unwrap();
     let parts: HString<512> = req;
     let s = parts.as_str();
     let sep = s.find("\r\n\r\n").expect("missing header/body separator");
@@ -141,7 +141,7 @@ fn post_body_after_double_crlf() {
 
 #[test]
 fn post_content_length_matches_body() {
-    let req = post_request("h", &make_msg("test-id", 12345), Some("/"));
+    let req = post_request("h", &make_msg("test-id", 12345), Some("/")).unwrap();
     let s = req.as_str();
 
     // Extract Content-Length value
@@ -159,25 +159,25 @@ fn post_content_length_matches_body() {
 
 #[test]
 fn post_zero_current() {
-    let req = post_request("h", &make_msg("x", 0), Some("/"));
+    let req = post_request("h", &make_msg("x", 0), Some("/")).unwrap();
     assert!(req.contains(r#""current":0"#));
 }
 
 #[test]
 fn post_negative_current() {
-    let req = post_request("h", &make_msg("x", -42), Some("/"));
+    let req = post_request("h", &make_msg("x", -42), Some("/")).unwrap();
     assert!(req.contains(r#""current":-42"#));
 }
 
 #[test]
 fn post_i32_max_current() {
-    let req = post_request("h", &make_msg("x", i32::MAX), Some("/"));
+    let req = post_request("h", &make_msg("x", i32::MAX), Some("/")).unwrap();
     assert!(req.contains("2147483647"));
 }
 
 #[test]
 fn post_i32_min_current() {
-    let req = post_request("h", &make_msg("x", i32::MIN), Some("/"));
+    let req = post_request("h", &make_msg("x", i32::MIN), Some("/")).unwrap();
     assert!(req.contains("-2147483648"));
 }
 
@@ -187,7 +187,7 @@ fn post_empty_id() {
         id: HString::new(),
         current: 1,
     };
-    let req = post_request("h", &msg, Some("/"));
+    let req = post_request("h", &msg, Some("/")).unwrap();
     assert!(req.contains(r#""id":"""#));
 }
 
@@ -198,7 +198,7 @@ fn post_max_capacity_id() {
         id: long_id,
         current: 1,
     };
-    let req = post_request("h", &msg, Some("/"));
+    let req = post_request("h", &msg, Some("/")).unwrap();
     // 64 A's should be in the body
     let body_start = req.as_str().find("\r\n\r\n").unwrap() + 4;
     let body = &req.as_str()[body_start..];
@@ -645,7 +645,7 @@ fn error_debug_generic_parse() {
 #[test]
 fn roundtrip_post_then_parse() {
     let msg = make_msg("device-001", 42);
-    let _req = post_request("supervictor.advin.io", &msg, None);
+    let _req = post_request("supervictor.advin.io", &msg, None).unwrap();
 
     // Simulate what API Gateway would return
     let response = concat!(
@@ -670,7 +670,7 @@ fn roundtrip_post_then_parse() {
 
 #[test]
 fn roundtrip_get_then_parse() {
-    let _req = get_request("supervictor.advin.io", None);
+    let _req = get_request("supervictor.advin.io", None).unwrap();
 
     let response = concat!(
         "HTTP/1.1 200 OK\r\n",
@@ -687,7 +687,7 @@ fn roundtrip_get_then_parse() {
 #[test]
 fn roundtrip_post_body_deserializable() {
     let msg = make_msg("round", -1);
-    let req = post_request("h", &msg, Some("/"));
+    let req = post_request("h", &msg, Some("/")).unwrap();
 
     // Extract the JSON body from the request
     let body_start = req.as_str().find("\r\n\r\n").unwrap() + 4;

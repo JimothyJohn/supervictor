@@ -33,7 +33,7 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
     // Rust library tests
     runner::step("Running Rust library tests");
     let host_target = rust_tools::host_target(r)?;
-    if let Err(_) = r.run(
+    if r.run(
         &["cargo", "test", "--lib", "--target", &host_target],
         &RunOptions {
             cwd: Some(cfg.device_dir.clone()),
@@ -43,7 +43,7 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
             log_to: Some(log_dir.join("rust_tests.log")),
             ..Default::default()
         },
-    ) {
+    ).is_err() {
         runner::error(&format!(
             "Rust library tests failed (see {})",
             log_dir.join("rust_tests.log").display()
@@ -54,7 +54,7 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
 
     // Python unit tests
     runner::step("Running Python unit tests");
-    if let Err(_) = r.run(
+    if r.run(
         &["uv", "run", "pytest", "tests/unit/", "-v"],
         &RunOptions {
             cwd: Some(cfg.cloud_dir.clone()),
@@ -64,7 +64,7 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
             log_to: Some(log_dir.join("python_unit_tests.log")),
             ..Default::default()
         },
-    ) {
+    ).is_err() {
         runner::error(&format!(
             "Python unit tests failed (see {})",
             log_dir.join("python_unit_tests.log").display()
@@ -97,7 +97,7 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
         test_vars.insert("SAM_LOCAL_URL".to_string(), sam.url());
         let test_env = env::make_env(&test_vars);
 
-        if let Err(_) = r.run(
+        if r.run(
             &[
                 "uv",
                 "run",
@@ -115,7 +115,7 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
                 log_to: Some(log_dir.join("integration_tests.log")),
                 ..Default::default()
             },
-        ) {
+        ).is_err() {
             runner::error(&format!(
                 "Integration tests failed (see {})",
                 log_dir.join("integration_tests.log").display()

@@ -25,7 +25,7 @@ fn post_serialization_failure_produces_empty_body() {
     let payload = OversizedPayload {
         data: core::iter::repeat_n('X', 300).collect(),
     };
-    let req = post_request("h", &payload, Some("/"));
+    let req = post_request("h", &payload, Some("/")).unwrap();
     // When serialization fails, post_request falls back to Content-Length: 0
     assert!(req.contains("Content-Length: 0"));
     // Body should be empty (nothing after \r\n\r\n)
@@ -40,7 +40,7 @@ fn post_serialization_failure_produces_empty_body() {
 #[test]
 fn post_content_length_single_digit() {
     // {"id":"a","current":0} = 21 chars = two digits
-    let req = post_request("h", &make_msg("a", 0), Some("/"));
+    let req = post_request("h", &make_msg("a", 0), Some("/")).unwrap();
     let s = req.as_str();
     let cl_prefix = "Content-Length: ";
     let cl_start = s.find(cl_prefix).unwrap() + cl_prefix.len();
@@ -60,7 +60,7 @@ fn post_content_length_three_digits() {
         id: long_id,
         current: i32::MAX,
     };
-    let req = post_request("h", &msg, Some("/"));
+    let req = post_request("h", &msg, Some("/")).unwrap();
     let s = req.as_str();
     let cl_prefix = "Content-Length: ";
     let cl_start = s.find(cl_prefix).unwrap() + cl_prefix.len();
@@ -74,22 +74,19 @@ fn post_content_length_three_digits() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// GAP 3: Buffer overflow — #[should_panic]
+// GAP 3: Buffer overflow returns Err instead of panicking
 // ════════════════════════════════════════════════════════════════
 
 #[test]
-#[should_panic]
 fn get_request_overflows_with_very_long_host() {
-    // HString<128> cannot hold a request with 400-char host
     let long_host: HString<400> = core::iter::repeat_n('h', 400).collect();
-    let _ = crate::network::http::get_request(long_host.as_str(), Some("/"));
+    assert!(crate::network::http::get_request(long_host.as_str(), Some("/")).is_err());
 }
 
 #[test]
-#[should_panic]
 fn get_request_overflows_with_very_long_path() {
     let long_path: HString<400> = core::iter::repeat_n('/', 400).collect();
-    let _ = crate::network::http::get_request("h", Some(long_path.as_str()));
+    assert!(crate::network::http::get_request("h", Some(long_path.as_str())).is_err());
 }
 
 // ════════════════════════════════════════════════════════════════

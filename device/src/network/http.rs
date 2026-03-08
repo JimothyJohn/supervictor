@@ -3,100 +3,82 @@ use crate::models::uplink::LambdaResponse;
 use heapless::String as HString;
 use serde::Serialize;
 
-pub fn get_request(host: &str, path: Option<&str>) -> HString<128> {
+/// Push a str into a heapless String, mapping capacity errors to HttpError.
+fn push<const N: usize>(buf: &mut HString<N>, s: &str) -> Result<(), HttpError> {
+    buf.push_str(s).map_err(|_| HttpError::BufferOverflow)
+}
+
+pub fn get_request(host: &str, path: Option<&str>) -> Result<HString<128>, HttpError> {
     let mut request = HString::<128>::new();
-    // Use the provided path or default to "/"
     let path = path.unwrap_or("/");
 
-    // Use the path in the request line instead of hardcoded "/"
     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/GET
-    request.push_str("GET ").unwrap();
-    request.push_str(path).unwrap();
-    request.push_str(" HTTP/1.0").unwrap();
-    request.push_str("\r\n").unwrap();
-    request.push_str("Host: ").unwrap();
-    request.push_str(host).unwrap();
-    request.push_str("\r\n").unwrap();
-    request.push_str("User-Agent: ").unwrap();
-    request
-        .push_str("Uplink/0.1.0 (Platform; ESP32-C3)")
-        .unwrap();
-    request.push_str("\r\n").unwrap();
-    request.push_str("Accept: */*").unwrap();
-    request.push_str("\r\n\r\n").unwrap();
-    request
+    push(&mut request, "GET ")?;
+    push(&mut request, path)?;
+    push(&mut request, " HTTP/1.0\r\n")?;
+    push(&mut request, "Host: ")?;
+    push(&mut request, host)?;
+    push(&mut request, "\r\n")?;
+    push(
+        &mut request,
+        "User-Agent: Uplink/0.1.0 (Platform; ESP32-C3)\r\n",
+    )?;
+    push(&mut request, "Accept: */*\r\n\r\n")?;
+    Ok(request)
 }
 
 /// Create an HTTP POST request with JSON body
-pub fn post_request<T>(host: &str, data: &T, path: Option<&str>) -> HString<512>
+pub fn post_request<T>(host: &str, data: &T, path: Option<&str>) -> Result<HString<512>, HttpError>
 where
     T: Serialize,
 {
     let mut request = HString::<512>::new();
-
-    // Format the request path
     let endpoint = path.unwrap_or("/");
 
-    // Start building the request
     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/POST
-    request.push_str("POST ").unwrap();
-    request.push_str(endpoint).unwrap();
-    request.push_str(" HTTP/1.1\r\n").unwrap();
-    request.push_str("Host: ").unwrap();
-    request.push_str(host).unwrap();
-    request.push_str("\r\n").unwrap();
-    request
-        .push_str("Content-Type: application/json\r\n")
-        .unwrap();
+    push(&mut request, "POST ")?;
+    push(&mut request, endpoint)?;
+    push(&mut request, " HTTP/1.1\r\n")?;
+    push(&mut request, "Host: ")?;
+    push(&mut request, host)?;
+    push(&mut request, "\r\nContent-Type: application/json\r\n")?;
 
-    // Serialize the data to JSON
     let json_result = serde_json_core::to_string::<T, 256>(data);
 
     match json_result {
         Ok(json) => {
-            // Add Content-Length header
-            request.push_str("Content-Length: ").unwrap();
-
-            // Convert length to string - simplified approach
-            let len = json.len();
-            // For most HTTP requests, content length will be small
-            // This handles up to 5 digits (lengths up to 99999)
-            let mut buffer = [0u8; 5];
-            let mut i = 0;
-
-            // Handle zero case
-            if len == 0 {
-                request.push_str("0").unwrap();
-            } else {
-                // Convert number to digits
-                let mut n = len;
-                while n > 0 {
-                    buffer[i] = (n % 10) as u8 + b'0';
-                    n /= 10;
-                    i += 1;
-                }
-
-                // Add digits in reverse order
-                while i > 0 {
-                    i -= 1;
-                    request.push(buffer[i] as char).unwrap();
-                }
-            }
-
-            request.push_str("\r\n").unwrap();
-            request.push_str("Connection: close").unwrap();
-            request.push_str("\r\n\r\n").unwrap();
-
-            // Add the JSON body
-            request.push_str(&json).unwrap();
+            push(&mut request, "Content-Length: ")?;
+            push_usize(&mut request, json.len())?;
+            push(&mut request, "\r\nConnection: close\r\n\r\n")?;
+            push(&mut request, &json)?;
         }
         Err(_) => {
-            // Handle serialization error
-            request.push_str("Content-Length: 0\r\n\r\n").unwrap();
+            push(&mut request, "Content-Length: 0\r\n\r\n")?;
         }
     }
 
-    request
+    Ok(request)
+}
+
+/// Write a usize as decimal digits into a heapless String.
+fn push_usize<const N: usize>(buf: &mut HString<N>, value: usize) -> Result<(), HttpError> {
+    if value == 0 {
+        return push(buf, "0");
+    }
+    let mut digits = [0u8; 10];
+    let mut i = 0;
+    let mut n = value;
+    while n > 0 {
+        digits[i] = (n % 10) as u8 + b'0';
+        n /= 10;
+        i += 1;
+    }
+    while i > 0 {
+        i -= 1;
+        buf.push(digits[i] as char)
+            .map_err(|_| HttpError::BufferOverflow)?;
+    }
+    Ok(())
 }
 
 /// Parses the headers and body of an HTTP response
@@ -203,26 +185,13 @@ pub fn parse_response(response: &str) -> Result<LambdaResponse, HttpError> {
     Ok(lambda_response)
 }
 
-// AI-Generated comment: Test module, only compiled when running `cargo test`.
 #[cfg(test)]
 mod tests {
-    // AI-Generated comment: Import items from the parent module (http.rs) into the test scope.
     use super::*;
-    // AI-Generated comment: Also import necessary items from other modules if needed for tests.
-    // AI-Generated comment: For example, you might need the model for post_request.
     use crate::models::uplink::UplinkMessage;
 
-    // AI-Generated comment: Basic test function ensuring things compile and run.
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-
-    // AI-Generated comment: Example test for post_request formatting.
-    // AI-Generated comment: Tests the structure of the generated HTTP request string.
     #[test]
     fn test_post_request_formatting() {
-        // AI-Generated comment: Setup test data.
         let host = "test.host.com";
         let path = Some("/test/path");
         let message = UplinkMessage {
@@ -230,18 +199,11 @@ mod tests {
             current: 99,
         };
 
-        // AI-Generated comment: Call the function under test.
-        let request_string = post_request(host, &message, path); // Use .as_str()
+        let request_string = post_request(host, &message, path).unwrap();
 
-        // AI-Generated comment: Perform assertions on the result.
-        // AI-Generated comment: Check if the request starts with POST and includes key elements.
         assert!(request_string.starts_with("POST /test/path HTTP/1.1\r\n"));
         assert!(request_string.contains("Host: test.host.com\r\n"));
         assert!(request_string.contains("Content-Type: application/json\r\n"));
         assert!(request_string.contains("\r\n\r\n{\"id\":\"test-id\",\"current\":99}"));
-        // Check for body
-        // AI-Generated comment: Add more specific checks for headers, content-length etc.
     }
-
-    // AI-Generated comment: Add more tests for get_request, edge cases, different inputs etc.
 }
