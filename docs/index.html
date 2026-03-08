@@ -77,9 +77,9 @@
     letter-spacing: 0.05em;
   }
   .badge.rust   { background: #7c2d12; color: #fdba74; }
-  .badge.python { background: #1e3a5f; color: #93c5fd; }
   .badge.aws    { background: #14532d; color: #86efac; }
   .badge.mtls   { background: #3b0764; color: #d8b4fe; }
+  .badge.esp    { background: #1e3a5f; color: #93c5fd; }
 
   /* Sections */
   section {
@@ -347,10 +347,10 @@
 
 <header>
   <h1>super<span>victor</span></h1>
-  <p>An IoT template: ESP32 edge device, serverless cloud API, and mutual TLS authentication&mdash;wired together with a single CLI.</p>
+  <p>An all-Rust IoT template: ESP32 edge device, axum cloud API, and mutual TLS authentication&mdash;wired together with a single CLI.</p>
   <div class="badges">
-    <span class="badge rust">Rust / ESP32</span>
-    <span class="badge python">Python 3.12</span>
+    <span class="badge rust">Rust</span>
+    <span class="badge esp">ESP32-C3</span>
     <span class="badge aws">AWS SAM</span>
     <span class="badge mtls">mTLS</span>
   </div>
@@ -362,8 +362,8 @@
   <div class="arch">
     <div class="arch-node">
       <div class="label">Edge</div>
-      <div class="name">ESP32-S3</div>
-      <div class="detail">Rust / no_std</div>
+      <div class="name">ESP32-C3</div>
+      <div class="detail">Rust / no_std / Embassy</div>
     </div>
     <div class="arch-arrow">&rarr;</div>
     <div class="arch-node">
@@ -374,8 +374,8 @@
     <div class="arch-arrow">&rarr;</div>
     <div class="arch-node">
       <div class="label">Cloud</div>
-      <div class="name">API Gateway + Lambda</div>
-      <div class="detail">Python 3.12 / arm64</div>
+      <div class="name">Axum API</div>
+      <div class="detail">Rust / tokio / SQLite or DynamoDB</div>
     </div>
   </div>
 </section>
@@ -385,18 +385,23 @@
   <h2>Repository Layout</h2>
   <div class="tree">
 <span class="dir">supervictor/</span>
-<span class="dir">  src/</span>                        <span class="comment"># Rust firmware (ESP32)</span>
-<span class="dir">  supervictor-cloud/</span>            <span class="comment"># Python cloud API</span>
-<span class="file">    uplink/app.py</span>          <span class="comment"># Lambda handler</span>
-<span class="file">    template.yaml</span>               <span class="comment"># SAM/CloudFormation</span>
-<span class="file">    samconfig.toml</span>               <span class="comment"># SAM deploy configs</span>
-<span class="dir">    tests/</span>                      <span class="comment"># unit + integration</span>
-<span class="dir">    scripts/</span>                    <span class="comment"># shell helpers</span>
-<span class="dir">    certs/</span>                      <span class="comment"># generated certs (gitignored)</span>
-<span class="dir">  quickstart/</span>                    <span class="comment"># CLI package</span>
-<span class="file">  qs</span>                             <span class="comment"># CLI entry point</span>
-<span class="file">  .env.dev</span>                       <span class="comment"># local dev config</span>
-<span class="file">  .env.staging</span>                   <span class="comment"># staging config</span>
+<span class="dir">  device/</span>                       <span class="comment"># ESP32-C3 firmware (no_std, Embassy)</span>
+<span class="file">    src/bin/embedded_main.rs</span>   <span class="comment"># firmware entry point</span>
+<span class="file">    src/bin/desktop_main.rs</span>    <span class="comment"># desktop mTLS test client</span>
+<span class="dir">    src/app/</span>                   <span class="comment"># application logic</span>
+<span class="dir">    src/network/</span>               <span class="comment"># HTTP, TLS, DNS, TCP</span>
+<span class="dir">    src/models/</span>                <span class="comment"># uplink message types</span>
+<span class="dir">  endpoint/</span>                     <span class="comment"># cloud API (axum + tokio)</span>
+<span class="file">    src/handlers.rs</span>            <span class="comment"># request handlers</span>
+<span class="file">    src/routes.rs</span>              <span class="comment"># axum router</span>
+<span class="dir">    src/store/</span>                 <span class="comment"># SQLite + DynamoDB backends</span>
+<span class="file">    template.yaml</span>              <span class="comment"># SAM/CloudFormation</span>
+<span class="file">    docker-compose.yml</span>         <span class="comment"># local dev with Caddy mTLS</span>
+<span class="dir">  cli/</span>                          <span class="comment"># qs CLI (clap)</span>
+<span class="file">    src/main.rs</span>                <span class="comment"># entry point</span>
+<span class="dir">    src/commands/</span>              <span class="comment"># dev, edge, staging, prod, certs, ...</span>
+<span class="dir">  certs/</span>                        <span class="comment"># generated certs (gitignored)</span>
+<span class="dir">  docs/</span>                         <span class="comment"># this page</span>
   </div>
 </section>
 
@@ -406,13 +411,38 @@
   <div class="endpoints">
     <div class="endpoint">
       <span class="method get">GET</span>
-      <span class="path">/hello</span>
-      <span class="desc">Health check &mdash; returns greeting + mTLS subject (if present)</span>
+      <span class="path">/health</span>
+      <span class="desc">Health check &mdash; returns <code>{ "status": "ok" }</code></span>
+    </div>
+    <div class="endpoint">
+      <span class="method get">GET</span>
+      <span class="path">/</span>
+      <span class="desc">Greeting + mTLS subject (if present)</span>
     </div>
     <div class="endpoint">
       <span class="method post">POST</span>
-      <span class="path">/hello</span>
+      <span class="path">/</span>
       <span class="desc">Device uplink &mdash; accepts <code>{ id, current }</code> payload</span>
+    </div>
+    <div class="endpoint">
+      <span class="method get">GET</span>
+      <span class="path">/devices</span>
+      <span class="desc">List all registered devices</span>
+    </div>
+    <div class="endpoint">
+      <span class="method post">POST</span>
+      <span class="path">/devices</span>
+      <span class="desc">Register a new device</span>
+    </div>
+    <div class="endpoint">
+      <span class="method get">GET</span>
+      <span class="path">/devices/{device_id}</span>
+      <span class="desc">Get device details</span>
+    </div>
+    <div class="endpoint">
+      <span class="method get">GET</span>
+      <span class="path">/devices/{device_id}/uplinks</span>
+      <span class="desc">Recent uplink history for a device</span>
     </div>
   </div>
 </section>
@@ -421,7 +451,7 @@
 <section>
   <h2>CLI Pipeline</h2>
   <p style="color:var(--muted); margin-bottom:20px; font-size:0.9rem;">
-    The <code>qs</code> CLI orchestrates build, test, and deploy through three progressive stages.
+    The <code>qs</code> CLI orchestrates build, test, deploy, and device management through progressive stages.
   </p>
   <div style="overflow-x:auto">
     <table class="pipeline">
@@ -430,20 +460,52 @@
       </thead>
       <tbody>
         <tr>
-          <td>./qs dev</td>
-          <td>Unit tests, SAM build, start <code>sam local</code>, run local integration tests</td>
+          <td>qs dev</td>
+          <td>Unit tests, build endpoint, start local server, run integration tests</td>
         </tr>
         <tr>
-          <td>./qs dev --serve</td>
-          <td>Same as above but keeps sam local running for manual testing</td>
+          <td>qs dev --serve</td>
+          <td>Same as above but keeps the server running for manual testing</td>
         </tr>
         <tr>
-          <td>./qs staging</td>
+          <td>qs edge</td>
+          <td>Build + flash ESP32-C3 firmware via espflash</td>
+        </tr>
+        <tr>
+          <td>qs staging</td>
           <td>Dev gate &rarr; deploy to dev stack &rarr; integration tests against live endpoint</td>
         </tr>
         <tr>
-          <td>./qs prod</td>
+          <td>qs prod</td>
           <td>Dev gate &rarr; staging gate &rarr; confirm &rarr; deploy prod &rarr; mTLS verification</td>
+        </tr>
+        <tr>
+          <td>qs certs ca</td>
+          <td>Initialize the root CA for mTLS</td>
+        </tr>
+        <tr>
+          <td>qs certs device &lt;name&gt;</td>
+          <td>Issue a device client certificate</td>
+        </tr>
+        <tr>
+          <td>qs certs server &lt;name&gt;</td>
+          <td>Issue a server/TLS certificate</td>
+        </tr>
+        <tr>
+          <td>qs certs verify</td>
+          <td>Verify the mTLS certificate chain</td>
+        </tr>
+        <tr>
+          <td>qs certs handshake</td>
+          <td>Simulate mTLS handshake against a running server</td>
+        </tr>
+        <tr>
+          <td>qs ping</td>
+          <td>mTLS GET to verify the server is reachable</td>
+        </tr>
+        <tr>
+          <td>qs onboard</td>
+          <td>End-to-end device onboarding (certs + flash + verify)</td>
         </tr>
       </tbody>
     </table>
@@ -459,18 +521,18 @@
   <div class="tiers">
     <div class="tier">
       <h3><span class="dot" style="background:var(--green)"></span> Unit</h3>
-      <p>36 tests, no infra required. Validates handler logic, Pydantic models, response schemas.</p>
-      <p><code>uv run pytest tests/unit/</code></p>
+      <p>In-memory SQLite, no infra required. Validates handlers, models, and store logic.</p>
+      <p><code>cargo test --features sqlite</code></p>
     </div>
     <div class="tier">
       <h3><span class="dot" style="background:var(--blue)"></span> Local Integration</h3>
-      <p>HTTP against <code>sam local start-api</code>. Requires Docker. Marker: <code>local</code></p>
-      <p><code>./scripts/run_integration_tests.sh</code></p>
+      <p>HTTP against the running endpoint. Requires Docker + Caddy for mTLS.</p>
+      <p><code>docker compose up</code></p>
     </div>
     <div class="tier">
       <h3><span class="dot" style="background:var(--purple)"></span> Remote / mTLS</h3>
-      <p>HTTPS + client certs against deployed prod endpoint. Marker: <code>remote</code></p>
-      <p><code>API_ENDPOINT=https://... pytest -m remote</code></p>
+      <p>HTTPS + client certs against the deployed production endpoint.</p>
+      <p><code>qs ping --certs certs/device/</code></p>
     </div>
   </div>
 </section>
@@ -481,11 +543,11 @@
   <div class="env-grid">
     <div class="env-card">
       <h3>Dev</h3>
-      <p><code>.env.dev</code> &mdash; local SAM, WiFi credentials, serial port for flashing firmware</p>
+      <p>Local endpoint via <code>docker compose</code> with Caddy mTLS reverse proxy</p>
     </div>
     <div class="env-card">
       <h3>Staging</h3>
-      <p><code>.env.staging</code> &mdash; deployed dev stack on <code>execute-api</code>, no mTLS</p>
+      <p>Deployed dev stack on <code>execute-api</code>, no mTLS enforcement</p>
     </div>
     <div class="env-card">
       <h3>Production</h3>
@@ -498,13 +560,13 @@
 <section>
   <h2>Certificate Management</h2>
   <p style="color:var(--muted); margin-bottom:16px; font-size:0.9rem;">
-    API Gateway validates client certificates against a CA truststore in S3.
+    The <code>qs certs</code> subcommand manages the full mTLS certificate lifecycle.
   </p>
-  <pre>./scripts/gen_certs.sh ca                <span style="color:#52525b"># Create CA</span>
-./scripts/gen_certs.sh device mydevice   <span style="color:#52525b"># Issue device cert</span>
-./scripts/gen_certs.sh person alice      <span style="color:#52525b"># Issue person cert</span>
-
-aws s3 cp certs/ca/ca.pem s3://supervictor/truststore.pem</pre>
+  <pre>qs certs ca                          <span style="color:#52525b"># Create root CA</span>
+qs certs device esp32                <span style="color:#52525b"># Issue device cert</span>
+qs certs server caddy                <span style="color:#52525b"># Issue server cert</span>
+qs certs verify                      <span style="color:#52525b"># Verify cert chain</span>
+qs certs handshake                   <span style="color:#52525b"># Simulate mTLS handshake</span></pre>
 </section>
 
 <!-- Quick Start -->
@@ -513,29 +575,35 @@ aws s3 cp certs/ca/ca.pem s3://supervictor/truststore.pem</pre>
   <div class="steps">
     <div class="step">
       <div class="step-content">
-        <p>Clone and install dependencies</p>
+        <p>Clone the repository</p>
         <pre>git clone git@github.com:JimothyJohn/supervictor.git
-cd supervictor/supervictor-cloud
-uv sync</pre>
+cd supervictor</pre>
       </div>
     </div>
     <div class="step">
       <div class="step-content">
-        <p>Configure your environment</p>
-        <pre>cp .env.example ../.env.dev
-# Edit .env.dev with your WiFi credentials and serial port</pre>
+        <p>Build the CLI</p>
+        <pre>cd cli && cargo build --release
+alias qs=./target/release/qs</pre>
       </div>
     </div>
     <div class="step">
       <div class="step-content">
-        <p>Run the dev pipeline</p>
-        <pre>./qs dev</pre>
+        <p>Generate certificates and start the local endpoint</p>
+        <pre>qs certs ca && qs certs device esp32 && qs certs server caddy
+qs dev --serve</pre>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-content">
+        <p>Flash the device</p>
+        <pre>qs edge</pre>
       </div>
     </div>
     <div class="step">
       <div class="step-content">
         <p>Deploy to production (when ready)</p>
-        <pre>./qs prod</pre>
+        <pre>qs prod</pre>
       </div>
     </div>
   </div>
@@ -545,7 +613,7 @@ uv sync</pre>
 <section>
   <h2>Infrastructure</h2>
   <p style="color:var(--muted); margin-bottom:16px; font-size:0.9rem;">
-    Defined in <code>template.yaml</code> using AWS SAM. Prod-only resources are gated behind a <code>Condition: IsProd</code> flag.
+    Defined in <code>endpoint/template.yaml</code> using AWS SAM. Prod-only resources are gated behind a <code>Condition: IsProd</code> flag.
   </p>
   <div style="overflow-x:auto">
     <table class="pipeline">
@@ -554,7 +622,7 @@ uv sync</pre>
       </thead>
       <tbody>
         <tr><td>API Gateway</td><td>Regional REST API with CORS</td><td>All</td></tr>
-        <tr><td>Lambda</td><td>Python 3.12, arm64, 256 MB, 10s timeout</td><td>All</td></tr>
+        <tr><td>Lambda</td><td>Rust binary via Lambda Web Adapter, arm64</td><td>All</td></tr>
         <tr><td>ACM Certificate</td><td>DNS-validated TLS for custom domain</td><td>Prod</td></tr>
         <tr><td>Custom Domain</td><td>mTLS enforcement via S3 truststore</td><td>Prod</td></tr>
         <tr><td>Route53</td><td>A-record alias to API Gateway</td><td>Prod</td></tr>
@@ -564,20 +632,27 @@ uv sync</pre>
   </div>
 </section>
 
-<!-- CI/CD -->
+<!-- Tech Stack -->
 <section>
-  <h2>CI/CD</h2>
-  <p style="color:var(--muted); font-size:0.9rem;">
-    GitHub Actions runs on every push to <code>supervictor-cloud/</code>.
-    Two sequential jobs: <strong>Unit Tests</strong> (no Docker) then <strong>Integration Tests</strong> (Docker + SAM CLI).
-    Toolchain: <code>uv</code> with caching via <code>astral-sh/setup-uv</code>.
-  </p>
+  <h2>Tech Stack</h2>
+  <div style="overflow-x:auto">
+    <table class="pipeline">
+      <thead>
+        <tr><th>Component</th><th>Crate</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>device</td><td>esp-hal, embassy, esp-mbedtls</td><td>no_std firmware with async WiFi + TLS</td></tr>
+        <tr><td>endpoint</td><td>axum, tokio, rusqlite</td><td>Cloud API with feature-gated store backends</td></tr>
+        <tr><td>cli</td><td>clap, ureq, toml</td><td>Build/test/deploy orchestration</td></tr>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 </div>
 
 <footer>
-  supervictor &middot; Rust + Python + AWS
+  supervictor &middot; Rust
 </footer>
 
 </body>
