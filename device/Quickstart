@@ -58,7 +58,7 @@ main() {
             -d|--desktop)
                 BIN="supervictor-desktop"
                 FEATURES="desktop"
-                TARGET="x86_64-unknown-linux-gnu"
+                TARGET="$(rustc -vV | awk '/^host:/ { print $2 }')"
                 ;;
             -t|--test)
                 echo "Running library unit tests..."
@@ -87,7 +87,7 @@ main() {
         cargo clippy --all-features --workspace -- -D warnings
     fi
 
-    cargo run $RELEASE --features=$FEATURES --bin $BIN --target $TARGET
+    cargo run $RELEASE --features=$FEATURES --bin $BIN ${TARGET:+--target $TARGET}
 }
 
 main "$@"

@@ -45,9 +45,11 @@ def run_dev(args: argparse.Namespace, config: ProjectConfig) -> int:
     port = env_vars.get("SAM_LOCAL_PORT", str(config.sam_local_port))
     cfg = config if str(config.sam_local_port) == port else ProjectConfig(
         repo_root=config.repo_root,
+        device_dir=config.device_dir,
         cloud_dir=config.cloud_dir,
         env_dev=config.env_dev,
         env_staging=config.env_staging,
+        env_prod=config.env_prod,
         sam_local_port=int(port),
     )
 

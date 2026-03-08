@@ -8,7 +8,7 @@ import logging
 from quickstart import runner
 from quickstart.commands import dev, staging
 from quickstart.config import ProjectConfig
-from quickstart.env import make_env
+from quickstart.env import load_env, make_env
 from quickstart.sam import SamLocal
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,9 @@ def run_prod(args: argparse.Namespace, config: ProjectConfig) -> int:
         return 1
 
     # Deploy to prod
-    env = make_env({})
+    runner.step("Loading .env.prod")
+    prod_vars = load_env(config.env_prod)
+    env = make_env(prod_vars)
     sam = SamLocal(config, env=env, verbose=verbose, dry_run=dry_run)
     sam.build(no_cache=True)
     deployed = sam.deploy(config.sam_config_env_prod, force_upload=True)
@@ -71,14 +73,22 @@ def _reload_truststore(*, verbose: bool, dry_run: bool) -> None:
     so we swap to a temp copy and back to force a real reload.
     """
     import subprocess
+    import time
 
     runner.step("Reloading API Gateway mTLS truststore")
     if dry_run:
         logger.info("[dry-run] truststore reload skipped")
         return
 
-    def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(cmd, capture_output=True, text=True)
+    def _run(cmd: list[str], retries: int = 0, delay: float = 3.0) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        for attempt in range(retries):
+            if result.returncode == 0 or "TooManyRequests" not in result.stderr:
+                break
+            logger.info(f"Rate limited, retrying in {delay}s (attempt {attempt + 2}/{retries + 1})")
+            time.sleep(delay)
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        return result
 
     # Copy truststore to temp key
     cp = _run(["aws", "s3", "cp", _TRUSTSTORE_URI, _TRUSTSTORE_TEMP_URI])
@@ -96,7 +106,8 @@ def _reload_truststore(*, verbose: bool, dry_run: bool) -> None:
             _TRUSTSTORE_DOMAIN,
             "--patch-operations",
             f"op=replace,path=/mutualTlsAuthentication/truststoreUri,value={_TRUSTSTORE_TEMP_URI}",
-        ]
+        ],
+        retries=3,
     )
     if swap.returncode != 0:
         runner.error(f"Truststore swap failed: {swap.stderr.strip()}")
@@ -112,7 +123,8 @@ def _reload_truststore(*, verbose: bool, dry_run: bool) -> None:
             _TRUSTSTORE_DOMAIN,
             "--patch-operations",
             f"op=replace,path=/mutualTlsAuthentication/truststoreUri,value={_TRUSTSTORE_URI}",
-        ]
+        ],
+        retries=3,
     )
     if restore.returncode != 0:
         runner.error(f"Truststore restore failed: {restore.stderr.strip()}")

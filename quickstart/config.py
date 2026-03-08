@@ -17,6 +17,8 @@ class ProjectConfig:
     # Logs — set dynamically in from_repo_root()
     log_dir: Path = Path(".logs")
 
+    env_prod: Path = Path(".env.prod")
+
     # SAM local — set dynamically in from_repo_root()
     sam_local_port: int = 3000
     sam_ready_timeout: int = 120
@@ -43,6 +45,7 @@ class ProjectConfig:
             cloud_dir=root / "cloud",
             env_dev=root / ".env.dev",
             env_staging=root / ".env.staging",
+            env_prod=root / ".env.prod",
             log_dir=log_dir,
             sam_log_file=str(log_dir / "sam_local.log"),
             sam_pid_file=str(log_dir / "sam_local.pid"),

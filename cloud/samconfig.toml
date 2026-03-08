@@ -24,32 +24,22 @@ warm_containers = "EAGER"
 [default.local_start_lambda.parameters]
 warm_containers = "EAGER"
 
-[dev]
-[dev.global.parameters]
-stack_name = "supervictor-dev"
+# Environment-specific values (stack_name, region, s3_prefix, parameter_overrides)
+# are driven by .env.dev / .env.prod and passed as CLI flags by quickstart/sam.py.
+# Only stable, environment-agnostic defaults live here.
 
+[dev]
 [dev.deploy.parameters]
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 fail_on_empty_changeset = false
 resolve_s3 = true
 resolve_image_repos = true
-s3_prefix = "supervictor-dev"
-stack_name = "supervictor-dev"
-region = "us-east-1"
-parameter_overrides = "Environment=\"dev\" StackName=\"supervictor-dev\" AppName=\"supervictor\""
 
 [prod]
-[prod.global.parameters]
-stack_name = "supervictor-prod"
-
 [prod.deploy.parameters]
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 fail_on_empty_changeset = false
 resolve_s3 = true
 resolve_image_repos = true
-s3_prefix = "supervictor-prod"
-stack_name = "supervictor-prod"
-region = "us-east-1"
-parameter_overrides = "Environment=prod StackName=supervictor-prod AppName=supervictor"

@@ -273,3 +273,4 @@ certs/
 *.pem
 .devcontainer/
 .ruff_cache/
+!certs/AmazonRootCA1.pem

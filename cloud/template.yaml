@@ -22,6 +22,11 @@ Parameters:
         Default: supervictor
         Description: The application name (used for SSM paths and resource naming).
 
+    TruststoreUri:
+        Type: String
+        Default: s3://supervictor/truststore.pem
+        Description: S3 URI of the CA PEM file used as the mTLS truststore.
+
 Conditions:
     IsProd: !Equals [!Ref Environment, prod]
 
@@ -185,7 +190,7 @@ Resources:
             DomainName: supervictor.advin.io
             RegionalCertificateArn: !Ref ApiCertificate
             MutualTlsAuthentication:
-                TruststoreUri: s3://supervictor/truststore.pem
+                TruststoreUri: !Ref TruststoreUri
             SecurityPolicy: TLS_1_2
             EndpointConfiguration:
                 Types:

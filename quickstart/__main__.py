@@ -12,7 +12,7 @@ if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
 from quickstart import output  # noqa: E402
-from quickstart.commands import dev, edge, prod, staging  # noqa: E402
+from quickstart.commands import certs, dev, edge, ping, prod, staging  # noqa: E402
 from quickstart.config import ProjectConfig  # noqa: E402
 
 
@@ -50,6 +50,9 @@ def main() -> int:
 
     sub.add_parser("prod", help="Full pipeline + confirmation + prod deployment")
 
+    certs.register_subparser(sub)
+    ping.register_subparser(sub)
+
     onboard_p = sub.add_parser("onboard", help="End-to-end device onboarding")
     onboard_p.add_argument("--device-name", required=True)
     onboard_p.add_argument("--owner-id", required=True)
@@ -80,6 +83,8 @@ def main() -> int:
         "edge": lambda: edge.run_edge(args, config),
         "staging": lambda: staging.run_staging(args, config),
         "prod": lambda: prod.run_prod(args, config),
+        "certs": lambda: certs.run_certs(args, config),
+        "ping": lambda: ping.run_ping(args, config),
     }
 
     return dispatch[args.command]()

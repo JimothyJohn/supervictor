@@ -67,10 +67,8 @@ def run_staging(
     # Run integration tests against the deployed dev stack.
     # The dev stack has no mTLS/custom domain (those are prod-only), so we reuse
     # the "local" marker tests against the execute-api HTTPS endpoint.
-    # execute-api URL format: https://{api-id}.execute-api.{region}.amazonaws.com/{stage}
     runner.step("Running integration tests against deployed dev stack")
-    host = staging_vars.get("HOST", "")
-    sam_local_url = f"https://{host}/{config.sam_config_env_dev}"
+    sam_local_url = sam.stack_endpoint(config.sam_config_env_dev)
 
     test_env = make_env({**staging_vars, "SAM_LOCAL_URL": sam_local_url})
 

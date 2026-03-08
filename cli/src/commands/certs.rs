@@ -1,0 +1,389 @@
+use crate::config::ProjectConfig;
+use crate::error::CliError;
+use crate::preflight;
+use crate::runner::{self, RunOptions, Runner};
+
+pub struct CertsArgs {
+    pub verbose: bool,
+    pub dry_run: bool,
+    pub command: CertsCommand,
+}
+
+pub enum CertsCommand {
+    Ca,
+    Device { name: String, days: Option<u32> },
+    Server { name: String, host_ip: String, days: Option<u32> },
+    List,
+    Verify { device_name: String, server_name: String },
+    Handshake {
+        host: String,
+        port: String,
+        device_name: String,
+        tls_version: Option<String>,
+        test_no_client: bool,
+    },
+}
+
+pub fn run_certs(
+    args: &CertsArgs,
+    config: &ProjectConfig,
+    r: &dyn Runner,
+) -> Result<i32, CliError> {
+    preflight::require(&["openssl"], false, r)?;
+
+    match &args.command {
+        CertsCommand::Ca => run_gen(config, &["ca"], args.verbose, args.dry_run, r),
+        CertsCommand::Device { name, days } => {
+            let mut gen_args = vec!["device", name.as_str()];
+            let days_str;
+            if let Some(d) = days {
+                days_str = d.to_string();
+                gen_args.push(&days_str);
+            }
+            run_gen(config, &gen_args, args.verbose, args.dry_run, r)
+        }
+        CertsCommand::Server { name, host_ip, days } => {
+            let mut gen_args = vec!["server", name.as_str(), host_ip.as_str()];
+            let days_str;
+            if let Some(d) = days {
+                days_str = d.to_string();
+                gen_args.push(&days_str);
+            }
+            run_gen(config, &gen_args, args.verbose, args.dry_run, r)
+        }
+        CertsCommand::List => run_gen(config, &["list"], args.verbose, args.dry_run, r),
+        CertsCommand::Verify {
+            device_name,
+            server_name,
+        } => cmd_verify(config, device_name, server_name, args.verbose, args.dry_run, r),
+        CertsCommand::Handshake {
+            host,
+            port,
+            device_name,
+            tls_version,
+            test_no_client,
+        } => cmd_handshake(
+            config,
+            host,
+            port,
+            device_name,
+            tls_version.as_deref(),
+            *test_no_client,
+            args.verbose,
+            args.dry_run,
+            r,
+        ),
+    }
+}
+
+fn run_gen(
+    config: &ProjectConfig,
+    gen_args: &[&str],
+    verbose: bool,
+    dry_run: bool,
+    r: &dyn Runner,
+) -> Result<i32, CliError> {
+    let script = config.gen_certs_script_path();
+    let script_str = script.to_string_lossy().to_string();
+    let mut cmd: Vec<&str> = vec![&script_str];
+    cmd.extend_from_slice(gen_args);
+
+    match r.run(
+        &cmd,
+        &RunOptions {
+            cwd: Some(config.cloud_dir.clone()),
+            verbose,
+            dry_run,
+            ..Default::default()
+        },
+    ) {
+        Ok(_) => Ok(0),
+        Err(e) => {
+            runner::error(&format!("gen_certs.sh {} failed: {}", gen_args.join(" "), e));
+            Ok(1)
+        }
+    }
+}
+
+fn cmd_verify(
+    config: &ProjectConfig,
+    device_name: &str,
+    server_name: &str,
+    verbose: bool,
+    dry_run: bool,
+    r: &dyn Runner,
+) -> Result<i32, CliError> {
+    let certs = config.certs_dir();
+    let ca_pem = certs.join("ca/ca.pem");
+    let server_pem = certs.join(format!("servers/{}/server.pem", server_name));
+    let client_pem = certs.join(format!("devices/{}/client.pem", device_name));
+    let ca_str = ca_pem.to_string_lossy().to_string();
+    let server_str = server_pem.to_string_lossy().to_string();
+    let client_str = client_pem.to_string_lossy().to_string();
+
+    let opts = RunOptions {
+        capture: true,
+        verbose,
+        dry_run,
+        ..Default::default()
+    };
+
+    let mut all_ok = true;
+
+    // 1. Verify CA
+    runner::step("Verify root CA");
+    match r.run(&["openssl", "verify", "-CAfile", &ca_str, &ca_str], &opts) {
+        Ok(result) if dry_run || result.stdout.contains("OK") => {
+            runner::success(&format!("  {}", result.stdout.trim()));
+        }
+        Ok(result) => {
+            runner::error(&format!("  FAIL: {}", result.stdout.trim()));
+            all_ok = false;
+        }
+        Err(e) => {
+            runner::error(&format!("  FAIL: {}", e));
+            all_ok = false;
+        }
+    }
+
+    // 2. Verify server cert
+    runner::step("Verify server cert against CA");
+    match r.run(
+        &["openssl", "verify", "-CAfile", &ca_str, &server_str],
+        &opts,
+    ) {
+        Ok(result) if dry_run || result.stdout.contains("OK") => {
+            runner::success(&format!("  {}", result.stdout.trim()));
+        }
+        Ok(result) => {
+            runner::error(&format!("  FAIL: {}", result.stdout.trim()));
+            all_ok = false;
+        }
+        Err(e) => {
+            runner::error(&format!("  FAIL: {}", e));
+            all_ok = false;
+        }
+    }
+
+    // 3. Verify client cert
+    runner::step("Verify client cert against CA");
+    match r.run(
+        &["openssl", "verify", "-CAfile", &ca_str, &client_str],
+        &opts,
+    ) {
+        Ok(result) if dry_run || result.stdout.contains("OK") => {
+            runner::success(&format!("  {}", result.stdout.trim()));
+        }
+        Ok(result) => {
+            runner::error(&format!("  FAIL: {}", result.stdout.trim()));
+            all_ok = false;
+        }
+        Err(e) => {
+            runner::error(&format!("  FAIL: {}", e));
+            all_ok = false;
+        }
+    }
+
+    // 4. Server cert SAN
+    runner::step("Server cert SAN");
+    if let Ok(result) = r.run(
+        &[
+            "openssl", "x509", "-in", &server_str, "-noout", "-ext", "subjectAltName",
+        ],
+        &RunOptions { check: false, ..opts.clone() },
+    ) {
+        runner::success(&format!("  {}", result.stdout.trim()));
+    }
+
+    // 5. Client cert subject
+    runner::step("Client cert subject");
+    if let Ok(result) = r.run(
+        &[
+            "openssl", "x509", "-in", &client_str, "-noout", "-subject",
+        ],
+        &RunOptions { check: false, ..opts.clone() },
+    ) {
+        runner::success(&format!("  {}", result.stdout.trim()));
+    }
+
+    // 6. Client cert Extended Key Usage
+    runner::step("Client cert Extended Key Usage");
+    match r.run(
+        &[
+            "openssl",
+            "x509",
+            "-in",
+            &client_str,
+            "-noout",
+            "-ext",
+            "extendedKeyUsage",
+        ],
+        &RunOptions { check: false, ..opts.clone() },
+    ) {
+        Ok(result) if !dry_run => {
+            if result.stdout.contains("clientAuth") {
+                runner::success(&format!("  {}", result.stdout.trim()));
+            } else {
+                runner::error(&format!(
+                    "  FAIL: clientAuth not found in Extended Key Usage: {}",
+                    result.stdout.trim()
+                ));
+                all_ok = false;
+            }
+        }
+        Ok(result) => runner::success(&format!("  {}", result.stdout.trim())),
+        Err(e) => {
+            runner::error(&format!("  FAIL: could not read Extended Key Usage: {}", e));
+            all_ok = false;
+        }
+    }
+
+    // 7. Expiry dates
+    runner::step("Certificate expiry dates");
+    for (label, cert_path) in [("CA", &ca_str), ("Server", &server_str), ("Client", &client_str)] {
+        match r.run(
+            &["openssl", "x509", "-in", cert_path, "-noout", "-enddate"],
+            &RunOptions { check: false, ..opts.clone() },
+        ) {
+            Ok(result) if !dry_run => {
+                let expiry = result
+                    .stdout
+                    .trim()
+                    .strip_prefix("notAfter=")
+                    .unwrap_or(result.stdout.trim());
+                runner::success(&format!("  {}: expires {}", label, expiry));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                runner::error(&format!("  {} expiry check failed: {}", label, e));
+                all_ok = false;
+            }
+        }
+    }
+
+    if all_ok {
+        runner::success("\nAll checks passed.");
+        Ok(0)
+    } else {
+        runner::error("\nSome checks failed.");
+        Ok(1)
+    }
+}
+
+fn cmd_handshake(
+    config: &ProjectConfig,
+    host: &str,
+    port: &str,
+    device_name: &str,
+    tls_version: Option<&str>,
+    test_no_client: bool,
+    verbose: bool,
+    dry_run: bool,
+    r: &dyn Runner,
+) -> Result<i32, CliError> {
+    let certs = config.certs_dir();
+    let ca_pem = certs.join("ca/ca.pem");
+    let client_pem = certs.join(format!("devices/{}/client.pem", device_name));
+    let client_key = certs.join(format!("devices/{}/client.key", device_name));
+    let ca_str = ca_pem.to_string_lossy().to_string();
+    let client_pem_str = client_pem.to_string_lossy().to_string();
+    let client_key_str = client_key.to_string_lossy().to_string();
+    let target = format!("{}:{}", host, port);
+
+    let opts = RunOptions {
+        capture: true,
+        verbose,
+        dry_run,
+        check: false,
+        ..Default::default()
+    };
+
+    let mut all_ok = true;
+
+    // 1. Full mTLS handshake
+    runner::step(&format!("mTLS handshake to {}", target));
+    let mut mtls_cmd = vec![
+        "openssl",
+        "s_client",
+        "-connect",
+        &target,
+        "-cert",
+        &client_pem_str,
+        "-key",
+        &client_key_str,
+        "-CAfile",
+        &ca_str,
+    ];
+    let tls_flag = tls_version.map(|ver| format!("-{}", ver));
+    if let Some(ref flag) = tls_flag {
+        mtls_cmd.push(flag);
+    }
+
+    match r.run(&mtls_cmd, &opts) {
+        Ok(result) if !dry_run => {
+            if result.stdout.contains("Verify return code: 0 (ok)") {
+                runner::success("  Handshake OK — Verify return code: 0 (ok)");
+            } else {
+                let diag = result
+                    .stdout
+                    .lines()
+                    .find(|l| l.contains("Verify return code:"))
+                    .unwrap_or("could not find verify return code in output");
+                runner::error(&format!("  FAIL: {}", diag.trim()));
+                all_ok = false;
+            }
+        }
+        Ok(_) => {}
+        Err(e) => {
+            runner::error(&format!("  FAIL: mTLS handshake failed: {}", e));
+            all_ok = false;
+        }
+    }
+
+    // 2. Without client cert
+    if test_no_client {
+        runner::step(&format!(
+            "Connecting without client cert to {} (should fail if mTLS enforced)",
+            target
+        ));
+        let mut no_client_cmd = vec![
+            "openssl",
+            "s_client",
+            "-connect",
+            &target,
+            "-CAfile",
+            &ca_str,
+        ];
+        if let Some(ref flag) = tls_flag {
+            no_client_cmd.push(flag);
+        }
+
+        match r.run(&no_client_cmd, &opts) {
+            Ok(result) if !dry_run => {
+                if result.stdout.contains("Verify return code: 0 (ok)") {
+                    runner::error(
+                        "  WARN: server accepted connection without client cert — mTLS may not be enforced",
+                    );
+                } else {
+                    runner::success(
+                        "  Server rejected connection without client cert (mTLS enforced)",
+                    );
+                }
+            }
+            Ok(_) => {}
+            Err(_) => {
+                runner::success(
+                    "  Server rejected connection without client cert (mTLS enforced)",
+                );
+            }
+        }
+    }
+
+    if all_ok {
+        runner::success("\nHandshake checks passed.");
+        Ok(0)
+    } else {
+        runner::error("\nHandshake checks failed.");
+        Ok(1)
+    }
+}

@@ -144,11 +144,94 @@ class SamLocal:
         if hasattr(self, "_env_file") and self._env_file.exists():
             self._env_file.unlink()
 
+    def _read_stack_name(self, config_env: str) -> str:
+        """Read stack_name from env vars, falling back to samconfig.toml."""
+        # CLI flags from .env files take precedence (see deploy())
+        env = self._env or {}
+        if env.get("SAM_STACK_NAME"):
+            return env["SAM_STACK_NAME"]
+
+        import tomllib
+
+        samconfig = self._config.cloud_dir / "samconfig.toml"
+        with open(samconfig, "rb") as f:
+            data = tomllib.load(f)
+
+        env_section = data.get(config_env, {})
+        # Try deploy.parameters first, then global.parameters
+        for path in (("deploy", "parameters"), ("global", "parameters")):
+            section = env_section
+            for key in path:
+                section = section.get(key, {})
+            name = section.get("stack_name")
+            if name:
+                return name.strip('"')
+
+        raise RuntimeError(
+            f"No stack_name found in samconfig.toml for config-env '{config_env}'"
+        )
+
+    def stack_endpoint(self, config_env: str) -> str:
+        """Query CloudFormation for the deployed API endpoint URL."""
+        if self._dry_run:
+            return f"https://DRY-RUN.execute-api.us-east-1.amazonaws.com/{config_env}"
+
+        stack_name = self._read_stack_name(config_env)
+        result = runner.run(
+            [
+                "aws", "cloudformation", "describe-stacks",
+                "--stack-name", stack_name,
+                "--query",
+                "Stacks[0].Outputs[?OutputKey=='SupervictorApiEndpoint'].OutputValue",
+                "--output", "text",
+            ],
+            env=self._env,
+            verbose=self._verbose,
+            dry_run=self._dry_run,
+            capture=True,
+        )
+        url = result.stdout.strip().rstrip("/")
+        if not url:
+            raise RuntimeError(
+                f"No SupervictorApiEndpoint output found for stack '{stack_name}'"
+            )
+        return url
+
     def deploy(self, config_env: str, *, force_upload: bool = False) -> bool:
-        """Run sam deploy --config-env <env>. Returns True if changes deployed."""
+        """Run sam deploy --config-env <env>. Returns True if changes deployed.
+
+        If the process env (self._env) contains SAM_* variables, they are passed
+        as CLI flags so that .env.dev / .env.staging drives the deploy instead of
+        hardcoded values in samconfig.toml.
+        """
         log_path = self._config.log_dir / f"sam_deploy_{config_env}.log"
         runner.step(f"Deploying to {config_env} stack")
         cmd = ["sam", "deploy", "--config-env", config_env]
+
+        # Override samconfig values from env vars when present
+        env = self._env or {}
+        if env.get("SAM_STACK_NAME"):
+            cmd.extend(["--stack-name", env["SAM_STACK_NAME"]])
+        if env.get("SAM_REGION"):
+            cmd.extend(["--region", env["SAM_REGION"]])
+        if env.get("SAM_S3_PREFIX"):
+            cmd.extend(["--s3-prefix", env["SAM_S3_PREFIX"]])
+
+        # Build --parameter-overrides from SAM_* env vars
+        param_parts: list[str] = []
+        param_map = {
+            "SAM_ENVIRONMENT": "Environment",
+            "SAM_APP_NAME": "AppName",
+            "SAM_STACK_NAME": "StackName",
+            "SAM_TRUSTSTORE_URI": "TruststoreUri",
+        }
+        for env_key, cfn_param in param_map.items():
+            val = env.get(env_key)
+            if val:
+                param_parts.append(f"{cfn_param}={val}")
+        if param_parts:
+            cmd.extend(["--parameter-overrides", " ".join(param_parts)])
+
         if force_upload:
             cmd.append("--force-upload")
         result = runner.run(
