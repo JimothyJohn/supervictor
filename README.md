@@ -1,46 +1,171 @@
-![rustacean](docs/banner.jpg)
+![supervictor](docs/banner.jpg)
 
 # supervictor
 
-An experiment in deploying Rust on a RISC-V MCU. If you can do it here you can do it anywhere!
+**One language. One toolchain. Sensor to cloud.**
 
-## Goal
+Supervictor is an all-Rust IoT framework that covers the entire stack — bare-metal firmware on a RISC-V microcontroller, a cloud API, mTLS certificate management, and a CLI that wires it all together. No Python glue scripts. No Node.js lambdas. No YAML-driven code generators. Just Rust, from the register to the database.
 
-Extract information from our environment as efficiently as possible.
+## Why One Language Matters
 
-### Hardware
+Most IoT stacks are a Frankenstein of C firmware, Python cloud functions, bash deploy scripts, and JavaScript dashboards — held together by JSON contracts that nobody validates. When the firmware team changes a field name, the cloud team finds out at 2 AM.
 
-- [XIAO ESP32C3](https://wiki.seeedstudio.com/XIAO_ESP32C3_Getting_Started/)
+Supervictor takes a different approach:
 
-### Built with 
+- **Shared types across the entire stack.** The same `UplinkMessage` struct compiles into the firmware and the API. Change a field and the compiler catches every callsite — on the microcontroller *and* in the cloud — before anything ships.
+- **One build system.** `cargo build` works for the firmware, the API, and the CLI. No polyglot toolchain to install, no version matrix to maintain.
+- **One test runner.** Unit tests, integration tests, and end-to-end mTLS verification all run with `cargo test`. Same language, same assertions, same CI pipeline.
+- **One dependency tree to audit.** Security review one ecosystem instead of three. `cargo audit` covers your firmware, your API, and your deploy tooling in a single pass.
+- **Refactor without fear.** Rename a function, restructure a module, change a protocol — the compiler tells you exactly what broke across every layer. Try that across C, Python, and JavaScript.
 
-- esp-generate 0.3.0
+The result: an IoT stack where a solo developer moves as fast as a team, and a team moves as fast as a well-oiled machine.
 
-### Resources
+## Architecture
 
-- [The Rust Programming Language](https://doc.rust-lang.org/book/)
-    - [Bookmark](https://doc.rust-lang.org/book/ch03-05-control-flow.html)
+```
+ ESP32-C3                    mTLS                    Axum API
+┌──────────────┐       ┌──────────────┐       ┌──────────────────┐
+│  Rust/no_std │──────>│   X.509      │──────>│  Rust/tokio      │
+│  Embassy     │       │   client     │       │  SQLite/DynamoDB  │
+│  esp-mbedtls │       │   certs      │       │  Feature-gated   │
+└──────────────┘       └──────────────┘       └──────────────────┘
+     device/                                       endpoint/
+                          cli/
+                   ┌──────────────────┐
+                   │  Build, flash,   │
+                   │  deploy, certs,  │
+                   │  onboard         │
+                   └──────────────────┘
+```
 
-- [The Embedded Rust Book](https://docs.rust-embedded.org/book/index.html)
-    - [Bookmark](https://docs.rust-embedded.org/book/start/qemu.html)
+Three crates. Three binaries. One language.
 
-- [The Rust on ESP Book](https://docs.esp-rs.org/book/)
+## Quick Start
 
-- [Embedded Rust (no_std) on Espressif](https://docs.esp-rs.org/no_std-training/)
-    - [Bookmark](https://docs.esp-rs.org/no_std-training/03_6_http_client.html)
+```bash
+# Clone and build the CLI
+git clone git@github.com:JimothyJohn/supervictor.git
+cd supervictor/cli && cargo build --release
+alias qs=./target/release/qs
 
-- [Embassy Book](https://embassy.dev/book/index.html)
+# Generate mTLS certificates
+qs certs ca
+qs certs device esp32
+qs certs server caddy
 
-- [Impl Rust for ESP32](https://esp32.implrust.com)
+# Start local endpoint (Docker + Caddy mTLS reverse proxy)
+qs dev --serve
 
-### TODO
+# Flash firmware to device
+qs edge
 
-- [ ] Updgrade to espflash v4 via esp-hal guidance: [esp-hal v1.0.0-rc.0](https://github.com/esp-rs/esp-hal/releases/tag/esp-hal-v1.0.0-rc.0) to enable esp-flash v4.3
+# When ready: deploy to production
+qs prod
+```
 
-- [ ] Utilize flash/NVS encryption. [Reference](https://espressif.github.io/esp32-c3-book-en/chapter_13/13.3/13.3.7.html)
+## Repository Layout
 
-- [] Implement OTA functionality
+```
+supervictor/
+  device/                        # ESP32-C3 firmware (no_std, Embassy async)
+    src/bin/embedded_main.rs     #   firmware entry point
+    src/bin/desktop_main.rs      #   desktop mTLS test client
+    src/app/                     #   application logic + async tasks
+    src/network/                 #   HTTP, TLS, DNS, TCP
+    src/models/                  #   uplink message types
+  endpoint/                      # Cloud API (axum + tokio)
+    src/handlers.rs              #   framework-agnostic pure functions
+    src/routes.rs                #   axum router
+    src/store/                   #   pluggable backends (SQLite, DynamoDB)
+    template.yaml                #   SAM/CloudFormation
+    docker-compose.yml           #   local dev with Caddy mTLS
+  cli/                           # qs CLI (clap)
+    src/commands/                 #   dev, edge, staging, prod, certs, onboard
+  certs/                         # generated certs (gitignored)
+  docs/                          # web interface
+```
 
-- [] Create onboarding web portal and webserver
+## API
 
-- [] Create placeholder NFC configuration workflow
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `GET` | `/` | Greeting + mTLS subject (if present) |
+| `POST` | `/` | Device uplink — accepts `{ id, current }` |
+| `GET` | `/devices` | List all registered devices |
+| `POST` | `/devices` | Register a new device |
+| `GET` | `/devices/{id}` | Get device details |
+| `GET` | `/devices/{id}/uplinks` | Recent uplink history |
+
+Handlers are pure functions with zero framework coupling — testable without HTTP, swappable across web frameworks.
+
+## CLI Pipeline
+
+The `qs` CLI orchestrates the full lifecycle through progressive stages:
+
+| Command | What it does |
+|---------|-------------|
+| `qs dev` | Unit tests + build endpoint + local server + integration tests |
+| `qs dev --serve` | Same, but keeps the server running for manual testing |
+| `qs edge` | Build + flash ESP32-C3 firmware |
+| `qs staging` | Dev gate + deploy dev stack + remote integration tests |
+| `qs prod` | Full pipeline + confirmation + production deployment |
+| `qs certs ca\|device\|server` | mTLS certificate lifecycle |
+| `qs ping` | mTLS health check against any endpoint |
+| `qs onboard` | End-to-end: certs + server + register + flash + verify |
+
+## Pluggable Storage
+
+The `DeviceStore` trait defines the storage contract. Swap backends without touching a single handler:
+
+```rust
+pub trait DeviceStore: Send + Sync {
+    fn put_device(&self, record: DeviceRecord) -> Result<DeviceRecord, AppError>;
+    fn get_device(&self, device_id: &str) -> Result<Option<DeviceRecord>, AppError>;
+    fn list_devices(&self) -> Result<Vec<DeviceRecord>, AppError>;
+    fn put_uplink(&self, record: UplinkRecord) -> Result<(), AppError>;
+    fn get_uplinks(&self, device_id: &str, limit: usize) -> Result<Vec<UplinkRecord>, AppError>;
+}
+```
+
+**Built-in backends:** SQLite (default) and DynamoDB (feature-gated). Adding your own is one `impl` block.
+
+## Testing
+
+Every layer is testable offline with zero external dependencies:
+
+```bash
+# Device — runs on host, not on hardware
+cargo test --lib --target aarch64-apple-darwin -p supervictor
+
+# Endpoint — in-memory SQLite, no AWS
+cargo test --features sqlite -p supervictor-endpoint
+
+# CLI
+cargo test -p supervictor-cli
+```
+
+Device tests use mock TCP servers with canned responses. Endpoint tests use in-memory SQLite via `axum-test`. No Docker, no AWS credentials, no network.
+
+## Deployment
+
+The endpoint runs anywhere Rust compiles:
+
+- **Local dev:** `docker compose up` (Caddy mTLS reverse proxy + SQLite)
+- **AWS Lambda:** SAM template with Lambda Web Adapter, arm64/Graviton, DynamoDB
+- **Any container platform:** Multi-stage Dockerfile, 30MB final image on Debian slim
+
+Production deployment includes mTLS enforcement via API Gateway truststore, ACM certificates, and Route53 DNS.
+
+## Tech Stack
+
+| Layer | Crates | Notes |
+|-------|--------|-------|
+| Device | esp-hal, embassy, esp-mbedtls, heapless | no_std, async, 144KB heap |
+| Endpoint | axum, tokio, rusqlite, aws-sdk-dynamodb | Feature-gated backends |
+| CLI | clap, ureq, toml | Sync HTTP, no runtime overhead |
+| Security | X.509 client certs, mTLS everywhere | Zero-trust by default |
+
+## License
+
+[MIT](LICENSE) — Nick Armenta, 2025
