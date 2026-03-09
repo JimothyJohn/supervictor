@@ -106,10 +106,7 @@ fn sam_local_post_i32_max_current() {
     let request = post_request(&host, &msg, None);
     let response_str = send_and_receive(&addr, request.as_str().as_bytes());
     let parsed = parse_response(&response_str).expect("parse_response failed on i32::MAX POST");
-    assert!(
-        !parsed.body.is_empty(),
-        "SAM local did not handle i32::MAX"
-    );
+    assert!(!parsed.body.is_empty(), "SAM local did not handle i32::MAX");
 }
 
 #[test]

@@ -40,7 +40,10 @@ async fn deployed_get_root() {
 
     assert_eq!(resp.status(), 200, "GET / should return 200");
     let body = resp.text().await.expect("read body");
-    assert!(body.contains("message"), "body missing 'message' key: {body}");
+    assert!(
+        body.contains("message"),
+        "body missing 'message' key: {body}"
+    );
 }
 
 #[tokio::test]
@@ -64,7 +67,10 @@ async fn deployed_post_uplink() {
 
     assert_eq!(resp.status(), 200, "POST / should return 200");
     let body = resp.text().await.expect("read body");
-    assert!(body.contains("device_id"), "body missing 'device_id': {body}");
+    assert!(
+        body.contains("device_id"),
+        "body missing 'device_id': {body}"
+    );
     assert!(
         body.contains("deployed-test"),
         "body should echo device id: {body}"

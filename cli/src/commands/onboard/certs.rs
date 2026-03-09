@@ -26,7 +26,13 @@ fn extract_subject_dn(cert_path: &std::path::Path, r: &dyn Runner) -> Result<Str
 fn upload_truststore(ctx: &OnboardContext, ca_pem: &std::path::Path) {
     let ca_str = ca_pem.to_string_lossy().to_string();
     let _ = ctx.runner.run(
-        &["aws", "s3", "cp", &ca_str, "s3://supervictor/truststore.pem"],
+        &[
+            "aws",
+            "s3",
+            "cp",
+            &ca_str,
+            "s3://supervictor/truststore.pem",
+        ],
         &RunOptions {
             verbose: ctx.verbose,
             ..Default::default()
@@ -35,7 +41,7 @@ fn upload_truststore(ctx: &OnboardContext, ca_pem: &std::path::Path) {
 }
 
 pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
-    let cloud_dir = ctx.config.cloud_dir.clone();
+    let script_cwd = ctx.config.repo_root.clone();
     let certs_dir = ctx.config.certs_dir();
     let gen_script = ctx.config.gen_certs_script_path();
     let gen_script_str = gen_script.to_string_lossy().to_string();
@@ -60,7 +66,7 @@ pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     }
 
     let opts = RunOptions {
-        cwd: Some(cloud_dir),
+        cwd: Some(script_cwd),
         verbose: ctx.verbose,
         dry_run: ctx.dry_run,
         ..Default::default()
@@ -73,10 +79,10 @@ pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     }
 
     if !client_pem.exists() {
-        if let Err(e) = ctx.runner.run(
-            &[&gen_script_str, "device", &ctx.device_name],
-            &opts,
-        ) {
+        if let Err(e) = ctx
+            .runner
+            .run(&[&gen_script_str, "device", &ctx.device_name], &opts)
+        {
             return PhaseResult::failed(format!("Device cert generation failed: {}", e));
         }
     }

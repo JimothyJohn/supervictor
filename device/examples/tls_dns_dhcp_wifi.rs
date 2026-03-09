@@ -24,13 +24,13 @@ use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{clock::CpuClock, rng::Rng, timer::timg::TimerGroup};
-use mbedtls_rs::Tls;
-use mbedtls_rs::{asynch::Session, Mode, TlsVersion};
 use esp_println::println;
 use esp_wifi::wifi::{
     ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiState,
 };
 use esp_wifi::{init, EspWifiController};
+use mbedtls_rs::Tls;
+use mbedtls_rs::{asynch::Session, Mode, TlsVersion};
 
 // use supervictor::models::UplinkMessage;
 // use supervictor::network::http::post_request;

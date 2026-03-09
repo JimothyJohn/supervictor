@@ -25,8 +25,8 @@ fn find_qname_end_single_label() {
 #[test]
 fn find_qname_end_multi_label() {
     let data = [
-        0x03, b'w', b'w', b'w', 0x06, b'g', b'o', b'o', b'g', b'l', b'e', 0x03, b'c', b'o',
-        b'm', 0x00,
+        0x03, b'w', b'w', b'w', 0x06, b'g', b'o', b'o', b'g', b'l', b'e', 0x03, b'c', b'o', b'm',
+        0x00,
     ];
     assert_eq!(find_qname_end(&data, 0), Some(16));
 }
@@ -146,10 +146,9 @@ const ANDROID_PROBE: [u8; 47] = [
     0x12, 0x34, // Transaction ID
     0x01, 0x00, // Flags
     0x00, 0x01, // Questions: 1
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // QNAME: connectivitycheck.gstatic.com
-    17, b'c', b'o', b'n', b'n', b'e', b'c', b't', b'i', b'v', b'i', b't', b'y', b'c', b'h',
-    b'e', b'c', b'k', 7, b'g', b's', b't', b'a', b't', b'i', b'c', 3, b'c', b'o', b'm',
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // QNAME: connectivitycheck.gstatic.com
+    17, b'c', b'o', b'n', b'n', b'e', b'c', b't', b'i', b'v', b'i', b't', b'y', b'c', b'h', b'e',
+    b'c', b'k', 7, b'g', b's', b't', b'a', b't', b'i', b'c', 3, b'c', b'o', b'm',
     0x00, // End of QNAME
     0x00, 0x01, // QTYPE: A
     0x00, 0x01, // QCLASS: IN
@@ -170,12 +169,9 @@ fn build_dns_response_android_captive_portal() {
 // 12 header + 8(captive) + 6(apple) + 4(com) + 1(null) + 4(QTYPE/QCLASS) = 35
 const IOS_PROBE: [u8; 35] = [
     0x56, 0x78, // Transaction ID
-    0x01, 0x00,
-    0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // QNAME: captive.apple.com
-    7, b'c', b'a', b'p', b't', b'i', b'v', b'e', 5, b'a', b'p', b'p', b'l', b'e', 3, b'c',
-    b'o', b'm', 0x00, // End of QNAME
+    0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // QNAME: captive.apple.com
+    7, b'c', b'a', b'p', b't', b'i', b'v', b'e', 5, b'a', b'p', b'p', b'l', b'e', 3, b'c', b'o',
+    b'm', 0x00, // End of QNAME
     0x00, 0x01, // QTYPE: A
     0x00, 0x01, // QCLASS: IN
 ];

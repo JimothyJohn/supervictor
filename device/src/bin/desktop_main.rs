@@ -57,40 +57,38 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         match TcpStream::connect(socket_addr).await {
-            Ok(socket) => {
-                match connector.connect(server_name.clone(), socket).await {
-                    Ok(mut tls_stream) => {
-                        let request = post_request(&base_host, &json_body, None);
+            Ok(socket) => match connector.connect(server_name.clone(), socket).await {
+                Ok(mut tls_stream) => {
+                    let request = post_request(&base_host, &json_body, None);
 
-                        if let Err(e) = tls_stream.write_all(request.as_bytes()).await {
-                            println!("Error writing request: {}", e);
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                            continue;
-                        }
-
-                        let mut response_buf = Vec::new();
-                        match tls_stream.read_to_end(&mut response_buf).await {
-                            Ok(bytes_read) => match String::from_utf8(response_buf) {
-                                Ok(response_str) => match parse_response(&response_str) {
-                                    Ok(response) => {
-                                        println!(
-                                            "Parsed response:\n---\n{}\n---",
-                                            serde_json_core::to_string::<_, 1024>(&response.body)
-                                                .unwrap()
-                                        )
-                                    }
-                                    Err(e) => println!("Error parsing response: {}", e),
-                                },
-                                Err(_) => {
-                                    println!("Received non-UTF8 response ({} bytes)", bytes_read)
-                                }
-                            },
-                            Err(e) => println!("Error reading response: {}", e),
-                        }
+                    if let Err(e) = tls_stream.write_all(request.as_bytes()).await {
+                        println!("Error writing request: {}", e);
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue;
                     }
-                    Err(e) => println!("TLS handshake error: {}", e),
+
+                    let mut response_buf = Vec::new();
+                    match tls_stream.read_to_end(&mut response_buf).await {
+                        Ok(bytes_read) => match String::from_utf8(response_buf) {
+                            Ok(response_str) => match parse_response(&response_str) {
+                                Ok(response) => {
+                                    println!(
+                                        "Parsed response:\n---\n{}\n---",
+                                        serde_json_core::to_string::<_, 1024>(&response.body)
+                                            .unwrap()
+                                    )
+                                }
+                                Err(e) => println!("Error parsing response: {}", e),
+                            },
+                            Err(_) => {
+                                println!("Received non-UTF8 response ({} bytes)", bytes_read)
+                            }
+                        },
+                        Err(e) => println!("Error reading response: {}", e),
+                    }
                 }
-            }
+                Err(e) => println!("TLS handshake error: {}", e),
+            },
             Err(e) => println!("TCP connection error: {}", e),
         }
 

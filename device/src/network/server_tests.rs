@@ -40,8 +40,7 @@ fn parse_request_line_method_only() {
 
 #[test]
 fn parse_request_line_wasm_path() {
-    let (method, path) =
-        parse_request_line("GET /supervictor_portal_bg.wasm HTTP/1.0\r\n");
+    let (method, path) = parse_request_line("GET /supervictor_portal_bg.wasm HTTP/1.0\r\n");
     assert_eq!(method, "GET");
     assert_eq!(path, "/supervictor_portal_bg.wasm");
 }
@@ -50,7 +49,8 @@ fn parse_request_line_wasm_path() {
 
 #[test]
 fn extract_body_present() {
-    let request = "POST /api/configure HTTP/1.0\r\nContent-Type: application/json\r\n\r\n{\"ssid\":\"Test\"}";
+    let request =
+        "POST /api/configure HTTP/1.0\r\nContent-Type: application/json\r\n\r\n{\"ssid\":\"Test\"}";
     assert_eq!(extract_body(request), "{\"ssid\":\"Test\"}");
 }
 
@@ -136,7 +136,11 @@ fn build_response_header_json() {
 
 #[test]
 fn build_response_header_with_extra() {
-    let h = build_response_header("application/wasm", 339000, Some("Content-Encoding: gzip\r\n"));
+    let h = build_response_header(
+        "application/wasm",
+        339000,
+        Some("Content-Encoding: gzip\r\n"),
+    );
     assert!(h.contains("Content-Type: application/wasm\r\n"));
     assert!(h.contains("Content-Length: 339000\r\n"));
     assert!(h.contains("Content-Encoding: gzip\r\n"));
@@ -246,8 +250,7 @@ fn parse_configure_body_valid() {
 
 #[test]
 fn parse_configure_body_empty_password() {
-    let (ssid, password) =
-        parse_configure_body(r#"{"ssid":"OpenNet","password":""}"#).unwrap();
+    let (ssid, password) = parse_configure_body(r#"{"ssid":"OpenNet","password":""}"#).unwrap();
     assert_eq!(ssid.as_str(), "OpenNet");
     assert_eq!(password.as_str(), "");
 }

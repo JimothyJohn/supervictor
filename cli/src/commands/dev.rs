@@ -32,7 +32,7 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
         }
     }
 
-    preflight::require(&["uv", "sam", "docker", "cargo"], true, r)?;
+    preflight::require(&["sam", "docker", "cargo"], true, r)?;
 
     let log_dir = &cfg.log_dir;
 
@@ -60,28 +60,28 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
     }
     runner::success("Rust library tests passed");
 
-    // Python unit tests
-    runner::step("Running Python unit tests");
+    // Endpoint tests
+    runner::step("Running endpoint tests");
     if r.run(
-        &["uv", "run", "pytest", "tests/unit/", "-v"],
+        &["cargo", "test", "--features", "sqlite"],
         &RunOptions {
-            cwd: Some(cfg.cloud_dir.clone()),
+            cwd: Some(cfg.endpoint_dir.clone()),
             env: Some(env.clone()),
             verbose: args.verbose,
             dry_run: args.dry_run,
-            log_to: Some(log_dir.join("python_unit_tests.log")),
+            log_to: Some(log_dir.join("endpoint_tests.log")),
             ..Default::default()
         },
     )
     .is_err()
     {
         runner::error(&format!(
-            "Python unit tests failed (see {})",
-            log_dir.join("python_unit_tests.log").display()
+            "Endpoint tests failed (see {})",
+            log_dir.join("endpoint_tests.log").display()
         ));
         return Ok(1);
     }
-    runner::success("Python unit tests passed");
+    runner::success("Endpoint tests passed");
 
     // SAM build
     let mut sam = SamLocal::new(&cfg, Some(env.clone()), args.verbose, args.dry_run);
@@ -108,21 +108,13 @@ pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result
     } else {
         runner::step("Running local integration tests");
         let mut test_vars = env_vars.clone();
-        test_vars.insert("SAM_LOCAL_URL".to_string(), sam.url());
+        test_vars.insert("DEPLOYED_URL".to_string(), sam.url());
         let test_env = env::make_env(&test_vars);
 
         if r.run(
-            &[
-                "uv",
-                "run",
-                "pytest",
-                "tests/integration/",
-                "-m",
-                "local",
-                "-v",
-            ],
+            &["cargo", "test", "--features", "sqlite", "--", "--ignored"],
             &RunOptions {
-                cwd: Some(cfg.cloud_dir.clone()),
+                cwd: Some(cfg.endpoint_dir.clone()),
                 env: Some(test_env),
                 verbose: args.verbose,
                 dry_run: args.dry_run,

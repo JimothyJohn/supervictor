@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 pub struct ProjectConfig {
     pub repo_root: PathBuf,
     pub device_dir: PathBuf,
-    pub cloud_dir: PathBuf,
+    pub endpoint_dir: PathBuf,
     pub env_dev: PathBuf,
     pub env_staging: PathBuf,
     pub env_prod: PathBuf,
@@ -29,7 +29,7 @@ impl ProjectConfig {
         let log_dir = root.join(".logs");
         Self {
             device_dir: root.join("device"),
-            cloud_dir: root.join("cloud"),
+            endpoint_dir: root.join("endpoint"),
             env_dev: root.join(".env.dev"),
             env_staging: root.join(".env.staging"),
             env_prod: root.join(".env.prod"),
@@ -53,7 +53,7 @@ impl ProjectConfig {
     }
 
     pub fn gen_certs_script_path(&self) -> PathBuf {
-        self.cloud_dir.join(&self.gen_certs_script)
+        self.repo_root.join("cloud").join(&self.gen_certs_script)
     }
 }
 
@@ -67,7 +67,7 @@ mod tests {
         let cfg = ProjectConfig::from_repo_root(Path::new("/tmp/repo"));
         assert_eq!(cfg.repo_root, Path::new("/tmp/repo"));
         assert_eq!(cfg.device_dir, Path::new("/tmp/repo/device"));
-        assert_eq!(cfg.cloud_dir, Path::new("/tmp/repo/cloud"));
+        assert_eq!(cfg.endpoint_dir, Path::new("/tmp/repo/endpoint"));
         assert_eq!(cfg.env_dev, Path::new("/tmp/repo/.env.dev"));
         assert_eq!(cfg.log_dir, Path::new("/tmp/repo/.logs"));
         assert_eq!(cfg.sam_local_port, 3000);

@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::store::DeviceStore;
 
-pub fn create_store(config: &Config) -> Result<Arc<dyn DeviceStore>, AppError> {
+pub async fn create_store(config: &Config) -> Result<Arc<dyn DeviceStore>, AppError> {
     match config.store_backend.as_str() {
         "sqlite" => {
             #[cfg(feature = "sqlite")]
@@ -19,10 +19,8 @@ pub fn create_store(config: &Config) -> Result<Arc<dyn DeviceStore>, AppError> {
         "dynamo" => {
             #[cfg(feature = "dynamo")]
             {
-                let rt = tokio::runtime::Handle::current();
-                let sdk_config = rt.block_on(aws_config::load_defaults(
-                    aws_config::BehaviorVersion::latest(),
-                ));
+                let sdk_config =
+                    aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
                 let store = crate::store::dynamo::DynamoDeviceStore::new(
                     &sdk_config,
                     &config.devices_table,

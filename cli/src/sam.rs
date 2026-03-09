@@ -9,7 +9,7 @@ use crate::error::CliError;
 use crate::runner::{self, BackgroundOptions, RunOptions, Runner};
 
 /// Lambda env var overrides for sam local (no DynamoDB available locally).
-const LOCAL_ENV_OVERRIDES: &str = r#"{"HelloWorldFunction":{"STORE_BACKEND":"sqlite"}}"#;
+const LOCAL_ENV_OVERRIDES: &str = r#"{"EndpointFunction":{"STORE_BACKEND":"sqlite"}}"#;
 
 /// SAM local lifecycle manager.
 pub struct SamLocal<'a> {
@@ -130,26 +130,6 @@ impl<'a> SamLocal<'a> {
     pub fn build(&self, r: &dyn Runner, no_cache: bool) -> Result<(), CliError> {
         let log_dir = &self.config.log_dir;
 
-        runner::step("Exporting runtime dependencies");
-        r.run(
-            &[
-                "uv",
-                "export",
-                "--no-dev",
-                "--no-hashes",
-                "-o",
-                "requirements.txt",
-            ],
-            &RunOptions {
-                cwd: Some(self.config.cloud_dir.join("uplink")),
-                env: self.env.clone(),
-                verbose: self.verbose,
-                dry_run: self.dry_run,
-                log_to: Some(log_dir.join("uv_export.log")),
-                ..Default::default()
-            },
-        )?;
-
         runner::step("Building SAM artifacts");
         let mut cmd: Vec<&str> = vec!["sam", "build", "--skip-pull-image"];
         if no_cache {
@@ -158,7 +138,7 @@ impl<'a> SamLocal<'a> {
         r.run(
             &cmd,
             &RunOptions {
-                cwd: Some(self.config.cloud_dir.clone()),
+                cwd: Some(self.config.endpoint_dir.clone()),
                 env: self.env.clone(),
                 verbose: self.verbose,
                 dry_run: self.dry_run,
@@ -197,7 +177,7 @@ impl<'a> SamLocal<'a> {
         let child = r.start_background(
             &cmd,
             &BackgroundOptions {
-                cwd: Some(self.config.cloud_dir.clone()),
+                cwd: Some(self.config.endpoint_dir.clone()),
                 env: self.env.clone(),
                 log_file: Some(PathBuf::from(&self.config.sam_log_file)),
                 verbose: self.verbose,
@@ -256,7 +236,7 @@ impl<'a> SamLocal<'a> {
             }
         }
 
-        let samconfig = self.config.cloud_dir.join("samconfig.toml");
+        let samconfig = self.config.endpoint_dir.join("samconfig.toml");
         let contents = fs::read_to_string(&samconfig).map_err(|e| {
             CliError::Config(format!("failed to read {}: {}", samconfig.display(), e))
         })?;
@@ -391,7 +371,7 @@ impl<'a> SamLocal<'a> {
         let result = r.run(
             &cmd_refs,
             &RunOptions {
-                cwd: Some(self.config.cloud_dir.clone()),
+                cwd: Some(self.config.endpoint_dir.clone()),
                 env: self.env.clone(),
                 verbose: self.verbose,
                 dry_run: self.dry_run,

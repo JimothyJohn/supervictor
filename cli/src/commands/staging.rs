@@ -40,7 +40,7 @@ pub fn run_staging(
     let staging_vars = env::load_env(&config.env_staging)?;
     let env = env::make_env(&staging_vars);
 
-    preflight::require(&["uv", "sam", "docker", "openssl"], true, r)?;
+    preflight::require(&["sam", "docker", "openssl"], true, r)?;
 
     // Deploy to dev stack
     let sam = SamLocal::new(config, Some(env.clone()), args.verbose, args.dry_run);
@@ -49,25 +49,17 @@ pub fn run_staging(
 
     // Run integration tests against deployed dev stack
     runner::step("Running integration tests against deployed dev stack");
-    let sam_local_url = sam.stack_endpoint(r, &config.sam_config_env_dev)?;
+    let deployed_url = sam.stack_endpoint(r, &config.sam_config_env_dev)?;
 
     let mut test_vars = staging_vars.clone();
-    test_vars.insert("SAM_LOCAL_URL".to_string(), sam_local_url.clone());
+    test_vars.insert("DEPLOYED_URL".to_string(), deployed_url.clone());
     let test_env = env::make_env(&test_vars);
 
     let log_dir = &config.log_dir;
     if r.run(
-        &[
-            "uv",
-            "run",
-            "pytest",
-            "tests/integration/",
-            "-m",
-            "local",
-            "-v",
-        ],
+        &["cargo", "test", "--features", "sqlite", "--", "--ignored"],
         &RunOptions {
-            cwd: Some(config.cloud_dir.clone()),
+            cwd: Some(config.endpoint_dir.clone()),
             env: Some(test_env),
             verbose: args.verbose,
             dry_run: args.dry_run,
@@ -89,7 +81,7 @@ pub fn run_staging(
     runner::step("Running Rust device integration tests against deployed stack");
     let rust_target = rust_tools::host_target(r)?;
     let mut device_vars = staging_vars.clone();
-    device_vars.insert("DEPLOYED_URL".to_string(), sam_local_url);
+    device_vars.insert("DEPLOYED_URL".to_string(), deployed_url);
     let device_env = env::make_env(&device_vars);
 
     if r.run(
@@ -131,17 +123,9 @@ pub fn run_staging(
     let mtls_env = env::make_env(&mtls_vars);
 
     if r.run(
-        &[
-            "uv",
-            "run",
-            "pytest",
-            "tests/integration/",
-            "-m",
-            "remote",
-            "-v",
-        ],
+        &["cargo", "test", "--features", "sqlite", "--", "--ignored"],
         &RunOptions {
-            cwd: Some(config.cloud_dir.clone()),
+            cwd: Some(config.endpoint_dir.clone()),
             env: Some(mtls_env),
             verbose: args.verbose,
             dry_run: args.dry_run,
@@ -176,7 +160,7 @@ fn ensure_certs(
     let gen_script_str = gen_script.to_string_lossy().to_string();
 
     let opts = RunOptions {
-        cwd: Some(config.cloud_dir.clone()),
+        cwd: Some(config.repo_root.clone()),
         env: Some(env.clone()),
         verbose,
         dry_run,

@@ -6,8 +6,6 @@ certs/
 *.key
 *.crt
 .env*
-logs/
-.logs/
 docs/_build/
 __pycache__/
 *.pyc

@@ -5,7 +5,6 @@ use embassy_time::Duration;
 pub const HOST: &str = env!("HOST");
 pub const CA_PATH: &str = env!("CA_PATH");
 pub const CERT_PATH: &str = env!("CERT_PATH");
-pub const KEY_PATH: &str = env!("KEY_PATH");
 
 // --- System ---
 pub const HEAP_SIZE: usize = 144 * 1024;

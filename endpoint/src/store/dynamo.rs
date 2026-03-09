@@ -11,6 +11,13 @@ pub struct DynamoDeviceStore {
     messages_table: String,
 }
 
+/// Run an async block synchronously on the current tokio runtime.
+/// Uses `block_in_place` to avoid panicking on multi-threaded runtimes.
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let rt = tokio::runtime::Handle::current();
+    tokio::task::block_in_place(|| rt.block_on(f))
+}
+
 impl DynamoDeviceStore {
     pub fn new(
         sdk_config: &aws_config::SdkConfig,
@@ -71,8 +78,7 @@ impl DynamoDeviceStore {
 impl DeviceStore for DynamoDeviceStore {
     fn put_device(&self, record: DeviceRecord) -> Result<DeviceRecord, AppError> {
         let item = Self::device_to_item(&record);
-        let rt = tokio::runtime::Handle::current();
-        let result = rt.block_on(
+        let result = block_on(
             self.client
                 .put_item()
                 .table_name(&self.devices_table)
@@ -97,16 +103,14 @@ impl DeviceStore for DynamoDeviceStore {
     }
 
     fn get_device(&self, device_id: &str) -> Result<Option<DeviceRecord>, AppError> {
-        let rt = tokio::runtime::Handle::current();
-        let result = rt
-            .block_on(
-                self.client
-                    .get_item()
-                    .table_name(&self.devices_table)
-                    .key("device_id", AttributeValue::S(device_id.to_string()))
-                    .send(),
-            )
-            .map_err(|e| AppError::Store(format!("get_device: {e}")))?;
+        let result = block_on(
+            self.client
+                .get_item()
+                .table_name(&self.devices_table)
+                .key("device_id", AttributeValue::S(device_id.to_string()))
+                .send(),
+        )
+        .map_err(|e| AppError::Store(format!("get_device: {e}")))?;
 
         match result.item {
             Some(ref item) => Ok(Some(Self::item_to_device(item)?)),
@@ -115,9 +119,7 @@ impl DeviceStore for DynamoDeviceStore {
     }
 
     fn list_devices(&self) -> Result<Vec<DeviceRecord>, AppError> {
-        let rt = tokio::runtime::Handle::current();
-        let result = rt
-            .block_on(self.client.scan().table_name(&self.devices_table).send())
+        let result = block_on(self.client.scan().table_name(&self.devices_table).send())
             .map_err(|e| AppError::Store(format!("list_devices: {e}")))?;
 
         result.items().iter().map(Self::item_to_device).collect()
@@ -127,8 +129,7 @@ impl DeviceStore for DynamoDeviceStore {
         let payload_str = serde_json::to_string(&record.payload)
             .map_err(|e| AppError::Store(format!("serialize payload: {e}")))?;
 
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(
+        block_on(
             self.client
                 .put_item()
                 .table_name(&self.messages_table)
@@ -143,19 +144,17 @@ impl DeviceStore for DynamoDeviceStore {
     }
 
     fn get_uplinks(&self, device_id: &str, limit: usize) -> Result<Vec<UplinkRecord>, AppError> {
-        let rt = tokio::runtime::Handle::current();
-        let result = rt
-            .block_on(
-                self.client
-                    .query()
-                    .table_name(&self.messages_table)
-                    .key_condition_expression("device_id = :did")
-                    .expression_attribute_values(":did", AttributeValue::S(device_id.to_string()))
-                    .scan_index_forward(false)
-                    .limit(limit as i32)
-                    .send(),
-            )
-            .map_err(|e| AppError::Store(format!("get_uplinks: {e}")))?;
+        let result = block_on(
+            self.client
+                .query()
+                .table_name(&self.messages_table)
+                .key_condition_expression("device_id = :did")
+                .expression_attribute_values(":did", AttributeValue::S(device_id.to_string()))
+                .scan_index_forward(false)
+                .limit(limit as i32)
+                .send(),
+        )
+        .map_err(|e| AppError::Store(format!("get_uplinks: {e}")))?;
 
         result
             .items()

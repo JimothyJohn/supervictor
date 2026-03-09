@@ -19,24 +19,19 @@ fn ok_result() -> CommandOutput {
 }
 
 #[test]
-fn test_build_calls_uv_export_then_sam_build() {
+fn test_build_calls_sam_build() {
     let cfg = test_config();
     let runner = MockRunner::new();
-    runner.push_result(ok_result()); // uv export
     runner.push_result(ok_result()); // sam build
 
     let sam = SamLocal::new(&cfg, None, false, false);
     sam.build(&runner, false).unwrap();
 
-    assert_eq!(runner.call_count(), 2);
+    assert_eq!(runner.call_count(), 1);
     let call0 = runner.get_call(0);
-    assert_eq!(call0[0], "uv");
-    assert_eq!(call0[1], "export");
-
-    let call1 = runner.get_call(1);
-    assert_eq!(call1[0], "sam");
-    assert_eq!(call1[1], "build");
-    assert!(!call1.contains(&"--no-cached".to_string()));
+    assert_eq!(call0[0], "sam");
+    assert_eq!(call0[1], "build");
+    assert!(!call0.contains(&"--no-cached".to_string()));
 }
 
 #[test]
@@ -44,13 +39,12 @@ fn test_build_no_cache_adds_flag() {
     let cfg = test_config();
     let runner = MockRunner::new();
     runner.push_result(ok_result());
-    runner.push_result(ok_result());
 
     let sam = SamLocal::new(&cfg, None, false, false);
     sam.build(&runner, true).unwrap();
 
-    let call1 = runner.get_call(1);
-    assert!(call1.contains(&"--no-cached".to_string()));
+    let call0 = runner.get_call(0);
+    assert!(call0.contains(&"--no-cached".to_string()));
 }
 
 #[test]

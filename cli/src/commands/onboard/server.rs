@@ -55,7 +55,7 @@ fn ensure_server_cert(ctx: &OnboardContext, host_ip: &str) -> Result<(), String>
 }
 
 fn start_compose(ctx: &mut OnboardContext) -> PhaseResult {
-    let compose_file = ctx.config.cloud_dir.join("docker-compose.yml");
+    let compose_file = ctx.config.endpoint_dir.join("docker-compose.yml");
     if !compose_file.exists() {
         return PhaseResult::failed(format!("Missing {}", compose_file.display()));
     }
@@ -75,7 +75,12 @@ fn start_compose(ctx: &mut OnboardContext) -> PhaseResult {
     // Tear down pre-existing stack
     let _ = ctx.runner.run(
         &[
-            "docker", "compose", "-f", &compose_str, "down", "--remove-orphans",
+            "docker",
+            "compose",
+            "-f",
+            &compose_str,
+            "down",
+            "--remove-orphans",
         ],
         &RunOptions {
             verbose: ctx.verbose,
@@ -89,7 +94,13 @@ fn start_compose(ctx: &mut OnboardContext) -> PhaseResult {
     // Start compose stack
     if let Err(e) = ctx.runner.run(
         &[
-            "docker", "compose", "-f", &compose_str, "up", "-d", "--build",
+            "docker",
+            "compose",
+            "-f",
+            &compose_str,
+            "up",
+            "-d",
+            "--build",
         ],
         &RunOptions {
             verbose: ctx.verbose,
@@ -158,7 +169,8 @@ fn start_aws(ctx: &mut OnboardContext) -> PhaseResult {
 }
 
 fn write_sam_env_overrides(ctx: &OnboardContext) -> PathBuf {
-    let overrides = r#"{"HelloWorldFunction":{"STORE_BACKEND":"sqlite","SQLITE_DB_PATH":"/tmp/supervictor.db"}}"#;
+    let overrides =
+        r#"{"EndpointFunction":{"STORE_BACKEND":"sqlite","SQLITE_DB_PATH":"/tmp/supervictor.db"}}"#;
     let dir = &ctx.config.log_dir;
     let _ = fs::create_dir_all(dir);
     let path = dir.join("sam_env_vars.json");

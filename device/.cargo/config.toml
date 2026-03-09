@@ -5,7 +5,7 @@ runner = "espflash flash --monitor"  # espflash v4 auto-detects chip/log-format
 build-std = "alloc,core"
 
 [env]
-ESP_LOG="info"
+ESP_LOG="warn"
 DEVICE_NAME = "factory-01"
 
 [build]

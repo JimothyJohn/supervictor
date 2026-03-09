@@ -114,7 +114,7 @@ fn run_gen(
     match r.run(
         &cmd,
         &RunOptions {
-            cwd: Some(config.cloud_dir.clone()),
+            cwd: Some(config.repo_root.clone()),
             verbose,
             dry_run,
             ..Default::default()

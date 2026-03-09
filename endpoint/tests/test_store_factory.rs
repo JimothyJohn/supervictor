@@ -14,17 +14,17 @@ fn test_config(backend: &str) -> Config {
     }
 }
 
-#[test]
-fn create_sqlite_store() {
+#[tokio::test]
+async fn create_sqlite_store() {
     let config = test_config("sqlite");
-    let store = create_store(&config);
+    let store = create_store(&config).await;
     assert!(store.is_ok());
 }
 
-#[test]
-fn unknown_backend_errors() {
+#[tokio::test]
+async fn unknown_backend_errors() {
     let config = test_config("redis");
-    let result = create_store(&config);
+    let result = create_store(&config).await;
     match result {
         Err(e) => {
             let msg = format!("{e}");

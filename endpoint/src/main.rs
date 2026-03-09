@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "starting supervictor endpoint"
     );
 
-    let store = supervictor_endpoint::store::factory::create_store(&config)?;
+    let store = supervictor_endpoint::store::factory::create_store(&config).await?;
     let app = supervictor_endpoint::routes::router(store);
 
     let addr = format!("0.0.0.0:{}", config.port);
