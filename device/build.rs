@@ -8,7 +8,6 @@ fn main() {
     // Enable builds on both desktop and embedded
     if target == "riscv32imc-unknown-none-elf" {
         linker_be_nice();
-        println!("cargo:rustc-link-arg=-Tdefmt.x");
         println!("cargo:rustc-link-arg=-Tlinkall.x");
     }
 }

@@ -1,11 +1,11 @@
 [target.riscv32imc-unknown-none-elf]
-runner = "espflash flash --monitor --chip esp32c3 --log-format defmt"  # espflash 3.3.0
+runner = "espflash flash --monitor"  # espflash v4 auto-detects chip/log-format
 
 [target.riscv32imc-unknown-none-elf.unstable]
 build-std = "alloc,core"
 
 [env]
-DEFMT_LOG="info"
+ESP_LOG="info"
 DEVICE_NAME = "factory-01"
 
 [build]

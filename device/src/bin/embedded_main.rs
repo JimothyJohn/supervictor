@@ -13,13 +13,18 @@ use embassy_net::StackResources;
 use embassy_time::Timer;
 use esp_alloc as _;
 use esp_backtrace as _;
-use esp_hal::{clock::CpuClock, rng::Rng, timer::systimer::SystemTimer, timer::timg::TimerGroup};
-use esp_mbedtls::Tls;
+use esp_hal::clock::CpuClock;
+use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::rng::{Rng, Trng, TrngSource};
+use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
-use esp_wifi::{init, EspWifiController};
+use esp_radio::wifi::{self, ClientConfig, ModeConfig};
+use mbedtls_rs::Tls;
 
 use supervictor::app::tasks::{app, connection, net_task};
 use supervictor::config::*;
+
+esp_bootloader_esp_idf::esp_app_desc!();
 
 // Magically convert a variable into a static variable
 macro_rules! make_static {
@@ -31,42 +36,57 @@ macro_rules! make_static {
     }};
 }
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(spawner: embassy_executor::Spawner) -> ! {
-    // Log level is configured with the ESP_LOG environment variable
     esp_println::logger::init_logger_from_env();
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
 
-    // Initialize the ESP32C3 peripherals
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    // Initialize random number generator
-    let mut rng = Rng::new(peripherals.RNG);
-    let systimer = SystemTimer::new(peripherals.SYSTIMER);
-    esp_hal_embassy::init(systimer.alarm0);
 
-    // Uses bit shifting to convert a 32-bit random to a 64-bit, pretty smart!
+    // Enable true RNG (needs RNG + ADC1 peripherals for entropy)
+    let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1);
+    let rng = Rng::new();
     let net_seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
-    let wifi_init_result = init(timg0.timer0, rng, peripherals.RADIO_CLK);
-    let wifi_ctrl = match wifi_init_result {
-        Ok(ctrl) => ctrl,
-        Err(e) => {
-            println!("   ❌ FATAL: Failed to initialize WiFi driver: {:?}", e);
-            panic!("WiFi driver initialization failed");
+    // esp-rtos requires explicit start on RISC-V with SoftwareInterrupt<0>
+    let software_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timg0.timer0, software_interrupt.software_interrupt0);
+
+    // Initialize esp-radio controller (requires esp-rtos started)
+    let esp_radio_ctrl = &*make_static!(
+        esp_radio::Controller<'static>,
+        match esp_radio::init() {
+            Ok(ctrl) => ctrl,
+            Err(e) => {
+                println!("FATAL: Failed to initialize esp-radio: {:?}", e);
+                panic!("esp-radio initialization failed");
+            }
         }
-    };
-    let esp_wifi_ctrl = &*make_static!(EspWifiController<'static>, wifi_ctrl);
-    let (controller, interfaces) = match esp_wifi::wifi::new(esp_wifi_ctrl, peripherals.WIFI) {
-        Ok((controller, interfaces)) => (controller, interfaces),
-        Err(e) => {
-            println!("   ❌ FATAL: Failed to initialize WiFi: {:?}", e);
-            panic!("WiFi initialization failed");
-        }
-    };
+    );
+
+    // WiFi station config
+    let client_config = ModeConfig::Client(
+        ClientConfig::default()
+            .with_ssid(env!("SSID").into())
+            .with_password(env!("PASSWORD").into()),
+    );
+    let (mut controller, interfaces) =
+        match wifi::new(&esp_radio_ctrl, peripherals.WIFI, wifi::Config::default()) {
+            Ok(r) => r,
+            Err(e) => {
+                println!("FATAL: Failed to initialize WiFi: {:?}", e);
+                panic!("WiFi initialization failed");
+            }
+        };
+
+    // Apply WiFi config before spawning tasks
+    if let Err(e) = controller.set_config(&client_config) {
+        println!("FATAL: WiFi set_config failed: {:?}", e);
+        panic!("WiFi set_config failed");
+    }
 
     // Initialize the network stack
-    // Must be static to avoid being moved. It is ONLY used by the app function
     let (stack, runner) = embassy_net::new(
         interfaces.sta,
         embassy_net::Config::dhcpv4(Default::default()),
@@ -74,21 +94,19 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         net_seed,
     );
 
-    // https://github.com/esp-rs/esp-mbedtls/blob/main/examples/async_client.rs
-    let mut tls = match Tls::new(peripherals.SHA) {
+    // Initialize TLS — mbedtls-rs needs Trng (implements CryptoRng)
+    let trng = Trng::try_new().expect("TrngSource must be active");
+    let trng_static = make_static!(Trng, trng);
+    let mut tls = match Tls::new(trng_static) {
         Ok(t) => t,
         Err(e) => {
             println!("Failed to create TLS context: {:?}", e);
             panic!("Failed to create TLS context: {:?}", e);
         }
     };
-
-    // TODO: Reduce this once we have a working program
     tls.set_debug(TLS_DEBUG_LEVEL);
 
-    spawner
-        .spawn(connection(controller, env!("SSID"), env!("PASSWORD")))
-        .ok();
+    spawner.spawn(connection(controller)).ok();
     spawner.spawn(net_task(runner)).ok();
     spawner.spawn(app(stack, tls)).ok();
 

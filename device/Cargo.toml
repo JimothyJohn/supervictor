@@ -17,18 +17,20 @@ required-features = ["desktop"]
 portal = ["embedded", "embassy-net/udp"]
 desktop = ["reqwest", "tokio", "rustls", "tokio-rustls", "rustls-pemfile"]
 embedded = [
-  "esp-alloc", 
-  "esp-backtrace", 
-  "esp-hal", 
-  "esp-hal-embassy", 
-  "esp-println", 
-  "esp-wifi",
+  "esp-alloc",
+  "esp-backtrace",
+  "esp-hal",
+  "esp-rtos",
+  "esp-println",
+  "esp-radio",
   "embassy-net",
   "embassy-executor",
   "embassy-time",
   "embedded-io",
   "embedded-io-async",
-  "esp-mbedtls",
+  "mbedtls-rs",
+  "esp-bootloader-esp-idf",
+  "esp-metadata-generated",
   "reqwless",
   "static_cell",
 ]
@@ -39,7 +41,7 @@ name = "supervictor"
 path = "./src/lib.rs"
 
 [dependencies]
-embassy-net = { version = "0.6.0", features = [
+embassy-net = { version = "0.8.0", features = [
   "dhcpv4",
   "medium-ethernet",
   "tcp",
@@ -49,45 +51,41 @@ embassy-net = { version = "0.6.0", features = [
 reqwest = { version = "0.12.15", optional = true, features = ["json", "rustls-tls"] }
 tokio = { version = "1.0", optional = true, features = ["full"] }
 
-embedded-io = { version = "0.6.1", optional = true }
-embedded-io-async = { version = "0.6.1", optional = true }
-esp-alloc = { version = "0.7.0", optional = true }
-esp-backtrace = { version = "0.15.1", features = [
-  "defmt",
+embedded-io = { version = "0.7.0", optional = true }
+embedded-io-async = { version = "0.7.0", optional = true }
+esp-alloc = { version = "0.9.0", optional = true }
+esp-backtrace = { version = "0.18.1", features = [
   "esp32c3",
-  "exception-handler",
   "panic-handler",
-], optional = true  }
-esp-hal = { version = "=1.0.0-beta.0", default-features = false, features = [
-  "defmt",
+  "println",
+], optional = true }
+esp-hal = { version = "1", default-features = false, features = [
+  "log-04",
   "esp32c3",
   "unstable",
+  "exception-handler",
 ], optional = true }
-esp-println = { version = "0.13.0", features = [
-  "defmt-espflash",
-  "esp32c3",
-  "log",
+esp-println = { version = "0.16", features = [
+  "log-04",
 ], optional = true }
-embassy-executor = { version = "0.7.0", features = [
-  "defmt",
-  "task-arena-size-40960",
-], optional = true }
-embassy-time = { version = "0.4.0", features = ["generic-queue-8"], optional = true }
-esp-hal-embassy = { version = "0.7.0", features = ["esp32c3"], optional = true }
-esp-wifi = { version = "0.13.0", features = [
-  "builtin-scheduler",
-  "defmt",
-  "esp-alloc",
+embassy-executor = { version = "0.9.0", optional = true }
+embassy-time = { version = "0.5.0", features = ["generic-queue-8"], optional = true }
+esp-rtos = { version = "0.2", features = ["esp32c3", "esp-radio", "embassy"], optional = true }
+esp-radio = { version = "0.17", features = [
   "esp32c3",
   "wifi",
+  "log-04",
+  "unstable",
 ], optional = true }
 heapless = { version = "0.8.0", default-features = false }
 static_cell = { version = "2.1.0", optional = true, features = ["nightly"] }
 serde = { version = "1.0.219", default-features = false, features = ["alloc"] }
 serde-json-core = "0.6.0"
-reqwless = { version = "0.13.0", default-features = false, optional = true,  features = ["log"] }
+reqwless = { version = "0.13.0", default-features = false, optional = true, features = ["log"] }
 log = "0.4.26"
-esp-mbedtls = { git = "https://github.com/esp-rs/esp-mbedtls.git", rev = "03458c34e6c5cd8578010bb4429dc362b9358185", optional = true, features = ["esp32c3"] }
+mbedtls-rs = { git = "https://github.com/esp-rs/mbedtls-rs.git", rev = "4329f17", optional = true, features = ["log"] }
+esp-bootloader-esp-idf = { version = "0.4", optional = true, features = ["esp32c3"] }
+esp-metadata-generated = { version = "0.3", optional = true, features = ["esp32c3"] }
 rustls = { version = "0.23.26", optional = true }
 tokio-rustls = { version = "0.26.2", optional = true }
 rustls-pemfile = { version = "2.2.0", optional = true }

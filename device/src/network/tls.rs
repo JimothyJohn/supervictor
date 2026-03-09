@@ -1,17 +1,19 @@
-use esp_mbedtls::{Certificates, X509};
+use core::ffi::CStr;
 use esp_println::println;
+use mbedtls_rs::{Certificate, ClientSessionConfig, Credentials, PrivateKey, TlsVersion, X509};
 
-pub fn load_certificates() -> Certificates<'static> {
-    let ca_chain_bytes = concat!(
+pub fn load_certificates() -> ClientSessionConfig<'static> {
+    // CA chain — null-terminated PEM wrapped as CStr
+    let ca_chain_pem = concat!(
         include_str!(concat!("../../../", env!("CERT_PATH"), env!("CA_PATH"))),
         "\0"
-    )
-    .as_bytes();
+    );
+    let ca_chain_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(ca_chain_pem.as_bytes()) };
 
-    let ca_chain = match X509::pem(ca_chain_bytes) {
-        Ok(x509) => {
-            println!("[TLS] CA chain loaded ({} bytes)", ca_chain_bytes.len());
-            Some(x509)
+    let ca_chain = match Certificate::new(X509::PEM(ca_chain_cstr)) {
+        Ok(cert) => {
+            println!("[TLS] CA chain loaded ({} bytes)", ca_chain_pem.len());
+            Some(cert)
         }
         Err(e) => {
             println!(
@@ -24,7 +26,8 @@ pub fn load_certificates() -> Certificates<'static> {
         }
     };
 
-    let client_cert_bytes = concat!(
+    // Client certificate
+    let client_cert_pem = concat!(
         include_str!(concat!(
             "../../../",
             env!("CERT_PATH"),
@@ -33,28 +36,12 @@ pub fn load_certificates() -> Certificates<'static> {
             "/client.pem"
         )),
         "\0"
-    )
-    .as_bytes();
+    );
+    let client_cert_cstr =
+        unsafe { CStr::from_bytes_with_nul_unchecked(client_cert_pem.as_bytes()) };
 
-    let client_cert = match X509::pem(client_cert_bytes) {
-        Ok(x509) => {
-            println!(
-                "[TLS] Client cert loaded ({} bytes)",
-                client_cert_bytes.len()
-            );
-            Some(x509)
-        }
-        Err(e) => {
-            println!(
-                "[TLS] ERROR: Failed to parse client cert (devices/{}.pem): {:?}",
-                env!("DEVICE_NAME"),
-                e
-            );
-            None
-        }
-    };
-
-    let private_key_bytes = concat!(
+    // Client private key
+    let client_key_pem = concat!(
         include_str!(concat!(
             "../../../",
             env!("CERT_PATH"),
@@ -63,20 +50,35 @@ pub fn load_certificates() -> Certificates<'static> {
             "/client.key"
         )),
         "\0"
-    )
-    .as_bytes();
+    );
+    let client_key_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(client_key_pem.as_bytes()) };
 
-    let private_key = match X509::pem(private_key_bytes) {
-        Ok(x509) => {
+    let creds = match (
+        Certificate::new(X509::PEM(client_cert_cstr)),
+        PrivateKey::new(X509::PEM(client_key_cstr), None),
+    ) {
+        (Ok(cert), Ok(key)) => {
             println!(
-                "[TLS] Private key loaded ({} bytes)",
-                private_key_bytes.len()
+                "[TLS] Client cert loaded ({} bytes), key loaded ({} bytes)",
+                client_cert_pem.len(),
+                client_key_pem.len()
             );
-            Some(x509)
+            Some(Credentials {
+                certificate: cert,
+                private_key: key,
+            })
         }
-        Err(e) => {
+        (Err(e), _) => {
             println!(
-                "[TLS] ERROR: Failed to parse private key (devices/{}.key): {:?}",
+                "[TLS] ERROR: Failed to parse client cert (devices/{}/client.pem): {:?}",
+                env!("DEVICE_NAME"),
+                e
+            );
+            None
+        }
+        (_, Err(e)) => {
+            println!(
+                "[TLS] ERROR: Failed to parse client key (devices/{}/client.key): {:?}",
                 env!("DEVICE_NAME"),
                 e
             );
@@ -84,10 +86,20 @@ pub fn load_certificates() -> Certificates<'static> {
         }
     };
 
-    Certificates {
-        ca_chain: ca_chain,
-        certificate: client_cert,
-        private_key: private_key,
-        password: None,
+    // Server name for verification
+    let host_cstr = {
+        let host_bytes = concat!(env!("HOST"), "\0").as_bytes();
+        unsafe { CStr::from_bytes_with_nul_unchecked(host_bytes) }
+    };
+
+    ClientSessionConfig {
+        ca_chain,
+        creds,
+        server_name: Some(host_cstr),
+        min_version: match option_env!("TLS_VERSION") {
+            Some("1.3") => TlsVersion::Tls1_3,
+            _ => TlsVersion::Tls1_2,
+        },
+        ..ClientSessionConfig::new()
     }
 }
