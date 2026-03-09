@@ -52,10 +52,7 @@ pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
 }
 
 fn resolve_verify(ctx: &OnboardContext) -> Result<(String, ureq::Agent), String> {
-    let api_url = ctx
-        .api_url
-        .as_deref()
-        .unwrap_or("http://localhost:3000");
+    let api_url = ctx.api_url.as_deref().unwrap_or("http://localhost:3000");
     let device_name = &ctx.device_name;
 
     let env_vars = env::load_env(&ctx.config.env_dev).unwrap_or_default();
@@ -111,5 +108,5 @@ fn build_mtls_agent_from_ctx(
         .join("client.key");
     let ca = certs_dir.join("ca/ca.pem");
 
-    build_mtls_agent(&ca, &cert, &key).map_err(|e| format!("{}", e))
+    build_mtls_agent(Some(&ca), &cert, &key).map_err(|e| format!("{}", e))
 }

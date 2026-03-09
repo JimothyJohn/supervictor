@@ -88,7 +88,7 @@ fn build_agent(ctx: &OnboardContext) -> Result<ureq::Agent, String> {
                 .join(&ctx.device_name)
                 .join("client.key");
 
-            return build_mtls_agent(&ca, &cert, &key).map_err(|e| format!("{}", e));
+            return build_mtls_agent(Some(&ca), &cert, &key).map_err(|e| format!("{}", e));
         }
     }
 
