@@ -143,14 +143,14 @@ fn start_aws(ctx: &mut OnboardContext) -> PhaseResult {
     }
 
     match sam.start(ctx.runner, &["--env-vars", &env_file_str]) {
-        Ok(_guard) => {
-            // Note: guard is intentionally leaked here — cleanup happens via OnboardContext drop
+        Ok(mut guard) => {
             if let Err(e) = sam.wait_ready() {
                 return PhaseResult::failed(format!("SAM local failed: {}", e));
             }
             ctx.api_url = Some(sam.url());
-            // We can't easily keep the guard alive across phases, so the
-            // OnboardContext drop handler will handle cleanup via api_process
+            // Transfer the child process to OnboardContext so it stays alive
+            // across phases and gets cleaned up on drop
+            ctx.api_process = guard.take_process();
             PhaseResult::passed()
         }
         Err(e) => PhaseResult::failed(format!("SAM local start failed: {}", e)),

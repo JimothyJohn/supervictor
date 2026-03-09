@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fs;
-use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::Child;
 use std::time::{Duration, Instant};
@@ -41,6 +40,11 @@ impl Drop for SamGuard {
 }
 
 impl SamGuard {
+    /// Take ownership of the child process, preventing the guard from killing it on drop.
+    pub fn take_process(&mut self) -> Option<Child> {
+        self.proc.take()
+    }
+
     /// Block until the process exits.
     pub fn wait(&mut self) -> Result<(), CliError> {
         if let Some(ref mut child) = self.proc {
@@ -210,35 +214,26 @@ impl<'a> SamLocal<'a> {
         })
     }
 
-    /// Poll until sam local's HTTP server is up.
+    /// Poll until sam local's HTTP server is up and responding.
     pub fn wait_ready(&self) -> Result<(), CliError> {
         if self.dry_run {
             println!("  [dry-run] wait for sam local ready");
             return Ok(());
         }
 
-        let url = self.url();
-        println!("  Waiting for sam local at {} ...", url);
+        let health_url = format!("{}/health", self.url());
+        println!("  Waiting for sam local at {} ...", self.url());
         let deadline = Instant::now() + Duration::from_secs(self.config.sam_ready_timeout);
 
         while Instant::now() < deadline {
-            // Just check if TCP connects — faster than a full HTTP probe
-            let addr = format!("localhost:{}", self.config.sam_local_port);
-            if TcpStream::connect_timeout(
-                &addr.parse().unwrap_or_else(|_| {
-                    // Fallback: resolve manually
-                    use std::net::ToSocketAddrs;
-                    addr.to_socket_addrs()
-                        .ok()
-                        .and_then(|mut a| a.next())
-                        .unwrap_or_else(|| "127.0.0.1:3000".parse().unwrap())
-                }),
-                Duration::from_secs(2),
-            )
-            .is_ok()
-            {
-                runner::success("  sam local ready.");
-                return Ok(());
+            // Full HTTP probe — TCP alone succeeds before Lambda container is ready
+            // Accept any HTTP response (even 403) — we just need the server responding
+            match ureq::get(&health_url).call() {
+                Ok(_) | Err(ureq::Error::StatusCode(_)) => {
+                    runner::success("  sam local ready.");
+                    return Ok(());
+                }
+                Err(_) => {}
             }
             std::thread::sleep(Duration::from_secs(1));
         }
