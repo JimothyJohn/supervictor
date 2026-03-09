@@ -10,7 +10,8 @@ pub struct EdgeArgs {
 }
 
 pub fn run_edge(args: &EdgeArgs, config: &ProjectConfig, r: &dyn Runner) -> Result<i32, CliError> {
-    preflight::require(&["cargo", "espflash"], false, r)?;
+    preflight::require(&["cargo"], false, r)?;
+    preflight::ensure_espflash(r)?;
 
     runner::step("Loading .env.dev");
     let env_vars = env::load_env(&config.env_dev)?;

@@ -1,5 +1,5 @@
 [target.riscv32imc-unknown-none-elf]
-runner = "espflash flash --monitor --chip esp32c3 --log-format defmt"
+runner = "espflash flash --monitor --chip esp32c3 --log-format defmt"  # espflash 3.3.0
 
 [target.riscv32imc-unknown-none-elf.unstable]
 build-std = "alloc,core"

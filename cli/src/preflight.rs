@@ -1,5 +1,7 @@
 use crate::error::CliError;
-use crate::runner::{CommandOutput, RunOptions, Runner};
+use crate::runner::{self, CommandOutput, RunOptions, Runner};
+
+pub const ESPFLASH_VERSION: &str = "3.3.0";
 
 /// Return the names of any tools not found on PATH.
 pub fn check_tools(required: &[&str]) -> Vec<String> {
@@ -28,6 +30,49 @@ pub fn check_docker_running(runner: &dyn Runner) -> bool {
         runner.run(&["docker", "info"], &opts),
         Ok(CommandOutput { status: 0, .. })
     )
+}
+
+/// Install espflash at the pinned version if it is missing or mismatched.
+pub fn ensure_espflash(runner: &dyn Runner) -> Result<(), CliError> {
+    let needs_install = if which("espflash").is_some() {
+        // Check version
+        let opts = RunOptions {
+            capture: true,
+            check: false,
+            ..Default::default()
+        };
+        match runner.run(&["espflash", "--version"], &opts) {
+            Ok(CommandOutput { status: 0, stdout, .. }) => {
+                let installed = stdout.trim().replace("espflash ", "");
+                if installed == ESPFLASH_VERSION {
+                    return Ok(());
+                }
+                runner::step(&format!(
+                    "espflash {} found, expected {} — reinstalling",
+                    installed, ESPFLASH_VERSION
+                ));
+                true
+            }
+            _ => true,
+        }
+    } else {
+        runner::step("espflash not found — installing");
+        true
+    };
+
+    if needs_install {
+        let pkg = format!("espflash@{}", ESPFLASH_VERSION);
+        runner.run(
+            &["cargo", "install", &pkg],
+            &RunOptions {
+                check: true,
+                ..Default::default()
+            },
+        )?;
+        runner::success(&format!("Installed espflash {}", ESPFLASH_VERSION));
+    }
+
+    Ok(())
 }
 
 /// Exit with an error if any required tools are missing or Docker is down.

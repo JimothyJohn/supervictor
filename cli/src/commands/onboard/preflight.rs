@@ -1,8 +1,8 @@
-use crate::preflight::{check_docker_running, check_tools};
+use crate::preflight::{self, check_docker_running, check_tools};
 
 use super::{OnboardContext, PhaseResult};
 
-const BASE_TOOLS: &[&str] = &["openssl", "cargo", "espflash", "docker"];
+const BASE_TOOLS: &[&str] = &["openssl", "cargo", "docker"];
 const AWS_TOOLS: &[&str] = &["sam", "aws"];
 
 pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
@@ -14,6 +14,10 @@ pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     let missing = check_tools(&required);
     if !missing.is_empty() {
         return PhaseResult::failed(format!("Missing tools: {}", missing.join(", ")));
+    }
+
+    if let Err(e) = preflight::ensure_espflash(ctx.runner) {
+        return PhaseResult::failed(format!("Failed to ensure espflash: {}", e));
     }
 
     if !check_docker_running(ctx.runner) {

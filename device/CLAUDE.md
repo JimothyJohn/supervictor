@@ -3,7 +3,7 @@
 ## Commands
 ```
 cargo test --lib --target aarch64-apple-darwin   # Run tests (NOT the default ESP32 target)
-cargo run --bin supervictor-embedded --features embedded   # Build + flash via espflash
+cargo run --bin supervictor-embedded --features embedded   # Build + flash via espflash 3.3.0
 cargo run --bin supervictor-desktop --features desktop     # Desktop mTLS test client
 cargo clippy --target aarch64-apple-darwin       # Lint
 ```

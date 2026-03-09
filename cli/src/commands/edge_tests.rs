@@ -20,6 +20,14 @@ fn ok() -> CommandOutput {
     CommandOutput::default()
 }
 
+fn espflash_version_ok() -> CommandOutput {
+    CommandOutput {
+        status: 0,
+        stdout: "espflash 3.3.0".to_string(),
+        stderr: String::new(),
+    }
+}
+
 #[test]
 fn test_edge_happy_path() {
     let tmp = std::env::temp_dir().join("qs_edge_happy");
@@ -28,6 +36,7 @@ fn test_edge_happy_path() {
     let cfg = setup(&tmp);
 
     let runner = MockRunner::new();
+    runner.push_result(espflash_version_ok()); // espflash --version
     runner.push_result(ok()); // cargo run (flash)
 
     let args = EdgeArgs {
@@ -37,7 +46,7 @@ fn test_edge_happy_path() {
     let code = run_edge(&args, &cfg, &runner).unwrap();
     assert_eq!(code, 0);
 
-    let call = runner.get_call(0);
+    let call = runner.get_call(1); // index 1: cargo run (0 is espflash --version)
     assert!(call.contains(&"cargo".to_string()));
     assert!(call.contains(&"run".to_string()));
     assert!(call.contains(&"supervictor-embedded".to_string()));
@@ -64,6 +73,7 @@ fn test_edge_with_port_env() {
     cfg.env_dev = env_path;
 
     let runner = MockRunner::new();
+    runner.push_result(espflash_version_ok()); // espflash --version
     runner.push_result(ok());
 
     let args = EdgeArgs {
@@ -73,7 +83,7 @@ fn test_edge_with_port_env() {
     let code = run_edge(&args, &cfg, &runner).unwrap();
     assert_eq!(code, 0);
 
-    let call = runner.get_call(0);
+    let call = runner.get_call(1); // index 1: cargo run (0 is espflash --version)
     assert!(call.contains(&"--port".to_string()));
     assert!(call.contains(&"/dev/ttyUSB0".to_string()));
 
@@ -88,6 +98,7 @@ fn test_edge_flash_failure_returns_1() {
     let cfg = setup(&tmp);
 
     let runner = MockRunner::new();
+    runner.push_result(espflash_version_ok()); // espflash --version
     runner.push_result(CommandOutput {
         status: 1,
         stdout: String::new(),
