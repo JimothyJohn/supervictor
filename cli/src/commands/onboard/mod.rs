@@ -1,8 +1,14 @@
+/// Certificate generation phase (CA + device cert).
 pub mod certs;
+/// Firmware build and flash phase.
 pub mod flash;
+/// Preflight checks for required tools, Docker, and env files.
 pub mod preflight;
+/// Device registration phase (POST + verify active).
 pub mod register;
+/// API server startup phase (Docker Compose or SAM local).
 pub mod server;
+/// Uplink verification phase (poll for first device uplink).
 pub mod verify;
 
 use std::path::PathBuf;
@@ -15,43 +21,74 @@ use crate::runner::Runner;
 
 // ── Types ─────────────────────────────────────────────────────────────
 
+/// Outcome of a single onboard phase.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PhaseStatus {
+    /// Phase completed successfully.
     Passed,
+    /// Phase encountered an error.
     Failed,
+    /// Phase was not needed or explicitly skipped.
     Skipped,
 }
 
+/// Result returned by each onboard phase function.
 pub struct PhaseResult {
+    /// Whether the phase passed, failed, or was skipped.
     pub status: PhaseStatus,
+    /// Human-readable detail (empty on success).
     pub message: String,
 }
 
 impl PhaseResult {
+    /// Construct a successful result.
     pub fn passed() -> Self {
-        Self { status: PhaseStatus::Passed, message: String::new() }
+        Self {
+            status: PhaseStatus::Passed,
+            message: String::new(),
+        }
     }
+    /// Construct a failure result with an error message.
     pub fn failed(msg: impl Into<String>) -> Self {
-        Self { status: PhaseStatus::Failed, message: msg.into() }
+        Self {
+            status: PhaseStatus::Failed,
+            message: msg.into(),
+        }
     }
+    /// Construct a skipped result with a reason.
     pub fn skipped(msg: impl Into<String>) -> Self {
-        Self { status: PhaseStatus::Skipped, message: msg.into() }
+        Self {
+            status: PhaseStatus::Skipped,
+            message: msg.into(),
+        }
     }
 }
 
+/// Shared mutable state threaded through all onboard phases.
 pub struct OnboardContext<'a> {
+    /// Project configuration.
     pub config: &'a ProjectConfig,
+    /// Subprocess runner (real or mock).
     pub runner: &'a dyn Runner,
+    /// Identity name for the device being onboarded.
     pub device_name: String,
+    /// Owner identifier for device registration.
     pub owner_id: String,
-    pub mode: String, // "onprem" | "aws"
+    /// Deployment mode: `"onprem"` (Docker Compose) or `"aws"` (SAM local).
+    pub mode: String,
+    /// Enable verbose output.
     pub verbose: bool,
+    /// Print commands without executing.
     pub dry_run: bool,
-    // Populated by phases:
+    /// Populated by the certs phase: path to the certs directory.
     pub certs_dir: Option<PathBuf>,
+    /// Populated by the certs phase: subject DN from the client cert.
     pub subject_dn: Option<String>,
+    /// Populated by the server phase: base URL of the running API.
     pub api_url: Option<String>,
+    /// Populated by the server phase: child process handle for cleanup.
     pub api_process: Option<Child>,
+    /// Populated by the server phase (onprem): compose file for teardown.
     pub compose_file: Option<PathBuf>,
 }
 
@@ -85,16 +122,25 @@ const PHASES: &[(&str, PhaseFn)] = &[
     ("Verify Uplink", verify::run),
 ];
 
+/// Arguments for the `qs onboard` command.
 pub struct OnboardArgs {
+    /// Device identity name.
     pub device_name: String,
+    /// Owner identifier for registration.
     pub owner_id: String,
+    /// Deployment mode: `"onprem"` or `"aws"`.
     pub mode: String,
+    /// Enable verbose output.
     pub verbose: bool,
+    /// Print commands without executing.
     pub dry_run: bool,
+    /// Phase index to start from (skip earlier phases).
     pub start_at: usize,
+    /// Phase indices to skip entirely.
     pub skip: Vec<usize>,
 }
 
+/// Run the full device onboarding sequence (preflight through verify).
 pub fn run_onboard(
     args: &OnboardArgs,
     config: &ProjectConfig,
@@ -121,7 +167,10 @@ pub fn run_onboard(
 fn run_phases(ctx: &mut OnboardContext, start_at: usize, skip: &[usize]) -> i32 {
     for (i, (name, phase_fn)) in PHASES.iter().enumerate() {
         if i < start_at {
-            output::step(&format!("Skipping phase {}: {} (--start-at {})", i, name, start_at));
+            output::step(&format!(
+                "Skipping phase {}: {} (--start-at {})",
+                i, name, start_at
+            ));
             continue;
         }
         if skip.contains(&i) {

@@ -1,3 +1,7 @@
+//! Binary entrypoint for the supervictor endpoint server.
+
+//! Binary entrypoint for the supervictor endpoint server.
+
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]

@@ -3,6 +3,7 @@ use crate::runner::RunOptions;
 
 use super::{OnboardContext, PhaseResult};
 
+/// Build the embedded firmware and flash it to the connected ESP32-C3.
 pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     let mut env_vars = match env::load_env(&ctx.config.env_dev) {
         Ok(v) => v,

@@ -9,20 +9,30 @@ use crate::output;
 /// Output captured from a completed subprocess.
 #[derive(Debug, Clone, Default)]
 pub struct CommandOutput {
+    /// Process exit code (0 = success).
     pub status: i32,
+    /// Captured stdout text.
     pub stdout: String,
+    /// Captured stderr text.
     pub stderr: String,
 }
 
 /// Options controlling how a command is executed.
 #[derive(Debug, Clone)]
 pub struct RunOptions {
+    /// Working directory for the subprocess.
     pub cwd: Option<PathBuf>,
+    /// Environment variable overrides.
     pub env: Option<HashMap<String, String>>,
+    /// If true, return an error on non-zero exit.
     pub check: bool,
+    /// If true, capture stdout/stderr instead of inheriting.
     pub capture: bool,
+    /// If true, echo the command before running.
     pub verbose: bool,
+    /// If true, print the command but do not execute.
     pub dry_run: bool,
+    /// If set, write combined stdout+stderr to this file.
     pub log_to: Option<PathBuf>,
 }
 
@@ -43,16 +53,23 @@ impl Default for RunOptions {
 /// Options for starting a background process.
 #[derive(Debug, Clone, Default)]
 pub struct BackgroundOptions {
+    /// Working directory for the background process.
     pub cwd: Option<PathBuf>,
+    /// Environment variable overrides.
     pub env: Option<HashMap<String, String>>,
+    /// If set, redirect stdout+stderr to this file.
     pub log_file: Option<PathBuf>,
+    /// If true, echo the command before spawning.
     pub verbose: bool,
+    /// If true, print the command but do not spawn.
     pub dry_run: bool,
 }
 
 /// Trait abstracting subprocess execution for testability.
 pub trait Runner {
+    /// Execute a command synchronously, returning captured output.
     fn run(&self, cmd: &[&str], opts: &RunOptions) -> Result<CommandOutput, CliError>;
+    /// Spawn a command in the background, returning the child process handle.
     fn start_background(
         &self,
         cmd: &[&str],
@@ -245,12 +262,16 @@ pub mod mock {
 
     /// Records every call and returns pre-loaded results.
     pub struct MockRunner {
+        /// Log of all `run()` invocations (command tokens).
         pub calls: RefCell<Vec<Vec<String>>>,
+        /// Queue of results to return from successive `run()` calls.
         pub results: RefCell<VecDeque<CommandOutput>>,
+        /// Log of all `start_background()` invocations (command tokens).
         pub bg_calls: RefCell<Vec<Vec<String>>>,
     }
 
     impl MockRunner {
+        /// Create an empty mock runner.
         pub fn new() -> Self {
             Self {
                 calls: RefCell::new(Vec::new()),
@@ -259,14 +280,17 @@ pub mod mock {
             }
         }
 
+        /// Enqueue a result that the next `run()` call will return.
         pub fn push_result(&self, result: CommandOutput) {
             self.results.borrow_mut().push_back(result);
         }
 
+        /// Number of `run()` calls recorded so far.
         pub fn call_count(&self) -> usize {
             self.calls.borrow().len()
         }
 
+        /// Retrieve the command tokens from the `idx`-th `run()` call.
         pub fn get_call(&self, idx: usize) -> Vec<String> {
             self.calls.borrow()[idx].clone()
         }

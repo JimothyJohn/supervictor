@@ -2,6 +2,8 @@ use core::ffi::CStr;
 use esp_println::println;
 use mbedtls_rs::{Certificate, ClientSessionConfig, Credentials, PrivateKey, TlsVersion, X509};
 
+/// Load CA chain, client certificate, and private key from compile-time paths
+/// and return a configured mTLS session config.
 pub fn load_certificates() -> ClientSessionConfig<'static> {
     // CA chain — null-terminated PEM wrapped as CStr
     let ca_chain_pem = concat!(

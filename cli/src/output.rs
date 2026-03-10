@@ -15,10 +15,12 @@ const ACCENT_COLORS: &[&str] = &[CYAN, YELLOW, MAGENTA, GREEN];
 static VERBOSE: AtomicBool = AtomicBool::new(false);
 static ACCENT_INDEX: AtomicUsize = AtomicUsize::new(0);
 
+/// Enable or disable verbose output globally.
 pub fn set_verbose(v: bool) {
     VERBOSE.store(v, Ordering::Relaxed);
 }
 
+/// Returns `true` if verbose output is enabled.
 pub fn is_verbose() -> bool {
     VERBOSE.load(Ordering::Relaxed)
 }
@@ -75,6 +77,7 @@ pub fn confirm(prompt: &str) -> bool {
     }
 }
 
+/// Reset verbose flag and accent color index (used in tests).
 pub fn reset_state() {
     VERBOSE.store(false, Ordering::Relaxed);
     ACCENT_INDEX.store(0, Ordering::Relaxed);

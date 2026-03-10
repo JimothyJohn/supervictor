@@ -11,8 +11,10 @@ use crate::middleware::ClientSubject;
 use crate::store::DeviceStore;
 use supervictor_wire::routes as wire;
 
+/// Shared application state: a thread-safe reference to the active store backend.
 pub type AppState = Arc<dyn DeviceStore>;
 
+/// Build the axum [`Router`] with all API routes and tracing middleware.
 pub fn router(store: Arc<dyn DeviceStore>) -> Router {
     Router::new()
         .route(wire::HEALTH, get(health))

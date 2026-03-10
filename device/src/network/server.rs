@@ -182,6 +182,7 @@ const PORTAL_JS: &[u8] = include_bytes!("../../../portal/dist/supervictor_portal
 #[cfg(feature = "portal")]
 const PORTAL_WASM_GZ: &[u8] = include_bytes!("../../../portal/dist/supervictor_portal_bg.wasm.gz");
 
+/// Embassy task that serves the captive portal UI and configuration API over HTTP.
 #[cfg(feature = "portal")]
 #[embassy_executor::task]
 pub async fn serve(stack: embassy_net::Stack<'static>) {

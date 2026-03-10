@@ -79,6 +79,7 @@ pub fn build_dns_response(query: &[u8]) -> Option<HVec<u8, 512>> {
     Some(resp)
 }
 
+/// Embassy task that listens on UDP port 53 and resolves all queries to the gateway IP.
 #[cfg(feature = "portal")]
 #[embassy_executor::task]
 pub async fn dns_hijack(stack: embassy_net::Stack<'static>) {

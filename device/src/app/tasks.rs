@@ -9,6 +9,7 @@ use esp_println::println;
 use esp_radio::wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState};
 use mbedtls_rs::{Session, SessionConfig, Tls};
 
+/// Maintains the WiFi station connection, reconnecting on disconnect.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
 pub async fn connection(mut controller: WifiController<'static>) {
@@ -37,12 +38,14 @@ pub async fn connection(mut controller: WifiController<'static>) {
     }
 }
 
+/// Drives the Embassy network stack (packet rx/tx) for the WiFi interface.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
 pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }
 
+/// Main application loop: resolves DNS, establishes mTLS, and sends uplink telemetry.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
 pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
@@ -136,6 +139,7 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
                 Ok(r) => r,
                 Err(e) => {
                     println!("   Failed to build HTTP request: {}", e);
+                    let _ = session.close().await;
                     Timer::after(MAIN_LOOP_DELAY).await;
                     continue;
                 }
@@ -168,6 +172,11 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
                 Ok(Err(e)) => println!("   Read failed: {:?}", e),
                 Err(_) => println!("   Read timed out"),
             };
+
+            if let Err(e) = session.close().await {
+                println!("   TLS close error: {:?}", e);
+            }
+
             Timer::after(MAIN_LOOP_DELAY).await;
         }
     }

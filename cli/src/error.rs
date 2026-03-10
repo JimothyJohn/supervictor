@@ -5,16 +5,27 @@ use std::fmt;
 pub enum CliError {
     /// A subprocess exited with a non-zero code.
     Command {
+        /// The shell command that was executed.
         cmd: String,
+        /// Process exit code.
         code: i32,
+        /// Captured stderr output.
         stderr: String,
     },
     /// A wait/poll operation exceeded its deadline.
-    Timeout { message: String },
+    Timeout {
+        /// Human-readable description of the timeout.
+        message: String,
+    },
     /// Generic I/O failure.
     Io(std::io::Error),
     /// HTTP request returned an unexpected status.
-    Http { status: u16, body: String },
+    Http {
+        /// HTTP status code.
+        status: u16,
+        /// Response body text.
+        body: String,
+    },
     /// Bad or missing configuration.
     Config(String),
     /// One or more required CLI tools are missing.

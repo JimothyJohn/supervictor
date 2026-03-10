@@ -3,27 +3,44 @@ use std::path::{Path, PathBuf};
 /// Project-wide configuration. Mirrors quickstart/config.py.
 #[derive(Debug, Clone)]
 pub struct ProjectConfig {
+    /// Absolute path to the repository root.
     pub repo_root: PathBuf,
+    /// Path to the `device/` crate directory.
     pub device_dir: PathBuf,
+    /// Path to the `endpoint/` crate directory.
     pub endpoint_dir: PathBuf,
+    /// Path to the `.env.dev` file.
     pub env_dev: PathBuf,
+    /// Path to the `.env.staging` file.
     pub env_staging: PathBuf,
+    /// Path to the `.env.prod` file.
     pub env_prod: PathBuf,
+    /// Path to the `.logs/` directory for build and test output.
     pub log_dir: PathBuf,
 
+    /// Port for `sam local start-api`.
     pub sam_local_port: u16,
+    /// Seconds to wait for SAM local readiness.
     pub sam_ready_timeout: u64,
+    /// Path to the SAM local log file.
     pub sam_log_file: PathBuf,
+    /// Path to the SAM local PID file (for `--serve` / `--stop`).
     pub sam_pid_file: PathBuf,
+    /// SAM config-env name for the dev stack.
     pub sam_config_env_dev: String,
+    /// SAM config-env name for the prod stack.
     pub sam_config_env_prod: String,
 
+    /// Directory name for certificates (relative to repo root).
     pub certs_dir_name: String,
+    /// Relative path to the cert generation script.
     pub gen_certs_script: String,
+    /// Production API endpoint URL.
     pub prod_api_endpoint: String,
 }
 
 impl ProjectConfig {
+    /// Build a config from the given repository root, deriving all paths.
     pub fn from_repo_root(root: &Path) -> Self {
         let root = root.to_path_buf();
         let log_dir = root.join(".logs");
@@ -48,10 +65,12 @@ impl ProjectConfig {
         }
     }
 
+    /// Absolute path to the certificates directory.
     pub fn certs_dir(&self) -> PathBuf {
         self.repo_root.join(&self.certs_dir_name)
     }
 
+    /// Absolute path to the `gen_certs.sh` script.
     pub fn gen_certs_script_path(&self) -> PathBuf {
         self.repo_root.join("cloud").join(&self.gen_certs_script)
     }

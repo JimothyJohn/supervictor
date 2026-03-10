@@ -6,13 +6,19 @@ use crate::runner::{self, RunOptions, Runner};
 use crate::rust_tools;
 use crate::sam::{self, SamLocal};
 
+/// Arguments for the `qs dev` command.
 pub struct DevArgs {
+    /// Enable verbose output.
     pub verbose: bool,
+    /// Print commands without executing.
     pub dry_run: bool,
+    /// Detach SAM local so it keeps running after the pipeline.
     pub serve: bool,
+    /// Stop a previously-detached SAM local process.
     pub stop: bool,
 }
 
+/// Run the local development pipeline: tests, SAM build, and optional serve.
 pub fn run_dev(args: &DevArgs, config: &ProjectConfig, r: &dyn Runner) -> Result<i32, CliError> {
     // Handle --stop: kill any running SAM process and exit
     if args.stop {

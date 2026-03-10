@@ -3,37 +3,61 @@ use crate::error::CliError;
 use crate::preflight;
 use crate::runner::{self, RunOptions, Runner};
 
+/// Arguments for the `qs certs` command.
 pub struct CertsArgs {
+    /// Enable verbose output.
     pub verbose: bool,
+    /// Print commands without executing.
     pub dry_run: bool,
+    /// The certificate subcommand to execute.
     pub command: CertsCommand,
 }
 
+/// Certificate management subcommands.
 pub enum CertsCommand {
+    /// Generate a new root CA.
     Ca,
+    /// Generate a device client certificate.
     Device {
+        /// Device identity name (used as directory and CN).
         name: String,
+        /// Optional validity period in days.
         days: Option<u32>,
     },
+    /// Generate a server certificate with SAN.
     Server {
+        /// Server name (used as directory).
         name: String,
+        /// IP or hostname for the SAN extension.
         host_ip: String,
+        /// Optional validity period in days.
         days: Option<u32>,
     },
+    /// List all generated certificates.
     List,
+    /// Verify a device and server cert chain against the CA.
     Verify {
+        /// Device whose client cert to verify.
         device_name: String,
+        /// Server whose cert to verify.
         server_name: String,
     },
+    /// Test a live TLS handshake against a remote server.
     Handshake {
+        /// Target hostname.
         host: String,
+        /// Target port.
         port: String,
+        /// Device name whose client cert to present.
         device_name: String,
+        /// Optional TLS version flag (e.g. "tls1_2").
         tls_version: Option<String>,
+        /// Also test connecting without a client cert.
         test_no_client: bool,
     },
 }
 
+/// Dispatch the `qs certs` subcommand.
 pub fn run_certs(
     args: &CertsArgs,
     config: &ProjectConfig,

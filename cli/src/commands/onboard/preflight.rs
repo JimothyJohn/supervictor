@@ -5,6 +5,7 @@ use super::{OnboardContext, PhaseResult};
 const BASE_TOOLS: &[&str] = &["openssl", "cargo", "docker"];
 const AWS_TOOLS: &[&str] = &["sam", "aws"];
 
+/// Check that required CLI tools, Docker, and `.env.dev` are available.
 pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     let mut required: Vec<&str> = BASE_TOOLS.to_vec();
     if ctx.mode == "aws" {

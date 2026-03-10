@@ -4,6 +4,7 @@ use supervictor_wire::{routes as wire, status};
 
 use super::{OnboardContext, PhaseResult};
 
+/// Register the device via POST and verify it becomes active.
 pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     if ctx.dry_run {
         return PhaseResult::passed();

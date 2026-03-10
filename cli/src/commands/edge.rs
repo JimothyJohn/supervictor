@@ -4,11 +4,15 @@ use crate::error::CliError;
 use crate::preflight;
 use crate::runner::{self, RunOptions, Runner};
 
+/// Arguments for the `qs edge` command.
 pub struct EdgeArgs {
+    /// Enable verbose output.
     pub verbose: bool,
+    /// Print commands without executing.
     pub dry_run: bool,
 }
 
+/// Build and flash the ESP32-C3 embedded firmware via espflash.
 pub fn run_edge(args: &EdgeArgs, config: &ProjectConfig, r: &dyn Runner) -> Result<i32, CliError> {
     preflight::require(&["cargo"], false, r)?;
     preflight::ensure_espflash(r)?;

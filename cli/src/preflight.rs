@@ -1,6 +1,7 @@
 use crate::error::CliError;
 use crate::runner::{self, CommandOutput, RunOptions, Runner};
 
+/// Pinned espflash version installed by `ensure_espflash`.
 pub const ESPFLASH_VERSION: &str = "3.3.0";
 
 /// Return the names of any tools not found on PATH.
@@ -42,7 +43,9 @@ pub fn ensure_espflash(runner: &dyn Runner) -> Result<(), CliError> {
             ..Default::default()
         };
         match runner.run(&["espflash", "--version"], &opts) {
-            Ok(CommandOutput { status: 0, stdout, .. }) => {
+            Ok(CommandOutput {
+                status: 0, stdout, ..
+            }) => {
                 let installed = stdout.trim().replace("espflash ", "");
                 if installed == ESPFLASH_VERSION {
                     return Ok(());

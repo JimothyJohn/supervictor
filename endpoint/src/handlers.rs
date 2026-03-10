@@ -8,6 +8,7 @@ use crate::models::{
 use crate::store::DeviceStore;
 use supervictor_wire::status;
 
+/// Return a greeting, optionally echoing the mTLS client subject.
 pub fn handle_hello(client_subject: Option<String>) -> HelloResponse {
     HelloResponse {
         message: "Hello from Supervictor!".into(),
@@ -15,6 +16,9 @@ pub fn handle_hello(client_subject: Option<String>) -> HelloResponse {
     }
 }
 
+/// Parse and persist a device uplink message.
+///
+/// When `require_registration` is true, the device must exist and be active.
 pub fn handle_uplink(
     raw_body: Option<&str>,
     client_subject: Option<String>,
@@ -59,6 +63,7 @@ pub fn handle_uplink(
     })
 }
 
+/// Register a new device from a JSON request body.
 pub fn handle_register_device(
     raw_body: Option<&str>,
     store: &dyn DeviceStore,
@@ -85,6 +90,7 @@ pub fn handle_register_device(
     Ok(DeviceResponse::from(saved))
 }
 
+/// Look up a single device by its identifier.
 pub fn handle_get_device(
     device_id: &str,
     store: &dyn DeviceStore,
@@ -98,11 +104,13 @@ pub fn handle_get_device(
     }
 }
 
+/// List all registered devices.
 pub fn handle_list_devices(store: &dyn DeviceStore) -> Result<Vec<DeviceResponse>, AppError> {
     let devices = store.list_devices()?;
     Ok(devices.into_iter().map(DeviceResponse::from).collect())
 }
 
+/// Retrieve the most recent uplinks for a device, up to `limit`.
 pub fn handle_get_device_uplinks(
     device_id: &str,
     store: &dyn DeviceStore,

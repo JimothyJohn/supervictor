@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::store::DeviceStore;
 
+/// Instantiate the configured store backend based on [`Config::store_backend`].
 pub async fn create_store(config: &Config) -> Result<Arc<dyn DeviceStore>, AppError> {
     match config.store_backend.as_str() {
         "sqlite" => {

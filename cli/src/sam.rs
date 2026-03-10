@@ -106,6 +106,7 @@ pub fn stop_from_pid_file(pid_file: &std::path::Path) -> Result<bool, CliError> 
 }
 
 impl<'a> SamLocal<'a> {
+    /// Create a new SAM local manager with the given config and options.
     pub fn new(
         config: &'a ProjectConfig,
         env: Option<HashMap<String, String>>,
@@ -122,6 +123,7 @@ impl<'a> SamLocal<'a> {
         }
     }
 
+    /// Base URL of the local SAM API (e.g. `http://localhost:3000`).
     pub fn url(&self) -> String {
         format!("http://localhost:{}", self.config.sam_local_port)
     }

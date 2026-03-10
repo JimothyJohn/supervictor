@@ -8,6 +8,7 @@ fn push<const N: usize>(buf: &mut HString<N>, s: &str) -> Result<(), HttpError> 
     buf.push_str(s).map_err(|_| HttpError::BufferOverflow)
 }
 
+/// Build an HTTP/1.0 GET request for the given host and optional path.
 pub fn get_request(host: &str, path: Option<&str>) -> Result<HString<128>, HttpError> {
     let mut request = HString::<128>::new();
     let path = path.unwrap_or("/");

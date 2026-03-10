@@ -8,11 +8,15 @@ use crate::sam::SamLocal;
 
 use super::dev;
 
+/// Arguments for the `qs staging` command.
 pub struct StagingArgs {
+    /// Enable verbose output.
     pub verbose: bool,
+    /// Print commands without executing.
     pub dry_run: bool,
 }
 
+/// Run the staging pipeline: deploy to dev stack, integration tests, mTLS verification.
 pub fn run_staging(
     args: &StagingArgs,
     config: &ProjectConfig,

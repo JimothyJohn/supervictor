@@ -6,15 +6,21 @@ use crate::config::ProjectConfig;
 use crate::error::CliError;
 use crate::runner;
 
-/// Arguments for the ping command.
+/// Arguments for the `qs ping` command.
 pub struct PingArgs {
+    /// Optional path to the device certs directory (default: `certs/devices/test-device`).
     pub certs: Option<PathBuf>,
+    /// Optional CA cert path (default: WebPki roots).
     pub ca: Option<PathBuf>,
+    /// Target hostname.
     pub host: String,
+    /// Target HTTPS port.
     pub port: u16,
+    /// Print commands without executing.
     pub dry_run: bool,
 }
 
+/// Send an mTLS GET request to the target endpoint and print the response.
 pub fn run_ping(args: &PingArgs, config: &ProjectConfig) -> Result<i32, CliError> {
     let cert_dir = args
         .certs

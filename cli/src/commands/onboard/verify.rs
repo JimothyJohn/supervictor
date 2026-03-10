@@ -10,6 +10,7 @@ use super::{OnboardContext, PhaseResult};
 const POLL_INTERVAL: u64 = 5;
 const POLL_TIMEOUT: u64 = 60;
 
+/// Poll the uplinks endpoint until the device sends its first reading.
 pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     if ctx.dry_run {
         return PhaseResult::passed();

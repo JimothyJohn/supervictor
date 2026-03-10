@@ -5,6 +5,7 @@ use crate::error::AppError;
 use crate::models::{DeviceRecord, UplinkRecord};
 use crate::store::DeviceStore;
 
+/// DynamoDB-backed implementation of [`DeviceStore`](super::DeviceStore).
 pub struct DynamoDeviceStore {
     client: Client,
     devices_table: String,
@@ -19,6 +20,7 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 }
 
 impl DynamoDeviceStore {
+    /// Create a new DynamoDB store backed by the given AWS SDK config and table names.
     pub fn new(
         sdk_config: &aws_config::SdkConfig,
         devices_table: &str,

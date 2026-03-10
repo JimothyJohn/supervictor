@@ -1,7 +1,11 @@
+/// Errors that can occur during HTTP request building or response parsing.
 #[derive(Debug)]
 pub enum HttpError {
+    /// Failed to deserialize the response body or headers.
     Deserialization,
+    /// General failure when parsing HTTP response structure.
     GenericParseError,
+    /// A heapless buffer exceeded its fixed capacity.
     BufferOverflow,
 }
 

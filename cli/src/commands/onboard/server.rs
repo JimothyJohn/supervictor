@@ -11,6 +11,7 @@ use super::{OnboardContext, PhaseResult};
 const POLL_TIMEOUT: u64 = 60;
 const POLL_INTERVAL: u64 = 2;
 
+/// Start the API server (Docker Compose for onprem, SAM local for AWS).
 pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     if ctx.mode == "onprem" {
         start_compose(ctx)

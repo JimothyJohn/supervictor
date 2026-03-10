@@ -8,9 +8,8 @@ use crate::error::CliError;
 /// Handles `#` comments, `KEY=VALUE`, single- and double-quoted values,
 /// and blank lines. Does not mutate the process environment.
 pub fn load_env(path: &Path) -> Result<HashMap<String, String>, CliError> {
-    let contents = std::fs::read_to_string(path).map_err(|e| {
-        CliError::Config(format!("failed to read {}: {}", path.display(), e))
-    })?;
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| CliError::Config(format!("failed to read {}: {}", path.display(), e)))?;
     Ok(parse_env(&contents))
 }
 
@@ -37,11 +36,10 @@ fn parse_env(contents: &str) -> HashMap<String, String> {
 
 fn strip_quotes(s: &str) -> &str {
     if s.len() >= 2
-        && ((s.starts_with('"') && s.ends_with('"'))
-            || (s.starts_with('\'') && s.ends_with('\'')))
-        {
-            return &s[1..s.len() - 1];
-        }
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+    {
+        return &s[1..s.len() - 1];
+    }
     s
 }
 

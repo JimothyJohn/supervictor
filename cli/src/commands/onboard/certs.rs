@@ -40,6 +40,7 @@ fn upload_truststore(ctx: &OnboardContext, ca_pem: &std::path::Path) {
     );
 }
 
+/// Generate CA and device certificates if they do not already exist.
 pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     let script_cwd = ctx.config.repo_root.clone();
     let certs_dir = ctx.config.certs_dir();

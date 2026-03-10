@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use crate::error::CliError;
 use crate::runner::{self, CommandOutput, RunOptions, Runner};
 
+/// API Gateway custom domain for mTLS.
 const TRUSTSTORE_DOMAIN: &str = "supervictor.advin.io";
 const TRUSTSTORE_BUCKET: &str = "supervictor";
 const TRUSTSTORE_KEY: &str = "truststore.pem";

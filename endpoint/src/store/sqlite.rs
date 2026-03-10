@@ -6,11 +6,13 @@ use crate::error::AppError;
 use crate::models::{DeviceRecord, UplinkRecord};
 use crate::store::DeviceStore;
 
+/// SQLite-backed implementation of [`DeviceStore`].
 pub struct SqliteDeviceStore {
     conn: Mutex<Connection>,
 }
 
 impl SqliteDeviceStore {
+    /// Open (or create) a SQLite database at `db_path` and run migrations.
     pub fn new(db_path: &str) -> Result<Self, AppError> {
         let conn =
             Connection::open(db_path).map_err(|e| AppError::Store(format!("sqlite open: {e}")))?;

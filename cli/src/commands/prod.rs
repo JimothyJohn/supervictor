@@ -6,11 +6,15 @@ use crate::sam::SamLocal;
 
 use super::{dev, staging, truststore};
 
+/// Arguments for the `qs prod` command.
 pub struct ProdArgs {
+    /// Enable verbose output.
     pub verbose: bool,
+    /// Print commands without executing.
     pub dry_run: bool,
 }
 
+/// Run the production deployment pipeline (dev gate, staging gate, confirm, deploy).
 pub fn run_prod(args: &ProdArgs, config: &ProjectConfig, r: &dyn Runner) -> Result<i32, CliError> {
     // Gate 1: dev
     runner::milestone("Running dev gate");
