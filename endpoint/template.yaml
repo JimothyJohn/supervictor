@@ -137,8 +137,8 @@ Resources:
                         Path: /devices/{device_id}/uplinks
                         Method: get
         Metadata:
-            Dockerfile: Dockerfile
-            DockerContext: ./
+            Dockerfile: endpoint/Dockerfile
+            DockerContext: ../
             DockerTag: latest
 
     # -------------------------------------------------------------------------

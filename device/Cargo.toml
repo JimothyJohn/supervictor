@@ -1,6 +1,6 @@
 [package]
 edition = "2021"
-name = "supervictor"
+name = "supervictor-device"
 version = "0.1.0"
 
 [[bin]]
@@ -96,17 +96,3 @@ tokio = { version = "1.0", features = ["full"] }
 rustls = "0.23.26"
 tokio-rustls = "0.26.2"
 rcgen = "0.13"
-
-[profile.dev]
-# Rust debug is too slow.
-# For debug builds always builds with some optimization
-opt-level = "s"
-
-[profile.release]
-codegen-units = 1        # LLVM can perform better optimizations using a single thread
-debug = 2
-debug-assertions = false
-incremental = false
-lto = 'fat'
-opt-level = 's'
-overflow-checks = false

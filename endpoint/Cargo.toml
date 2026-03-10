@@ -21,6 +21,7 @@ chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 aws-sdk-dynamodb = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
+supervictor-wire = { path = "../wire", features = ["alloc"] }
 
 [dev-dependencies]
 axum-test = "19"

@@ -9,16 +9,17 @@ use tower_http::trace::TraceLayer;
 use crate::handlers;
 use crate::middleware::ClientSubject;
 use crate::store::DeviceStore;
+use supervictor_wire::routes as wire;
 
 pub type AppState = Arc<dyn DeviceStore>;
 
 pub fn router(store: Arc<dyn DeviceStore>) -> Router {
     Router::new()
-        .route("/health", get(health))
-        .route("/", get(hello).post(uplink))
-        .route("/devices", get(list_devices).post(register_device))
-        .route("/devices/{device_id}", get(get_device))
-        .route("/devices/{device_id}/uplinks", get(get_device_uplinks))
+        .route(wire::HEALTH, get(health))
+        .route(wire::ROOT, get(hello).post(uplink))
+        .route(wire::DEVICES, get(list_devices).post(register_device))
+        .route(wire::DEVICE_PATTERN, get(get_device))
+        .route(wire::DEVICE_UPLINKS_PATTERN, get(get_device_uplinks))
         .with_state(store)
         .layer(TraceLayer::new_for_http())
 }

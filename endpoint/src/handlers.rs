@@ -6,6 +6,7 @@ use crate::models::{
     UplinkRecord, UplinkResponse,
 };
 use crate::store::DeviceStore;
+use supervictor_wire::status;
 
 pub fn handle_hello(client_subject: Option<String>) -> HelloResponse {
     HelloResponse {
@@ -34,7 +35,7 @@ pub fn handle_uplink(
         if let Some(s) = store {
             let device = s.get_device(&uplink.id)?;
             match device {
-                Some(d) if d.status == "active" => {}
+                Some(d) if d.status == status::ACTIVE => {}
                 _ => return Err(AppError::DeviceNotRegistered),
             }
         }
@@ -76,7 +77,7 @@ pub fn handle_register_device(
         device_id: req.device_id,
         owner_id: req.owner_id,
         subject_dn: req.subject_dn,
-        status: "active".into(),
+        status: status::ACTIVE.into(),
         created_at: Utc::now().to_rfc3339(),
     };
 

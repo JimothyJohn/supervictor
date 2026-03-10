@@ -1,4 +1,6 @@
 use crate::commands::ping::{build_mtls_agent, build_plain_agent};
+use supervictor_wire::models::{DeviceResponse, RegisterDeviceRequest};
+use supervictor_wire::{routes as wire, status};
 
 use super::{OnboardContext, PhaseResult};
 
@@ -18,17 +20,18 @@ pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     };
 
     // POST registration
-    let register_url = format!("{}/devices", api_url);
-    let payload = serde_json::json!({
-        "device_id": ctx.device_name,
-        "owner_id": ctx.owner_id,
-        "subject_dn": ctx.subject_dn,
-    });
+    let register_url = format!("{}{}", api_url, wire::DEVICES);
+    let payload = RegisterDeviceRequest {
+        device_id: ctx.device_name.clone(),
+        owner_id: ctx.owner_id.clone(),
+        subject_dn: ctx.subject_dn.clone(),
+    };
+    let body = serde_json::to_string(&payload).unwrap();
 
     match agent
         .post(&register_url)
         .header("Content-Type", "application/json")
-        .send(payload.to_string().as_bytes())
+        .send(body.as_bytes())
     {
         Ok(resp) => {
             if resp.status() != 201 {
@@ -47,18 +50,16 @@ pub fn run(ctx: &mut OnboardContext) -> PhaseResult {
     }
 
     // GET to verify device is active
-    let verify_url = format!("{}/devices/{}", api_url, ctx.device_name);
+    let verify_url = format!("{}{}/{}", api_url, wire::DEVICES, ctx.device_name);
     match agent.get(&verify_url).call() {
         Ok(resp) => {
-            let body = resp.into_body().read_to_string().unwrap_or_default();
-            match serde_json::from_str::<serde_json::Value>(&body) {
-                Ok(json) => {
-                    if json.get("status").and_then(|s| s.as_str()) != Some("active") {
+            let resp_body = resp.into_body().read_to_string().unwrap_or_default();
+            match serde_json::from_str::<DeviceResponse>(&resp_body) {
+                Ok(device) => {
+                    if device.status != status::ACTIVE {
                         return PhaseResult::failed(format!(
                             "Device status is '{}', expected 'active'",
-                            json.get("status")
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("unknown")
+                            device.status
                         ));
                     }
                 }

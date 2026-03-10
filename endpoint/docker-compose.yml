@@ -1,6 +1,8 @@
 services:
   endpoint:
-    build: .
+    build:
+      context: ../
+      dockerfile: endpoint/Dockerfile
     expose:
       - "8000"
     environment:

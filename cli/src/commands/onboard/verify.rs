@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use crate::commands::ping::{build_mtls_agent, build_plain_agent};
 use crate::env;
 use crate::output;
+use supervictor_wire::routes as wire;
 
 use super::{OnboardContext, PhaseResult};
 
@@ -61,7 +62,7 @@ fn resolve_verify(ctx: &OnboardContext) -> Result<(String, ureq::Agent), String>
     if ctx.mode == "onprem" {
         if ctx.compose_file.is_some() {
             let agent = build_mtls_agent_from_ctx(ctx, true)?;
-            let url = format!("{}/devices/{}/uplinks", api_url, device_name);
+            let url = format!("{}{}/{}/uplinks", api_url, wire::DEVICES, device_name);
             return Ok((url, agent));
         }
         let port = env_vars.get("PORT").cloned().unwrap_or_default();
@@ -71,21 +72,21 @@ fn resolve_verify(ctx: &OnboardContext) -> Result<(String, ureq::Agent), String>
             api_url.to_string()
         };
         return Ok((
-            format!("{}/devices/{}/uplinks", base, device_name),
+            format!("{}{}/{}/uplinks", base, wire::DEVICES, device_name),
             build_plain_agent(),
         ));
     }
 
     // AWS mode
     if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
-        let url = format!("{}/devices/{}/uplinks", api_url, device_name);
+        let url = format!("{}{}/{}/uplinks", api_url, wire::DEVICES, device_name);
         return Ok((url, build_plain_agent()));
     }
 
     // Remote host — use mTLS
     output::info(&format!("Device targets {} — verifying via mTLS", host));
     let agent = build_mtls_agent_from_ctx(ctx, false)?;
-    let url = format!("https://{}/devices/{}/uplinks", host, device_name);
+    let url = format!("https://{}{}/{}/uplinks", host, wire::DEVICES, device_name);
     Ok((url, agent))
 }
 

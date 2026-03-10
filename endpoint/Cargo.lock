@@ -2121,12 +2121,17 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "supervictor-wire",
  "thiserror",
  "tokio",
  "tower-http",
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "supervictor-wire"
+version = "0.1.0"
 
 [[package]]
 name = "syn"

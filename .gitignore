@@ -274,3 +274,4 @@ certs/
 .devcontainer/
 .ruff_cache/
 !certs/AmazonRootCA1.pem
+.claude

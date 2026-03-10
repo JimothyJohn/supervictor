@@ -1,0 +1,12 @@
+# Only send wire/ and endpoint/ to the Docker daemon
+*
+!wire/
+!endpoint/
+
+# Exclude build artifacts and secrets within those dirs
+**/target/
+**/.logs/
+**/*.md
+**/.env*
+**/certs/
+endpoint/tests/

@@ -179,3 +179,7 @@ fn ensure_certs(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "staging_tests.rs"]
+mod tests;

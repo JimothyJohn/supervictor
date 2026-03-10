@@ -64,3 +64,7 @@ pub fn run_prod(args: &ProdArgs, config: &ProjectConfig, r: &dyn Runner) -> Resu
     }
     Ok(0)
 }
+
+#[cfg(test)]
+#[path = "prod_tests.rs"]
+mod tests;

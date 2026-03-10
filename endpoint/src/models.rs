@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+// Re-export wire types as canonical API types
+pub use supervictor_wire::models::{DeviceResponse, RegisterDeviceRequest, UplinkMessage};
+
 // --- Domain Records (storage layer) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,23 +22,7 @@ pub struct UplinkRecord {
     pub payload: serde_json::Value,
 }
 
-// --- API Request Types ---
-
-#[derive(Debug, Deserialize)]
-pub struct UplinkMessage {
-    pub id: String,
-    pub current: i64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RegisterDeviceRequest {
-    pub device_id: String,
-    pub owner_id: String,
-    #[serde(default)]
-    pub subject_dn: Option<String>,
-}
-
-// --- API Response Types ---
+// --- Endpoint-only Response Types ---
 
 #[derive(Debug, Serialize)]
 pub struct HelloResponse {
@@ -48,19 +35,9 @@ pub struct HelloResponse {
 pub struct UplinkResponse {
     pub message: String,
     pub device_id: String,
-    pub current: i64,
+    pub current: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_subject: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DeviceResponse {
-    pub device_id: String,
-    pub owner_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subject_dn: Option<String>,
-    pub status: String,
-    pub created_at: String,
 }
 
 #[derive(Debug, Serialize)]

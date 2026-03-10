@@ -420,9 +420,14 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "supervictor-wire",
  "toml",
  "ureq",
 ]
+
+[[package]]
+name = "supervictor-wire"
+version = "0.1.0"
 
 [[package]]
 name = "syn"

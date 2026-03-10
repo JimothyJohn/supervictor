@@ -168,4 +168,4 @@ Production deployment includes mTLS enforcement via API Gateway truststore, ACM 
 
 ## License
 
-[MIT](LICENSE) — Nick Armenta, 2025
+[MIT](LICENSE) — Nick Armenta, 2026
