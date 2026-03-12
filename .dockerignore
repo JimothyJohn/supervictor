@@ -1,7 +1,7 @@
-# Only send wire/ and endpoint/ to the Docker daemon
+# Only send common/ and endpoint/ to the Docker daemon
 *
-!wire/
-!endpoint/
+!supervictor/common/
+!supervictor/endpoint/
 
 # Exclude build artifacts and secrets within those dirs
 **/target/
@@ -9,4 +9,4 @@
 **/*.md
 **/.env*
 **/certs/
-endpoint/tests/
+supervictor/endpoint/tests/

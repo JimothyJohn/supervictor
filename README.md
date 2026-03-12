@@ -29,7 +29,7 @@ The result: an IoT stack where a solo developer moves as fast as a team, and a t
 │  Embassy     │       │   client     │       │  SQLite/DynamoDB  │
 │  esp-mbedtls │       │   certs      │       │  Feature-gated   │
 └──────────────┘       └──────────────┘       └──────────────────┘
-     device/                                       endpoint/
+     edge/                                        endpoint/
                           cli/
                    ┌──────────────────┐
                    │  Build, flash,   │
@@ -38,14 +38,14 @@ The result: an IoT stack where a solo developer moves as fast as a team, and a t
                    └──────────────────┘
 ```
 
-Three crates. Three binaries. One language.
+Four crates. Three binaries. One language.
 
 ## Quick Start
 
 ```bash
 # Clone and build the CLI
 git clone git@github.com:JimothyJohn/supervictor.git
-cd supervictor/cli && cargo build --release
+cd supervictor/supervictor/cli && cargo build --release
 alias qs=./target/release/qs
 
 # Generate mTLS certificates
@@ -67,22 +67,24 @@ qs prod
 
 ```
 supervictor/
-  device/                        # ESP32-C3 firmware (no_std, Embassy async)
-    src/bin/embedded_main.rs     #   firmware entry point
-    src/bin/desktop_main.rs      #   desktop mTLS test client
-    src/app/                     #   application logic + async tasks
-    src/network/                 #   HTTP, TLS, DNS, TCP
-    src/models/                  #   uplink message types
-  endpoint/                      # Cloud API (axum + tokio)
-    src/handlers.rs              #   framework-agnostic pure functions
-    src/routes.rs                #   axum router
-    src/store/                   #   pluggable backends (SQLite, DynamoDB)
-    template.yaml                #   SAM/CloudFormation
-    docker-compose.yml           #   local dev with Caddy mTLS
-  cli/                           # qs CLI (clap)
-    src/commands/                 #   dev, edge, staging, prod, certs, onboard
-  certs/                         # generated certs (gitignored)
-  docs/                          # web interface
+  supervictor/
+    common/                        # Shared types & routes (no_std compatible)
+    edge/                          # ESP32-C3 firmware (no_std, Embassy async)
+      src/bin/embedded_main.rs     #   firmware entry point
+      src/bin/desktop_main.rs      #   desktop mTLS test client
+      src/app/                     #   application logic + async tasks
+      src/network/                 #   HTTP, TLS, DNS, TCP
+      src/models/                  #   uplink message types
+    endpoint/                      # Cloud API (axum + tokio)
+      src/handlers.rs              #   framework-agnostic pure functions
+      src/routes.rs                #   axum router
+      src/store/                   #   pluggable backends (SQLite, DynamoDB)
+      template.yaml                #   SAM/CloudFormation
+      docker-compose.yml           #   local dev with Caddy mTLS
+    cli/                           # qs CLI (clap)
+      src/commands/                #   dev, edge, staging, prod, certs, onboard
+  certs/                           # generated certs (gitignored)
+  docs/                            # web interface
 ```
 
 ## API
@@ -135,8 +137,8 @@ pub trait DeviceStore: Send + Sync {
 Every layer is testable offline with zero external dependencies:
 
 ```bash
-# Device — runs on host, not on hardware
-cargo test --lib --target aarch64-apple-darwin -p supervictor
+# Edge — runs on host, not on hardware
+cargo test --lib --target aarch64-apple-darwin -p supervictor-edge
 
 # Endpoint — in-memory SQLite, no AWS
 cargo test --features sqlite -p supervictor-endpoint

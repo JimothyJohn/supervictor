@@ -1,5 +1,5 @@
 [workspace]
-members = ["wire", "device", "endpoint", "cli"]
+members = ["supervictor/*"]
 resolver = "2"
 
 [profile.dev]

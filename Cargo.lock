@@ -4347,13 +4347,21 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
- "supervictor-wire",
+ "supervictor-common",
  "toml",
  "ureq",
 ]
 
 [[package]]
-name = "supervictor-device"
+name = "supervictor-common"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "supervictor-edge"
 version = "0.1.0"
 dependencies = [
  "embassy-executor",
@@ -4396,20 +4404,12 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "supervictor-wire",
+ "supervictor-common",
  "thiserror 2.0.18",
  "tokio",
  "tower-http",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "supervictor-wire"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]
