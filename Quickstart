@@ -104,8 +104,10 @@ lint() {
 validate_and_build() {
     log "building workspace (host)"
     cargo build --workspace --target "$HOST_TARGET"
-    log "checking edge embedded (xtensa, ESP32)"
-    (cd "$EDGE_DIR" && cargo check --features embedded)
+    log "checking edge embedded ethernet (xtensa, ESP32-POE-ISO primary uplink)"
+    (cd "$EDGE_DIR" && cargo check --features ethernet)
+    log "checking edge embedded wifi (fallback interface)"
+    (cd "$EDGE_DIR" && cargo check --features wifi)
     log "checking edge desktop"
     (cd "$EDGE_DIR" && cargo check --features desktop --target "$HOST_TARGET")
     log "build OK"
@@ -210,7 +212,7 @@ cmd_dev() {
 cmd_edge() {
     log "building and flashing embedded firmware"
     [[ -n "${ESPFLASH_PORT:-}" ]] && log "using serial port $ESPFLASH_PORT"
-    (cd "$EDGE_DIR" && cargo run --bin supervictor-embedded --features embedded)
+    (cd "$EDGE_DIR" && cargo run --bin supervictor-embedded --features ethernet)
 }
 
 # ── Staging / prod pipelines (was: qs staging / qs prod) ─────────────
@@ -340,7 +342,7 @@ cmd_onboard() { # <device-name> <owner-id> [host] [port]
     esac
 
     log "[3/4] flashing firmware (DEVICE_NAME=$device)"
-    (cd "$EDGE_DIR" && DEVICE_NAME="$device" cargo run --bin supervictor-embedded --features embedded)
+    (cd "$EDGE_DIR" && DEVICE_NAME="$device" cargo run --bin supervictor-embedded --features ethernet)
 
     log "[4/4] verifying with mTLS ping"
     PING_CERTS="$REPO_ROOT/certs/devices/$device" cmd_ping "$host" "$port"

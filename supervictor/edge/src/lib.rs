@@ -6,6 +6,8 @@
 
 #![no_std]
 
+/// Board support (Olimex ESP32-POE-ISO pin map, APLL math, RMII bring-up).
+pub mod board;
 /// HTTP error types for request/response handling.
 pub mod error;
 /// Domain models for device-to-cloud communication.

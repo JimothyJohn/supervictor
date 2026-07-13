@@ -62,6 +62,9 @@ jobs:
           openssl req -new -key ci-certs/devices/ci-device/client.key -subj "/CN=ci-device" \
             | openssl x509 -req -CA ci-certs/ca/ca.pem -CAkey ci-certs/ca/ca.key -CAcreateserial -days 1 \
               -out ci-certs/devices/ci-device/client.pem
-      - name: Check embedded firmware
+      - name: Check embedded firmware (ethernet — primary uplink)
         working-directory: supervictor/edge
-        run: cargo check --features embedded --locked
+        run: cargo check --features ethernet --locked
+      - name: Check embedded firmware (wifi — fallback interface)
+        working-directory: supervictor/edge
+        run: cargo check --features wifi --locked

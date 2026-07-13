@@ -19,6 +19,20 @@ pub const WIFI_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(5000);
 /// Delay before retrying a failed DNS resolution.
 pub const DNS_RETRY_DELAY: Duration = Duration::from_millis(3000);
 
+// --- Ethernet (EMAC / RMII, ESP32-POE-ISO) ---
+/// RX frame slots in the EMAC DMA ring. Sized for DHCP/TLS-handshake bursts;
+/// with TX below this is ~19 KB of DRAM held statically.
+pub const EMAC_RX_FRAMES: usize = 8;
+/// TX frame slots in the EMAC DMA ring (telemetry uplink is low-rate).
+pub const EMAC_TX_FRAMES: usize = 4;
+/// Per-frame DMA buffer size in bytes (max Ethernet frame + slack).
+pub const EMAC_FRAME_BUF_SIZE: usize = 1600;
+/// Interval between PHY link-status polls.
+pub const ETH_LINK_POLL_INTERVAL: Duration = Duration::from_millis(500);
+/// Wait after enabling PHY power (GPIO12) before MDIO access. The LAN8710A
+/// needs sub-ms per datasheet; generous margin costs boot time once.
+pub const PHY_POWER_STABLE_DELAY_MS: u32 = 100;
+
 // --- TCP/Socket ---
 /// TCP receive buffer size in bytes.
 pub const TCP_RX_BUFFER_SIZE: usize = 4096;

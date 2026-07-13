@@ -3,17 +3,20 @@ use crate::models::uplink::UplinkMessage;
 use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
 use embassy_net::tcp::TcpSocket;
-use embassy_net::{Runner, Stack};
+#[cfg(feature = "wifi")]
+use embassy_net::Runner;
+use embassy_net::Stack;
 use embassy_time::{Duration, Timer};
 use esp_println::println;
+#[cfg(feature = "wifi")]
 use esp_radio::wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState};
 use mbedtls_rs::{Session, SessionConfig, Tls};
 
 async fn backoff_delay(backoff: &mut Duration) {
     println!("   retrying in {}ms", backoff.as_millis());
     Timer::after(*backoff).await;
-    let doubled_ms = (backoff.as_millis() as u64).saturating_mul(2);
-    *backoff = if doubled_ms > BACKOFF_MAX.as_millis() as u64 {
+    let doubled_ms = backoff.as_millis().saturating_mul(2);
+    *backoff = if doubled_ms > BACKOFF_MAX.as_millis() {
         BACKOFF_MAX
     } else {
         Duration::from_millis(doubled_ms)
@@ -21,7 +24,7 @@ async fn backoff_delay(backoff: &mut Duration) {
 }
 
 /// Maintains the WiFi station connection, reconnecting on disconnect.
-#[cfg(feature = "embedded")]
+#[cfg(feature = "wifi")]
 #[embassy_executor::task]
 pub async fn connection(mut controller: WifiController<'static>) {
     loop {
@@ -50,7 +53,7 @@ pub async fn connection(mut controller: WifiController<'static>) {
 }
 
 /// Drives the Embassy network stack (packet rx/tx) for the WiFi interface.
-#[cfg(feature = "embedded")]
+#[cfg(feature = "wifi")]
 #[embassy_executor::task]
 pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await

@@ -52,19 +52,24 @@ them — git history is the changelog. Every remaining item is gated; the
       releases against heapless 0.9 (their main branch already moved; we're
       unified on 0.9.3 everywhere else).
       **Unblocks:** a serde-json-core release > 0.6.0.
-- [ ] Wired Ethernet on the ESP32-POE-ISO. The firmware now targets the
-      board's chip (ESP32/Xtensa) but ships WiFi-only — esp-hal has no EMAC
-      driver (esp-rs/esp-hal#4163). Reviewed `ph-esp32-mac` 0.1.1 (Feb 2026):
-      footprint is tiny (critical-section + embedded-hal, optional esp-hal
-      ^1.0 / embassy-net-driver ^0.2 / smoltcp ^0.12 — all already in-tree),
-      Apache-2.0, and it supports the POE-ISO's clock wiring
-      (`RmiiClockMode::InternalOutput` on GPIO17). But: 0 stars, ~70
-      downloads, single maintainer, and its PHY driver is LAN8720A — the
-      POE-ISO's LAN8710A is register-compatible for standard bring-up but
-      untested. POE-ISO pin map: MDC=GPIO23, MDIO=GPIO18, PHY power=GPIO12,
-      clock out=GPIO17.
-      **Unblocks:** board on hand — PHY bring-up and link-layer soak can't be
-      compile-checked, and the crate is too young to ship unverified.
+- [ ] Hardware-verify wired Ethernet on the ESP32-POE-ISO. The `ethernet`
+      feature (now the primary uplink; `wifi` is the fallback) is implemented
+      and compile-checked but has never touched the board: `ph-esp32-mac`
+      EMAC driver + LAN8720A PHY driver (the board's LAN8710A shares the
+      register map and `0x0007C0Fx` ID — bring-up should work, unproven), and
+      an in-tree APLL 50 MHz + GPIO17 clock-out bring-up
+      (`src/board/poe_iso.rs`) that nothing upstream provides — esp-hal has
+      no APLL API and the crate assumes the clock exists. Soak checklist:
+      PHY ID on console, link at 100FD, DHCP lease, mTLS uplink roundtrips,
+      cable pull/replug recovery.
+      **Unblocks:** board on hand — clock generation, MDIO, and link behavior
+      can't be compile-checked.
+- [ ] Move `ph-esp32-mac` from the pinned git fork back to crates.io. The
+      released 0.1.1 can't detect any PHY (MDIO reads broken — upstream
+      photon-circus/ph-esp32-mac#4); we pin the PR's hardware-verified fix
+      rev from `cfbraun/ph-esp32-mac`. If the fork disappears before #4
+      merges, builds break — re-pin or vendor.
+      **Unblocks:** upstream merging #4 and cutting a release.
 - [ ] OTA update path (prerequisite for cert rotation on deployed devices —
       see todo/ENTERPRISE.md and ROADMAP.md Phase 2).
       **Unblocks:** hardware + the esp migration above (A/B partition

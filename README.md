@@ -68,6 +68,7 @@ supervictor/
   supervictor/
     common/                        # Shared types & routes (no_std compatible)
     edge/                          # ESP32 (POE-ISO) firmware (no_std, Embassy async)
+                                   #   uplink: wired Ethernet/PoE primary, WiFi fallback
       src/bin/embedded_main.rs     #   firmware entry point
       src/bin/desktop_main.rs      #   desktop mTLS test client
       src/app/                     #   application logic + async tasks
