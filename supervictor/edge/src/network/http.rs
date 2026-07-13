@@ -27,7 +27,7 @@ pub fn get_request(host: &str, path: Option<&str>) -> Result<HString<192>, HttpE
     push(&mut request, "\r\n")?;
     push(
         &mut request,
-        "User-Agent: Uplink/0.1.0 (Platform; ESP32-C3)\r\n",
+        "User-Agent: Uplink/0.1.0 (Platform; ESP32)\r\n",
     )?;
     push(&mut request, "Connection: close\r\n")?;
     push(&mut request, "Accept: */*\r\n\r\n")?;

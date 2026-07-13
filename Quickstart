@@ -17,6 +17,10 @@ if [[ -f ".env.${ENV}" ]]; then
     set +a
 fi
 
+# Xtensa build env (PATH to xtensa-esp32-elf-gcc, the edge linker) — written
+# by `espup install`; harmless to skip when only host-side work runs.
+[[ -f "$HOME/export-esp.sh" ]] && . "$HOME/export-esp.sh"
+
 [[ "${TRACE:-0}" == "1" ]] && set -o xtrace
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
@@ -40,9 +44,9 @@ help_function() {
 Usage: $(basename "$0") <command> [args]
 
 Pipeline:
-  install                  Check toolchains (nightly + rust-src) and fetch deps
+  install                  Check toolchains (esp via espup) and fetch deps
   lint                     cargo fmt --check + clippy --all-targets -D warnings
-  build                    Workspace + edge embedded (riscv32) + edge desktop
+  build                    Workspace + edge embedded (xtensa) + edge desktop
   unit                     Full workspace test suite on the host
   integration              SAM-local roundtrips (SAM_LOCAL_URL) + staging smoke
   -t, --test               Everything: lint -> build -> unit -> integration
@@ -51,7 +55,7 @@ Pipeline:
 Local dev & deploy:
   dev [--serve|--stop]     Tests + sam build + sam local (+integration); --serve
                            detaches sam local, --stop kills a detached one
-  edge                     Build + flash the ESP32-C3 (espflash via cargo run)
+  edge                     Build + flash the ESP32-POE-ISO (espflash via cargo run)
   staging                  dev gate + deploy dev stack + remote integration tests
   prod                     dev + staging gates + confirm + prod deploy + truststore
   deploy                   Self-hosted staging box (scripts/deploy-staging.sh)
@@ -75,11 +79,15 @@ check_dependencies() {
 
 install_deps() {
     log "checking toolchains"
-    if ! rustup toolchain list | grep -q nightly; then
-        log "installing nightly toolchain (required for edge embedded build)"
-        rustup toolchain install nightly
+    # Xtensa (original ESP32) builds need the esp-rs fork toolchain via espup
+    if ! rustup toolchain list | grep -q '^esp'; then
+        command_exists espup || {
+            log "installing espup (Xtensa toolchain manager)"
+            cargo install espup --locked
+        }
+        log "installing esp toolchain (Xtensa rustc for the edge build)"
+        espup install --targets esp32
     fi
-    rustup component add rust-src --toolchain nightly >/dev/null 2>&1 || true
     log "fetching workspace dependencies"
     cargo fetch
     log "install OK"
@@ -96,8 +104,8 @@ lint() {
 validate_and_build() {
     log "building workspace (host)"
     cargo build --workspace --target "$HOST_TARGET"
-    log "checking edge embedded (riscv32imc, ESP32-C3)"
-    (cd "$EDGE_DIR" && cargo +nightly check --features embedded)
+    log "checking edge embedded (xtensa, ESP32)"
+    (cd "$EDGE_DIR" && cargo check --features embedded)
     log "checking edge desktop"
     (cd "$EDGE_DIR" && cargo check --features desktop --target "$HOST_TARGET")
     log "build OK"
@@ -166,7 +174,10 @@ cmd_dev() {
 
     local port="${SAM_LOCAL_PORT:-3000}"
     log "running edge library tests"
-    (cd "$EDGE_DIR" && cargo test --lib --target "$HOST_TARGET") \
+    # From the repo root so edge/.cargo/config.toml (xtensa default target +
+    # build-std) doesn't apply — build-std core/alloc conflicts with the
+    # prebuilt host std.
+    cargo test -p supervictor-edge --lib --target "$HOST_TARGET" \
         > "$LOG_DIR/rust_tests.log" 2>&1 || fail "edge tests failed (see $LOG_DIR/rust_tests.log)"
     log "running endpoint tests"
     (cd "$ENDPOINT_DIR" && cargo test --features sqlite) \

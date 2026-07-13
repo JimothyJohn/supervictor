@@ -52,6 +52,19 @@ them — git history is the changelog. Every remaining item is gated; the
       releases against heapless 0.9 (their main branch already moved; we're
       unified on 0.9.3 everywhere else).
       **Unblocks:** a serde-json-core release > 0.6.0.
+- [ ] Wired Ethernet on the ESP32-POE-ISO. The firmware now targets the
+      board's chip (ESP32/Xtensa) but ships WiFi-only — esp-hal has no EMAC
+      driver (esp-rs/esp-hal#4163). Reviewed `ph-esp32-mac` 0.1.1 (Feb 2026):
+      footprint is tiny (critical-section + embedded-hal, optional esp-hal
+      ^1.0 / embassy-net-driver ^0.2 / smoltcp ^0.12 — all already in-tree),
+      Apache-2.0, and it supports the POE-ISO's clock wiring
+      (`RmiiClockMode::InternalOutput` on GPIO17). But: 0 stars, ~70
+      downloads, single maintainer, and its PHY driver is LAN8720A — the
+      POE-ISO's LAN8710A is register-compatible for standard bring-up but
+      untested. POE-ISO pin map: MDC=GPIO23, MDIO=GPIO18, PHY power=GPIO12,
+      clock out=GPIO17.
+      **Unblocks:** board on hand — PHY bring-up and link-layer soak can't be
+      compile-checked, and the crate is too young to ship unverified.
 - [ ] OTA update path (prerequisite for cert rotation on deployed devices —
       see todo/ENTERPRISE.md and ROADMAP.md Phase 2).
       **Unblocks:** hardware + the esp migration above (A/B partition

@@ -9,8 +9,8 @@ Tactical backlog lives in `TODO.md`; enterprise/monetization scope in
 ## Where we are (Phases 0–1: shipped)
 
 ```
-ESP32-C3 ──mTLS──► API GW ──► Lambda ──► DynamoDB        (serverless path)
-ESP32-C3 ──mTLS──► Caddy ──► axum on t4g.micro ──► SQLite (self-hosted path)
+ESP32 ───mTLS──► API GW ──► Lambda ──► DynamoDB        (serverless path)
+ESP32 ───mTLS──► Caddy ──► axum on t4g.micro ──► SQLite (self-hosted path)
                                │
                                ├── /ui     dashboard (SSR + SSE, admin mTLS)
                                ├── /fleet  health API (staleness, fw versions)

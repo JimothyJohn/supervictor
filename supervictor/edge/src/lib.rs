@@ -1,4 +1,4 @@
-//! Supervictor device firmware library for ESP32-C3.
+//! Supervictor device firmware library for the ESP32 (Olimex ESP32-POE-ISO).
 //!
 //! A `no_std` embedded firmware crate built on the Embassy async runtime,
 //! providing mTLS-secured uplink communication, a captive portal for WiFi

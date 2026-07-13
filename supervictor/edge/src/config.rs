@@ -8,7 +8,7 @@ pub const HOST: &str = env!("HOST");
 // directly via env! inside include_str! at compile time.
 
 // --- System ---
-/// Total heap allocation in bytes for the ESP32-C3 allocator.
+/// Total heap allocation in bytes for the ESP32 allocator.
 pub const HEAP_SIZE: usize = 144 * 1024;
 
 // --- Network Timing ---

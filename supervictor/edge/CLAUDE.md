@@ -3,11 +3,20 @@
 ## Commands
 ```
 ../../Quickstart                                 # Full pipeline from repo root (lint, build, test)
-cargo test --target aarch64-apple-darwin         # Run tests (NOT the default ESP32 target)
-cargo run --bin supervictor-embedded --features embedded   # Build + flash via espflash
+cargo run --bin supervictor-embedded --features embedded   # Build + flash via espflash (from this dir)
 cargo run --bin supervictor-desktop --features desktop     # Desktop mTLS test client
-cargo clippy --all-targets --target aarch64-apple-darwin   # Lint (examples are feature-gated)
+
+# Host-side test/lint run from the REPO ROOT, not this dir — this dir's
+# .cargo/config.toml sets build-std for the xtensa target, which conflicts
+# with the prebuilt host std:
+cargo test -p supervictor-edge --lib --target aarch64-apple-darwin
+cargo clippy -p supervictor-edge --all-targets --target aarch64-apple-darwin   # examples are feature-gated
 ```
+The default target is `xtensa-esp32-none-elf` (Olimex ESP32-POE-ISO). It
+needs the esp-rs fork toolchain: `espup install --targets esp32`, then
+`. ~/export-esp.sh` so `xtensa-esp32-elf-gcc` (the linker) is on PATH —
+`Quickstart install` handles this.
+
 Embedded builds read SSID/HOST/CERT_PATH/... from the environment at compile
 time — load them with `set -a; source ../../.env.dev` first (Quickstart does
 this automatically). CERT_PATH is repo-root-relative.

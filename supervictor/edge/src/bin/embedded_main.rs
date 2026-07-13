@@ -14,7 +14,6 @@ use embassy_time::Timer;
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::rng::{Rng, Trng, TrngSource};
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
@@ -57,9 +56,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let rng = Rng::new();
     let net_seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
-    // esp-rtos requires explicit start on RISC-V with SoftwareInterrupt<0>
-    let software_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    esp_rtos::start(timg0.timer0, software_interrupt.software_interrupt0);
+    // On Xtensa esp-rtos starts without a software interrupt (that arg is riscv-only)
+    esp_rtos::start(timg0.timer0);
 
     // Initialize esp-radio controller (requires esp-rtos started)
     let esp_radio_ctrl = &*make_static!(

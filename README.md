@@ -23,7 +23,7 @@ The result: an IoT stack where a solo developer moves as fast as a team, and a t
 ## Architecture
 
 ```
- ESP32-C3                    mTLS                    Axum API
+ ESP32                       mTLS                    Axum API
 ┌──────────────┐       ┌──────────────┐       ┌──────────────────┐
 │  Rust/no_std │──────>│   X.509      │──────>│  Rust/tokio      │
 │  Embassy     │       │   client     │       │  SQLite/DynamoDB  │
@@ -67,7 +67,7 @@ cd supervictor
 supervictor/
   supervictor/
     common/                        # Shared types & routes (no_std compatible)
-    edge/                          # ESP32-C3 firmware (no_std, Embassy async)
+    edge/                          # ESP32 (POE-ISO) firmware (no_std, Embassy async)
       src/bin/embedded_main.rs     #   firmware entry point
       src/bin/desktop_main.rs      #   desktop mTLS test client
       src/app/                     #   application logic + async tasks
@@ -106,7 +106,7 @@ Handlers are pure functions with zero framework coupling — testable without HT
 | `./Quickstart` | Lint + build (host, embedded, desktop) + full test suite |
 | `./Quickstart dev` | Endpoint tests + SAM local + integration tests |
 | `./Quickstart dev --serve` | Same, but keeps the local server running |
-| `./Quickstart edge` | Build + flash ESP32-C3 firmware |
+| `./Quickstart edge` | Build + flash ESP32-POE-ISO firmware |
 | `./Quickstart staging` | Dev gate + deploy dev stack + remote integration tests |
 | `./Quickstart prod` | Full pipeline + confirmation + production deployment |
 | `./Quickstart certs ca\|device\|server\|admin` | mTLS certificate lifecycle |
