@@ -9,7 +9,16 @@ pub const HOST: &str = env!("HOST");
 
 // --- System ---
 /// Total heap allocation in bytes for the ESP32 allocator.
-pub const HEAP_SIZE: usize = 144 * 1024;
+///
+/// Sized against the main stack, not just heap demand: the ESP32's static
+/// DRAM segment is ~196 KB and the boot stack — which the Embassy executor
+/// runs EVERY task's poll on — is whatever the linker has left after .data
+/// and .bss (heap included). At 144 KB the leftover stack was 5 KB and the
+/// firmware stack-overflowed inside embassy_net::new before WiFi even came
+/// up; 112 KB leaves ~37 KB of stack, enough for mbedtls handshakes on
+/// Xtensa's stack-hungry windowed ABI. Check `_stack_start - _stack_end` in
+/// the ELF before raising this.
+pub const HEAP_SIZE: usize = 112 * 1024;
 
 // --- Network Timing ---
 /// Interval between network stack readiness checks.
