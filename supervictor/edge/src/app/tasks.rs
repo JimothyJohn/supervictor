@@ -79,7 +79,12 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
         println!("Waiting to get IP address...");
     }
 
-    let uplink = UplinkMessage::new("1234567890".try_into().unwrap(), 100);
+    // Device identity comes from DEVICE_NAME at compile time — set per board
+    // at flash time (the onboard flow does this); .cargo/config.toml provides
+    // the "factory-01" default. Length-checked at compile time against the
+    // UplinkMessage id capacity so a long name can't panic on boot.
+    const _: () = assert!(env!("DEVICE_NAME").len() <= 64);
+    let uplink = UplinkMessage::new(env!("DEVICE_NAME").try_into().unwrap(), 100);
 
     let mut backoff = BACKOFF_INITIAL;
 

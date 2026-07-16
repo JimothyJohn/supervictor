@@ -48,7 +48,16 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
     // SNI server name must match the server's certificate
     let server_name = ServerName::try_from(base_host.as_str())?.to_owned();
 
-    let message = UplinkMessage::new("1234567890".try_into().unwrap(), 100);
+    // Desktop reads its identity at runtime (embedded bakes DEVICE_NAME in at
+    // compile time); same env var either way.
+    let device_name = env::var("DEVICE_NAME").expect("DEVICE_NAME environment variable not set");
+    let message = UplinkMessage::new(
+        device_name
+            .as_str()
+            .try_into()
+            .expect("DEVICE_NAME longer than 64 bytes"),
+        100,
+    );
     // serde-json-core still returns its own heapless-0.8 String; bridge to
     // our heapless-0.9 type via &str until serde-json-core moves to 0.9.
     let json_body: HString<512> = serde_json_core::to_string::<_, 512>(&message)
