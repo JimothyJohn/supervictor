@@ -42,6 +42,7 @@ jobs:
       CA_PATH: ca/ca.pem
       DEVICE_NAME: ci-device
       HOST: ci.invalid
+      API_PATH: /
       SSID: ci-ssid
       PASSWORD: ci-password
       TLS_VERSION: "1.3"

@@ -86,6 +86,12 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
     const _: () = assert!(env!("DEVICE_NAME").len() <= 64);
     let uplink = UplinkMessage::new(env!("DEVICE_NAME").try_into().unwrap(), 100);
 
+    // Uplink path from API_PATH at compile time: "/" against a custom domain
+    // (base-path mapping supplies the stage), "/<stage>" against a raw
+    // execute-api URL. Must start with '/'.
+    const API_PATH: &str = env!("API_PATH");
+    const _: () = assert!(!API_PATH.is_empty() && API_PATH.as_bytes()[0] == b'/');
+
     let mut backoff = BACKOFF_INITIAL;
 
     // Outer loop: (re)establish TCP + TLS session.
@@ -156,7 +162,7 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
         backoff = BACKOFF_INITIAL;
 
         loop {
-            let request = match post_request(HOST, &uplink, None) {
+            let request = match post_request(HOST, &uplink, Some(API_PATH)) {
                 Ok(r) => r,
                 Err(e) => {
                     println!("   Failed to build HTTP request: {}", e);

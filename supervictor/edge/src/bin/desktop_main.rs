@@ -48,8 +48,10 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
     // SNI server name must match the server's certificate
     let server_name = ServerName::try_from(base_host.as_str())?.to_owned();
 
-    // Desktop reads its identity at runtime (embedded bakes DEVICE_NAME in at
-    // compile time); same env var either way.
+    // Desktop reads its identity and path at runtime (embedded bakes
+    // DEVICE_NAME/API_PATH in at compile time); same env vars either way.
+    // API_PATH: "/" against a custom domain, "/<stage>" against execute-api.
+    let api_path = env::var("API_PATH").unwrap_or_else(|_| "/".into());
     let device_name = env::var("DEVICE_NAME").expect("DEVICE_NAME environment variable not set");
     let message = UplinkMessage::new(
         device_name
@@ -70,7 +72,7 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
         match TcpStream::connect(socket_addr).await {
             Ok(socket) => match connector.connect(server_name.clone(), socket).await {
                 Ok(mut tls_stream) => {
-                    let request = match post_request(&base_host, &json_body, None) {
+                    let request = match post_request(&base_host, &json_body, Some(&api_path)) {
                         Ok(r) => r,
                         Err(e) => {
                             println!("Error building request: {}", e);
