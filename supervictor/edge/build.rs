@@ -3,22 +3,24 @@ fn main() {
     // Scans src/ for env!("VAR") patterns so new vars are picked up automatically.
     track_compile_env_vars();
 
-    // Only use embedded linker scripts for ESP32 target
+    // Only use embedded linker scripts for ESP32-family targets
     let target = std::env::var("TARGET").unwrap_or_default();
     // Enable builds on both desktop and embedded. Xtensa links through
     // xtensa-esp32-elf-gcc, which lacks lld's --error-handling-script, so
-    // the old linker_be_nice() hint hook is gone.
-    if target == "xtensa-esp32-none-elf" {
+    // the old linker_be_nice() hint hook is gone; riscv (ESP32-C3) links
+    // through rust-lld as usual.
+    if target == "xtensa-esp32-none-elf" || target == "riscv32imc-unknown-none-elf" {
         println!("cargo:rustc-link-arg=-Tlinkall.x");
 
         // mbedtls-rs-sys's prebuilt libs need printf/snprintf/vsnprintf. WiFi
         // builds get them from esp-wifi-sys's libprintf.a blob; ethernet-only
         // builds compile the same library (vendored mpaland/printf v4.0.0,
         // MIT) from source. `_putchar`, its output backend, is defined in
-        // src/network/ethernet.rs.
+        // src/network/ethernet.rs. Ethernet is ESP32-classic-only, so the
+        // shim (built with the Xtensa GCC) never applies to riscv targets.
         let ethernet_only = std::env::var_os("CARGO_FEATURE_ETHERNET").is_some()
             && std::env::var_os("CARGO_FEATURE_WIFI").is_none();
-        if ethernet_only {
+        if ethernet_only && target == "xtensa-esp32-none-elf" {
             compile_printf_shim();
         }
     }

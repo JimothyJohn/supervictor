@@ -33,7 +33,7 @@ jobs:
         run: cargo check -p supervictor-endpoint --no-default-features --features sqlite
 
   embedded:
-    name: Embedded build (xtensa, ESP32)
+    name: Embedded build (ESP32 xtensa + ESP32-C3 riscv)
     runs-on: ubuntu-latest
     env:
       # Compile-time config baked into the firmware. certs/ is gitignored,
@@ -62,9 +62,14 @@ jobs:
           openssl req -new -key ci-certs/devices/ci-device/client.key -subj "/CN=ci-device" \
             | openssl x509 -req -CA ci-certs/ca/ca.pem -CAkey ci-certs/ca/ca.key -CAcreateserial -days 1 \
               -out ci-certs/devices/ci-device/client.pem
-      - name: Check embedded firmware (ethernet — primary uplink)
+      - name: Check embedded firmware (ethernet — primary uplink, ESP32)
         working-directory: supervictor/edge
         run: cargo check --features ethernet --locked
-      - name: Check embedded firmware (wifi — fallback interface)
+      - name: Check embedded firmware (wifi — fallback interface, ESP32)
         working-directory: supervictor/edge
-        run: cargo check --features wifi --locked
+        run: cargo check --features wifi,chip-esp32 --locked
+      # The esp toolchain's rustc carries the riscv backend too; same
+      # toolchain builds the C3 with build-std, no extra install.
+      - name: Check embedded firmware (wifi, ESP32-C3 riscv)
+        working-directory: supervictor/edge
+        run: cargo check --features wifi,chip-esp32c3 --target riscv32imc-unknown-none-elf --locked

@@ -1920,7 +1920,7 @@ dependencies = [
  "esp-sync",
  "esp32 0.39.0",
  "esp32c2",
- "esp32c3",
+ "esp32c3 0.31.0",
  "esp32c6",
  "esp32h2",
  "esp32s2",
@@ -2092,6 +2092,7 @@ dependencies = [
  "document-features",
  "esp-metadata-generated 0.4.0",
  "esp32 0.40.2",
+ "esp32c3 0.32.2",
 ]
 
 [[package]]
@@ -2177,6 +2178,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "356af3771d0d6536c735bf71136594f4d1cbb506abf6e0c51a6639e9bf4e7988"
 dependencies = [
  "critical-section",
+ "vcell",
+]
+
+[[package]]
+name = "esp32c3"
+version = "0.32.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21e89ed62cf6c043a6d29c520b02a13b359ec8a75d67b65d4330ed717d15fe97"
+dependencies = [
  "vcell",
 ]
 

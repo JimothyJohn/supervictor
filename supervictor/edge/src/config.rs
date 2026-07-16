@@ -18,7 +18,14 @@ pub const HOST: &str = env!("HOST");
 /// up; 112 KB leaves ~37 KB of stack, enough for mbedtls handshakes on
 /// Xtensa's stack-hungry windowed ABI. Check `_stack_start - _stack_end` in
 /// the ELF before raising this.
+#[cfg(feature = "chip-esp32")]
 pub const HEAP_SIZE: usize = 112 * 1024;
+/// Total heap allocation in bytes for the ESP32-C3 allocator.
+///
+/// The C3's RAM is one 400 KB segment, so the boot stack has ample leftover
+/// at this size (hardware-verified pre-Xtensa-retarget at 144 KB).
+#[cfg(feature = "chip-esp32c3")]
+pub const HEAP_SIZE: usize = 144 * 1024;
 
 // --- Network Timing ---
 /// Interval between network stack readiness checks.

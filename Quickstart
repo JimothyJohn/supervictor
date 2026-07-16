@@ -106,10 +106,16 @@ validate_and_build() {
     cargo build --workspace --target "$HOST_TARGET"
     log "checking edge embedded ethernet (xtensa, ESP32-POE-ISO primary uplink)"
     (cd "$EDGE_DIR" && cargo check --features ethernet)
-    log "checking edge embedded wifi (fallback interface)"
-    (cd "$EDGE_DIR" && cargo check --features wifi)
+    log "checking edge embedded wifi (fallback interface, ESP32)"
+    (cd "$EDGE_DIR" && cargo check --features wifi,chip-esp32)
+    log "checking edge embedded wifi (ESP32-C3, riscv)"
+    (cd "$EDGE_DIR" && cargo check --features wifi,chip-esp32c3 --target riscv32imc-unknown-none-elf)
+    # From the repo root, NOT $EDGE_DIR: edge/.cargo/config.toml's build-std
+    # applies to every target when cargo runs from that dir, and a host-target
+    # check with build-std poisons target/<host>/ with a second libcore
+    # (duplicate-lang-item failures for every later host build).
     log "checking edge desktop"
-    (cd "$EDGE_DIR" && cargo check --features desktop --target "$HOST_TARGET")
+    cargo check -p supervictor-edge --features desktop --target "$HOST_TARGET"
     log "build OK"
 }
 

@@ -1,8 +1,10 @@
-//! Supervictor embedded firmware for the Olimex ESP32-POE-ISO.
+//! Supervictor embedded firmware for ESP32-family boards (primary target:
+//! the Olimex ESP32-POE-ISO; also runs on ESP32-C3 devkits).
 //!
-//! Uplinks telemetry over mTLS. The network interface is chosen at compile
-//! time: `ethernet` (primary — the board is PoE-powered, wired is the main
-//! connection) or `wifi` (fallback for boards deployed off-cable).
+//! Uplinks telemetry over mTLS. The chip (`chip-esp32` / `chip-esp32c3`) and
+//! network interface are chosen at compile time: `ethernet` (primary — the
+//! POE-ISO is PoE-powered, wired is the main connection; implies chip-esp32)
+//! or `wifi` (fallback for boards deployed off-cable, any chip).
 //!
 //! WiFi builds read SSID/PASSWORD from the environment at compile time.
 
@@ -19,6 +21,8 @@ use embassy_time::Timer;
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+#[cfg(feature = "chip-esp32c3")]
+use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::rng::{Rng, Trng, TrngSource};
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
@@ -72,8 +76,15 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let rng = Rng::new();
     let net_seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
-    // On Xtensa esp-rtos starts without a software interrupt (that arg is riscv-only)
+    // On Xtensa esp-rtos starts without a software interrupt; on riscv it
+    // needs SoftwareInterrupt<0> for its scheduler.
+    #[cfg(feature = "chip-esp32")]
     esp_rtos::start(timg0.timer0);
+    #[cfg(feature = "chip-esp32c3")]
+    esp_rtos::start(
+        timg0.timer0,
+        SoftwareInterruptControl::new(peripherals.SW_INTERRUPT).software_interrupt0,
+    );
 
     // --- Ethernet (primary): EMAC + LAN8710A over RMII, PoE-powered ---
     #[cfg(feature = "ethernet")]

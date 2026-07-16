@@ -1,6 +1,13 @@
 [target.xtensa-esp32-none-elf]
 runner = "espflash flash --monitor"  # espflash v4 auto-detects chip/log-format
 
+# ESP32-C3 (riscv) builds override the default target and pick the matching
+# chip feature, e.g.:
+#   cargo build --bin supervictor-embedded --features wifi,chip-esp32c3 \
+#     --target riscv32imc-unknown-none-elf
+[target.riscv32imc-unknown-none-elf]
+runner = "espflash flash --monitor"
+
 # The esp toolchain ships prebuilt std only for the host; xtensa targets are
 # built from the bundled rust-src. ([unstable] works because the esp channel
 # cargo is nightly-enabled.)

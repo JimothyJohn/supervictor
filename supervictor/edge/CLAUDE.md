@@ -3,8 +3,9 @@
 ## Commands
 ```
 ../../Quickstart                                 # Full pipeline from repo root (lint, build, test)
-cargo run --bin supervictor-embedded --features ethernet   # Build + flash via espflash (from this dir)
-cargo run --bin supervictor-embedded --features wifi       # WiFi fallback build (needs SSID/PASSWORD env)
+cargo run --bin supervictor-embedded --features ethernet   # Build + flash via espflash (from this dir; implies chip-esp32)
+cargo run --bin supervictor-embedded --features wifi,chip-esp32   # WiFi fallback build (needs SSID/PASSWORD env)
+cargo run --bin supervictor-embedded --features wifi,chip-esp32c3 --target riscv32imc-unknown-none-elf   # ESP32-C3 (riscv)
 cargo run --bin supervictor-desktop --features desktop     # Desktop mTLS test client
 
 # Host-side test/lint run from the REPO ROOT, not this dir — this dir's
@@ -16,7 +17,10 @@ cargo clippy -p supervictor-edge --all-targets --target aarch64-apple-darwin   #
 The default target is `xtensa-esp32-none-elf` (Olimex ESP32-POE-ISO). It
 needs the esp-rs fork toolchain: `espup install --targets esp32`, then
 `. ~/export-esp.sh` so `xtensa-esp32-elf-gcc` (the linker) is on PATH —
-`Quickstart install` handles this.
+`Quickstart install` handles this. The same toolchain builds the ESP32-C3
+(riscv) — embedded builds pick exactly one `chip-esp32` / `chip-esp32c3`
+feature matched to the `--target` (`ethernet` implies `chip-esp32`; only
+the classic ESP32 has an EMAC).
 
 Embedded builds read HOST/CERT_PATH/... (plus SSID/PASSWORD for wifi builds)
 from the environment at compile time — load them with

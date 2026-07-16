@@ -16,9 +16,30 @@ required-features = ["desktop"]
 [features]
 portal = ["wifi", "embassy-net/udp"]
 desktop = ["reqwest", "tokio", "rustls", "tokio-rustls", "rustls-pemfile"]
+# Chip selection — embedded builds need exactly one, matched to the cargo
+# --target (chip-esp32 ↔ xtensa-esp32-none-elf, chip-esp32c3 ↔
+# riscv32imc-unknown-none-elf). Fans the choice out to every esp-rs crate;
+# the '?' forwards only when that optional dep is enabled, and esp-backtrace
+# forwards the chip on to esp-println. `ethernet` implies chip-esp32 — only
+# the classic ESP32 has an EMAC.
+chip-esp32 = [
+  "esp-hal?/esp32",
+  "esp-backtrace?/esp32",
+  "esp-rtos?/esp32",
+  "esp-radio?/esp32",
+  "esp-bootloader-esp-idf?/esp32",
+]
+chip-esp32c3 = [
+  "esp-hal?/esp32c3",
+  "esp-backtrace?/esp32c3",
+  "esp-rtos?/esp32c3",
+  "esp-radio?/esp32c3",
+  "esp-bootloader-esp-idf?/esp32c3",
+]
 # Base embedded runtime (no network interface). The supervictor-embedded bin
 # additionally needs exactly one interface feature: `ethernet` (primary — the
-# POE-ISO uplinks over wired PoE) or `wifi`.
+# POE-ISO uplinks over wired PoE; implies chip-esp32) or `wifi` (pair with a
+# chip-* feature).
 embedded = [
   "esp-alloc",
   "esp-backtrace",
@@ -34,7 +55,7 @@ embedded = [
   "static_cell",
 ]
 wifi = ["embedded", "esp-radio", "esp-rtos/esp-radio"]
-ethernet = ["embedded", "ph-esp32-mac", "embassy-net-driver", "esp32"]
+ethernet = ["embedded", "ph-esp32-mac", "embassy-net-driver", "esp32", "chip-esp32"]
 
 # Use custom libraries
 [lib]
@@ -69,7 +90,6 @@ tokio = { version = "1.0", optional = true, features = ["full"] }
 embedded-io-async = { version = "0.7.0", optional = true }
 esp-alloc = { version = "0.9.0", optional = true }
 esp-backtrace = { version = "0.18.1", features = [
-  "esp32",
   "panic-handler",
   "println",
 ], optional = true }
@@ -77,7 +97,6 @@ esp-backtrace = { version = "0.18.1", features = [
 # still used by esp-rtos 0.2 / esp-radio 0.17; unpin when bumping those to 0.3/0.18
 esp-hal = { version = "=1.0.0", default-features = false, features = [
   "log-04",
-  "esp32",
   "unstable",
   "exception-handler",
 ], optional = true }
@@ -86,9 +105,8 @@ esp-println = { version = "0.16", features = [
 ], optional = true }
 embassy-executor = { version = "0.9.0", optional = true }
 embassy-time = { version = "0.5.0", features = ["generic-queue-8"], optional = true }
-esp-rtos = { version = "0.2", features = ["esp32", "embassy"], optional = true }
+esp-rtos = { version = "0.2", features = ["embassy"], optional = true }
 esp-radio = { version = "0.17", features = [
-  "esp32",
   "wifi",
   "log-04",
   "unstable",
@@ -116,7 +134,7 @@ embassy-net-driver = { version = "0.2", optional = true }
 # APLL power-up, IO_MUX GPIO17 for the RMII clock-out mux). Same version
 # esp-hal 1.0 already pulls — no new transitive weight.
 esp32 = { version = "0.39", optional = true }
-esp-bootloader-esp-idf = { version = "0.5", optional = true, features = ["esp32"] }
+esp-bootloader-esp-idf = { version = "0.5", optional = true }
 rustls = { version = "0.23.26", optional = true }
 tokio-rustls = { version = "0.26.2", optional = true }
 rustls-pemfile = { version = "2.2.0", optional = true }
