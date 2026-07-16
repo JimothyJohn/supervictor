@@ -52,18 +52,17 @@ them — git history is the changelog. Every remaining item is gated; the
       releases against heapless 0.9 (their main branch already moved; we're
       unified on 0.9.3 everywhere else).
       **Unblocks:** a serde-json-core release > 0.6.0.
-- [ ] Hardware-verify wired Ethernet on the ESP32-POE-ISO. The `ethernet`
-      feature (now the primary uplink; `wifi` is the fallback) is implemented
-      and compile-checked but has never touched the board: `ph-esp32-mac`
-      EMAC driver + LAN8720A PHY driver (the board's LAN8710A shares the
-      register map and `0x0007C0Fx` ID — bring-up should work, unproven), and
-      an in-tree APLL 50 MHz + GPIO17 clock-out bring-up
-      (`src/board/poe_iso.rs`) that nothing upstream provides — esp-hal has
-      no APLL API and the crate assumes the clock exists. Soak checklist:
-      PHY ID on console, link at 100FD, DHCP lease, mTLS uplink roundtrips,
-      cable pull/replug recovery.
-      **Unblocks:** board on hand — clock generation, MDIO, and link behavior
-      can't be compile-checked.
+- [ ] Finish the wired-Ethernet soak on the ESP32-POE-ISO: cable pull/replug
+      recovery, plus a multi-hour uplink soak. The rest of the checklist was
+      hardware-verified 2026-07-15 — PHY ID `0x0007c0f1` on console, link at
+      100FD, DHCP lease, repeated mTLS uplink roundtrips (HTTP 200) with
+      clean keepalive-expiry reconnects. Note: the `ethernet` feature is
+      POE-ISO-specific — on the ESP32-POE2 the PHY doesn't respond at all
+      (MDIO reads `0xffffffff`; different power/clock wiring). POE2 runs the
+      `wifi` build; a `poe2` board module is a separate item if that board
+      ever needs wired uplink.
+      **Unblocks:** a hand on the cable (pull/replug is physical) and an
+      hours-long soak window.
 - [ ] Move `ph-esp32-mac` from the pinned git fork back to crates.io. The
       released 0.1.1 can't detect any PHY (MDIO reads broken — upstream
       photon-circus/ph-esp32-mac#4); we pin the PR's hardware-verified fix

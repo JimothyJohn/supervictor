@@ -23,6 +23,19 @@ from the environment at compile time — load them with
 `set -a; source ../../.env.dev` first (Quickstart does this automatically).
 CERT_PATH is repo-root-relative.
 
+## Hardware on the bench
+Two Xtensa boards (port ↔ board mapping lives in `.env.dev`; ports are
+hub-position-dependent, MACs are stable):
+- **ESP32-POE-ISO** — runs the `ethernet` build (hardware-verified: PHY id
+  `0x0007c0f1`, 100FD link, DHCP, mTLS uplinks).
+- **ESP32-POE2** — runs the `wifi` build. The `ethernet` feature does NOT
+  work here (PHY id reads `0xffffffff` — different power/clock wiring than
+  the POE-ISO pin map in `src/board/poe_iso.rs`).
+
+Watching a board from a non-TTY context (agent shells): `espflash monitor`
+needs `--non-interactive`; add `--chip esp32 --after no-reset --before
+no-reset-no-sync` to attach without rebooting the running firmware.
+
 ## Network interfaces
 `embedded` is the interface-less base; the bin needs exactly one of:
 - `ethernet` (primary) — wired EMAC + LAN8710A over RMII, PoE-powered.
