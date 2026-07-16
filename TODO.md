@@ -29,6 +29,15 @@ them — git history is the changelog. Every remaining item is gated; the
 
 ## P1 — Hygiene
 
+- [ ] Purge bench pollution from `supervictor-prod-uplinks`: ~1.5M rows under
+      `device_id 1234567890` accumulated while the bench devices pointed at
+      the prod domain with a hardcoded id (fixed 2026-07-15 — devices now
+      carry per-board names and uplink to `supervictor-dev`). Decide: batch
+      delete the `1234567890` partition, and add a TTL attribute so uplinks
+      age out instead of accreting forever.
+      **Unblocks:** owner call on retention (TTL horizon) — deletes are
+      irreversible.
+
 - [ ] Reconcile `.claude/settings.json` (added to this repo mid-session by a
       concurrent session while the same files were being deleted from the
       `~/.claude` config repo — since restored there). Decide which level owns
