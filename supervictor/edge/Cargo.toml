@@ -15,7 +15,7 @@ required-features = ["desktop"]
 
 [features]
 portal = ["wifi", "embassy-net/udp"]
-desktop = ["reqwest", "tokio", "rustls", "tokio-rustls", "rustls-pemfile"]
+desktop = ["tokio", "rustls", "tokio-rustls", "rustls-pemfile"]
 # Chip selection — embedded builds need exactly one, matched to the cargo
 # --target (chip-esp32 ↔ xtensa-esp32-none-elf, chip-esp32c3 ↔
 # riscv32imc-unknown-none-elf). Fans the choice out to every esp-rs crate;
@@ -84,7 +84,6 @@ embassy-net = { version = "0.9.1", features = [
   "dns",
 ], optional = true }
 
-reqwest = { version = "0.12.15", optional = true, features = ["json", "rustls-tls"] }
 tokio = { version = "1.0", optional = true, features = ["full"] }
 
 embedded-io-async = { version = "0.7.0", optional = true }
@@ -135,8 +134,22 @@ embassy-net-driver = { version = "0.2", optional = true }
 # esp-hal 1.0 already pulls — no new transitive weight.
 esp32 = { version = "0.39", optional = true }
 esp-bootloader-esp-idf = { version = "0.5", optional = true }
-rustls = { version = "0.23.26", optional = true }
-tokio-rustls = { version = "0.26.2", optional = true }
+# ring is the provider desktop_main installs; default features would compile
+# the aws-lc-rs provider (a large C build) alongside it for nothing. The ring
+# flag used to arrive via reqwest's feature unification (reqwest is now
+# dev-only — tests/deployed_roundtrip.rs).
+rustls = { version = "0.23.26", optional = true, default-features = false, features = [
+  "ring",
+  "logging",
+  "std",
+  "tls12",
+] }
+# default features would re-enable rustls/aws_lc_rs; mirror the rustls set.
+tokio-rustls = { version = "0.26.2", optional = true, default-features = false, features = [
+  "ring",
+  "logging",
+  "tls12",
+] }
 rustls-pemfile = { version = "2.2.0", optional = true }
 
 [dev-dependencies]
