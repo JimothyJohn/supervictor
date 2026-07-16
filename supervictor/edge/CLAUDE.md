@@ -24,13 +24,13 @@ from the environment at compile time — load them with
 CERT_PATH is repo-root-relative.
 
 ## Hardware on the bench
-Two Xtensa boards (port ↔ board mapping lives in `.env.dev`; ports are
-hub-position-dependent, MACs are stable):
-- **ESP32-POE-ISO** — runs the `ethernet` build (hardware-verified: PHY id
-  `0x0007c0f1`, 100FD link, DHCP, mTLS uplinks).
-- **ESP32-POE2** — runs the `wifi` build. The `ethernet` feature does NOT
-  work here (PHY id reads `0xffffffff` — different power/clock wiring than
-  the POE-ISO pin map in `src/board/poe_iso.rs`).
+Physical rig (which board is on which port, cabling, flash/monitor
+recipes) is documented in `TESTRIG.md` at the repo root — gitignored
+because it's machine-specific; if it's missing, there's no hardware
+attached to this machine. One portable fact: the `ethernet` feature is
+POE-ISO-specific — on the ESP32-POE2 the PHY doesn't respond (MDIO reads
+`0xffffffff`; different power/clock wiring than the pin map in
+`src/board/poe_iso.rs`), so the POE2 runs the `wifi` build.
 
 Watching a board from a non-TTY context (agent shells): `espflash monitor`
 needs `--non-interactive`; add `--chip esp32 --after no-reset --before
