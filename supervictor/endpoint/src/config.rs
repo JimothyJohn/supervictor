@@ -23,6 +23,8 @@ pub struct Config {
     pub sqlite_db_path: String,
     /// Staleness watchdog tick interval in seconds; 0 disables it.
     pub watchdog_interval_secs: u64,
+    /// Days before an uplink row expires (DynamoDB TTL); 0 keeps rows forever.
+    pub uplink_ttl_days: u32,
 }
 
 impl Config {
@@ -48,6 +50,12 @@ impl Config {
                 let raw = env::var("WATCHDOG_INTERVAL_SECS").unwrap_or_else(|_| "300".into());
                 raw.parse().map_err(|e| {
                     AppError::Config(format!("invalid WATCHDOG_INTERVAL_SECS '{raw}': {e}"))
+                })?
+            },
+            uplink_ttl_days: {
+                let raw = env::var("UPLINK_TTL_DAYS").unwrap_or_else(|_| "30".into());
+                raw.parse().map_err(|e| {
+                    AppError::Config(format!("invalid UPLINK_TTL_DAYS '{raw}': {e}"))
                 })?
             },
         })
