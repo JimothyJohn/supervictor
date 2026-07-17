@@ -43,10 +43,11 @@ The gap that appears with real fleet scale is *acting* on what monitoring
 shows:
 
 - **OTA updates.** `/fleet` now shows which devices run old firmware; OTA is
-  how you fix it without a truck roll. esp-hal ecosystem provides
-  `esp-hal-ota`-style A/B partitions; the endpoint grows a firmware-artifact
-  route and a per-device desired-version field. This is also the
-  prerequisite for cert rotation (todo/ENTERPRISE.md).
+  how you fix it without a truck roll. Detailed roadmap: `docs/OTA.md`
+  (pull-based over existing mTLS, A/B slots via the in-tree
+  `esp-bootloader-esp-idf` OTA machinery + `esp-storage`, PoE boards
+  first). This is also the prerequisite for cert rotation
+  (todo/ENTERPRISE.md).
 - **Cert rotation.** Issue new device cert → deliver via OTA channel →
   device swaps → revoke old. Needs OTA first; design both together.
 - **Alerting beyond logs.** The watchdog emits structured `device went dark`
