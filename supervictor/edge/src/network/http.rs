@@ -34,12 +34,18 @@ pub fn get_request(host: &str, path: Option<&str>) -> Result<HString<192>, HttpE
     Ok(request)
 }
 
-/// Create an HTTP POST request with JSON body
-pub fn post_request<T>(host: &str, data: &T, path: Option<&str>) -> Result<HString<512>, HttpError>
+/// Create an HTTP POST request with JSON body.
+///
+/// Capacities (mirrored in `config.rs` — that module is embedded-gated, this
+/// one is host-testable): 512 bytes of JSON body fits a worst-case
+/// full-telemetry UplinkMessage (~475 bytes: 64-char id + 9 IMU floats +
+/// env + health fields, verified in `uplink_tests`); 1024 total leaves
+/// ~150 bytes of headers plus slack.
+pub fn post_request<T>(host: &str, data: &T, path: Option<&str>) -> Result<HString<1024>, HttpError>
 where
     T: Serialize,
 {
-    let mut request = HString::<512>::new();
+    let mut request = HString::<1024>::new();
     let endpoint = path.unwrap_or("/");
 
     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/POST
@@ -56,7 +62,7 @@ where
 
     // A payload that doesn't fit the buffer is an error, not an empty POST —
     // silently sending Content-Length: 0 would register a bogus uplink.
-    let json = serde_json_core::to_string::<T, 256>(data).map_err(|_| HttpError::Serialization)?;
+    let json = serde_json_core::to_string::<T, 512>(data).map_err(|_| HttpError::Serialization)?;
 
     push(&mut request, "Content-Length: ")?;
     push_usize(&mut request, json.len())?;
@@ -251,8 +257,20 @@ mod tests {
         struct Oversized {
             data: &'static str,
         }
-        // 312 chars > the 256-byte serde-json-core buffer in post_request
+        // 624 chars > the 512-byte serde-json-core buffer in post_request
         const LONG: &str = concat!(
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
             "abcdefghijklmnopqrstuvwxyz",
             "abcdefghijklmnopqrstuvwxyz",
             "abcdefghijklmnopqrstuvwxyz",

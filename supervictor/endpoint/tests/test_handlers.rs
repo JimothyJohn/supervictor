@@ -81,6 +81,64 @@ fn uplink_stores_record() {
     assert_eq!(uplinks[0].payload["current"], 99);
 }
 
+/// Every telemetry field the device sends is persisted; the id is not
+/// duplicated into the payload (it's the record key), and fields the
+/// device omitted don't appear as nulls.
+#[test]
+fn uplink_stores_full_telemetry_payload() {
+    let store = common::test_store();
+    let body = r#"{
+        "id": "dev-1", "current": -5, "fw": "0.2.0",
+        "seq": 17, "uptime_s": 86400, "interval_s": 300,
+        "heap_free": 73728, "rssi_dbm": -67,
+        "temp_c": 23.5, "humidity_pct": 41.25,
+        "accel_g": [0.5, -0.25, 1.0],
+        "gyro_dps": [1.5, 0.0, -1.5],
+        "mag_ut": [22.5, -4.25, 40.0]
+    }"#;
+    handlers::handle_uplink(Some(body), None, Some(store.as_ref()), false).unwrap();
+
+    let uplinks = store.get_uplinks("dev-1", 10).unwrap();
+    assert_eq!(uplinks.len(), 1);
+    let payload = uplinks[0].payload.as_object().unwrap();
+    assert!(payload.get("id").is_none(), "id must not be duplicated");
+    assert_eq!(payload["current"], -5);
+    assert_eq!(payload["fw"], "0.2.0");
+    assert_eq!(payload["seq"], 17);
+    assert_eq!(payload["uptime_s"], 86400);
+    assert_eq!(payload["interval_s"], 300);
+    assert_eq!(payload["heap_free"], 73728);
+    assert_eq!(payload["rssi_dbm"], -67);
+    assert_eq!(payload["temp_c"], 23.5);
+    assert_eq!(payload["humidity_pct"], 41.25);
+    assert_eq!(payload["accel_g"], serde_json::json!([0.5, -0.25, 1.0]));
+    assert_eq!(payload["gyro_dps"], serde_json::json!([1.5, 0.0, -1.5]));
+    assert_eq!(payload["mag_ut"], serde_json::json!([22.5, -4.25, 40.0]));
+}
+
+/// A minimal (pre-telemetry) uplink stores a minimal payload — absent
+/// Options never serialize as null into storage.
+#[test]
+fn uplink_minimal_payload_stays_minimal() {
+    let store = common::test_store();
+    handlers::handle_uplink(
+        Some(r#"{"id": "dev-1", "current": 1}"#),
+        None,
+        Some(store.as_ref()),
+        false,
+    )
+    .unwrap();
+
+    let uplinks = store.get_uplinks("dev-1", 10).unwrap();
+    let payload = uplinks[0].payload.as_object().unwrap();
+    assert_eq!(
+        payload.len(),
+        1,
+        "only 'current' expected, got: {payload:?}"
+    );
+    assert_eq!(payload["current"], 1);
+}
+
 #[test]
 fn register_device_success() {
     let store = common::test_store();

@@ -27,6 +27,16 @@ them — git history is the changelog. Every remaining item is gated; the
       issuance + rotation; keep only public certs local.
       **Unblocks:** an ops window — touches live staging deploys.
 
+- [ ] Bind uplink identity to the mTLS cert: `handle_uplink` trusts the
+      payload's `id` and never compares it against the client cert's
+      `subject_dn`, so any holder of ANY valid device cert can spoof any
+      other device's uplinks. Enforce `client_subject` ↔
+      `DeviceRecord.subject_dn` match when `require_registration` is on
+      (registration already stores the DN); ship with a regression test
+      that fails without the check.
+      **Unblocks:** decision on legacy rows — registered devices with no
+      `subject_dn` on record (reject vs grandfather-and-log).
+
 ## P1 — Hygiene
 
 - [ ] Purge bench pollution from `supervictor-prod-uplinks`: ~1.5M rows under

@@ -169,6 +169,98 @@ fn uplink_roundtrip_i32_extremes() {
     }
 }
 
+// ── UplinkMessage telemetry fields ───────────────────────────
+
+/// Health + sensor fields default to None from new() — a fresh uplink
+/// serializes exactly like pre-telemetry firmware (no nulls on the wire).
+#[test]
+fn uplink_new_telemetry_absent_from_wire() {
+    let msg = make_uplink("dev-1", 42);
+    let json = serde_json_core::to_string::<_, 512>(&msg).unwrap();
+    assert_eq!(
+        json.as_str(),
+        concat!(
+            r#"{"id":"dev-1","current":42,"fw":""#,
+            env!("CARGO_PKG_VERSION"),
+            r#""}"#
+        )
+    );
+}
+
+fn make_full_telemetry(id: &str) -> UplinkMessage {
+    let mut msg = make_uplink(id, i32::MIN);
+    msg.seq = Some(u32::MAX);
+    msg.uptime_s = Some(u32::MAX);
+    msg.interval_s = Some(u32::MAX);
+    msg.heap_free = Some(u32::MAX);
+    msg.rssi_dbm = Some(i8::MIN);
+    msg.temp_c = Some(f32::MIN);
+    msg.humidity_pct = Some(f32::MIN);
+    msg.accel_g = Some([f32::MIN; 3]);
+    msg.gyro_dps = Some([f32::MIN; 3]);
+    msg.mag_ut = Some([f32::MIN; 3]);
+    msg
+}
+
+/// The contract behind post_request's buffer sizing: a worst-case uplink —
+/// max-length id, every telemetry field at its widest printing — must fit
+/// the 512-byte JSON buffer (network/http.rs). If this fails, grow the
+/// buffers there, not the assertion here.
+#[test]
+fn uplink_worst_case_fits_json_buffer() {
+    let msg = make_full_telemetry(NAME_64);
+    let json = serde_json_core::to_string::<_, 512>(&msg)
+        .expect("worst-case uplink must fit post_request's 512-byte JSON buffer");
+    assert!(json.len() <= 512);
+}
+
+/// Full telemetry survives a no_std serialize → deserialize roundtrip.
+#[test]
+fn uplink_full_telemetry_roundtrip() {
+    let mut msg = make_uplink("rt", 7);
+    msg.seq = Some(3);
+    msg.uptime_s = Some(15);
+    msg.interval_s = Some(5);
+    msg.heap_free = Some(73_728);
+    msg.rssi_dbm = Some(-67);
+    msg.temp_c = Some(23.5);
+    msg.humidity_pct = Some(41.25);
+    msg.accel_g = Some([0.5, -0.25, 1.0]);
+    msg.gyro_dps = Some([1.5, 0.0, -1.5]);
+    msg.mag_ut = Some([22.5, -4.25, 40.0]);
+
+    let json = serde_json_core::to_string::<_, 512>(&msg).unwrap();
+    let (back, _): (UplinkMessage, _) = serde_json_core::from_str(json.as_str()).unwrap();
+    assert_eq!(back.seq, Some(3));
+    assert_eq!(back.uptime_s, Some(15));
+    assert_eq!(back.interval_s, Some(5));
+    assert_eq!(back.heap_free, Some(73_728));
+    assert_eq!(back.rssi_dbm, Some(-67));
+    assert_eq!(back.temp_c, Some(23.5));
+    assert_eq!(back.humidity_pct, Some(41.25));
+    assert_eq!(back.accel_g, Some([0.5, -0.25, 1.0]));
+    assert_eq!(back.gyro_dps, Some([1.5, 0.0, -1.5]));
+    assert_eq!(back.mag_ut, Some([22.5, -4.25, 40.0]));
+}
+
+/// Pre-telemetry JSON (id + current only) still parses: every new field
+/// lands as None.
+#[test]
+fn uplink_deserialize_pre_telemetry_json() {
+    let json = r#"{"id":"old","current":1}"#;
+    let (msg, _): (UplinkMessage, _) = serde_json_core::from_str(json).unwrap();
+    assert_eq!(msg.seq, None);
+    assert_eq!(msg.uptime_s, None);
+    assert_eq!(msg.interval_s, None);
+    assert_eq!(msg.heap_free, None);
+    assert_eq!(msg.rssi_dbm, None);
+    assert_eq!(msg.temp_c, None);
+    assert_eq!(msg.humidity_pct, None);
+    assert_eq!(msg.accel_g, None);
+    assert_eq!(msg.gyro_dps, None);
+    assert_eq!(msg.mag_ut, None);
+}
+
 // ── UplinkMessage clone ──────────────────────────────────────
 
 #[test]

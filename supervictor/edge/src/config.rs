@@ -75,14 +75,44 @@ pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 // --- HTTP ---
 /// Timeout for reading an HTTP response from the server.
 pub const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(5);
-/// Heapless buffer capacity for outgoing HTTP requests.
-pub const HTTP_REQUEST_BUFFER_CAPACITY: usize = 512;
+/// Heapless buffer capacity for outgoing HTTP requests. Mirrored as a
+/// literal in `network/http.rs` (this module is embedded-gated; http.rs is
+/// host-testable) — keep the two in sync.
+pub const HTTP_REQUEST_BUFFER_CAPACITY: usize = 1024;
 /// Heapless buffer capacity for incoming HTTP responses.
 pub const HTTP_RESPONSE_BUFFER_CAPACITY: usize = 1024;
 
 // --- Application Logic ---
+/// Parse a compile-time env var as u32, falling back to `default` when the
+/// var is unset. Non-numeric or overflowing values fail the build.
+const fn parse_env_u32(v: Option<&str>, default: u32) -> u32 {
+    match v {
+        None => default,
+        Some(s) => {
+            let b = s.as_bytes();
+            assert!(!b.is_empty(), "expected a positive integer");
+            let mut i = 0;
+            let mut n: u32 = 0;
+            while i < b.len() {
+                assert!(b[i].is_ascii_digit(), "expected a positive integer");
+                n = n * 10 + (b[i] - b'0') as u32;
+                i += 1;
+            }
+            n
+        }
+    }
+}
+
+/// Seconds between uplinks (t), settable per build via the UPLINK_INTERVAL_S
+/// env var (like DEVICE_NAME). This is the canonical knob — a user-facing
+/// "frequency" option is just the inverse (f = 1/t) at the UI layer. The
+/// value is reported in every uplink (`interval_s`) so the cloud can judge
+/// staleness against the device's own cadence.
+pub const UPLINK_INTERVAL_S: u32 = parse_env_u32(option_env!("UPLINK_INTERVAL_S"), 5);
+const _: () = assert!(UPLINK_INTERVAL_S > 0, "UPLINK_INTERVAL_S must be >= 1");
+
 /// Delay between iterations of the main uplink loop on success.
-pub const MAIN_LOOP_DELAY: Duration = Duration::from_millis(5000);
+pub const MAIN_LOOP_DELAY: Duration = Duration::from_secs(UPLINK_INTERVAL_S as u64);
 /// Initial backoff delay after a transient failure (DNS, TCP, TLS, HTTP).
 pub const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
 /// Maximum backoff delay — caps exponential growth.
@@ -93,8 +123,10 @@ pub const JSON_MAP_KEY_CAPACITY: usize = 8;
 pub const JSON_MAP_VALUE_CAPACITY: usize = 16;
 /// Maximum number of entries in a JSON map.
 pub const JSON_MAP_ENTRIES_CAPACITY: usize = 2;
-/// Maximum byte length of a serialized JSON payload.
-pub const JSON_SERIALIZED_CAPACITY: usize = 128;
+/// Maximum byte length of a serialized JSON payload. Mirrored as a literal
+/// in `network/http.rs::post_request` (see HTTP_REQUEST_BUFFER_CAPACITY
+/// note); sized for a worst-case full-telemetry UplinkMessage.
+pub const JSON_SERIALIZED_CAPACITY: usize = 512;
 
 // --- Portal (AP mode) ---
 /// Human-readable device identifier used in portal status responses.

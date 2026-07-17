@@ -84,7 +84,8 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
     // the "factory-01" default. Length-checked at compile time against the
     // UplinkMessage id capacity so a long name can't panic on boot.
     const _: () = assert!(env!("DEVICE_NAME").len() <= 64);
-    let uplink = UplinkMessage::new(env!("DEVICE_NAME").try_into().unwrap(), 100);
+    let mut uplink = UplinkMessage::new(env!("DEVICE_NAME").try_into().unwrap(), 100);
+    uplink.interval_s = Some(UPLINK_INTERVAL_S);
 
     // Uplink path from API_PATH at compile time: "/" against a custom domain
     // (base-path mapping supplies the stage), "/<stage>" against a raw
@@ -162,6 +163,12 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
         backoff = BACKOFF_INITIAL;
 
         loop {
+            // Refresh health metadata for this ping. Sensor fields stay None
+            // until real sensors land (see docs/TELEMETRY.md).
+            uplink.seq = Some(uplink.seq.map_or(1, |n| n.wrapping_add(1)));
+            uplink.uptime_s = Some(embassy_time::Instant::now().as_secs() as u32);
+            uplink.heap_free = Some(esp_alloc::HEAP.free() as u32);
+
             let request = match post_request(HOST, &uplink, Some(API_PATH)) {
                 Ok(r) => r,
                 Err(e) => {
