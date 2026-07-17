@@ -39,18 +39,6 @@ them — git history is the changelog. Every remaining item is gated; the
 
 ## P1 — Hygiene
 
-- [ ] Purge bench pollution from `supervictor-prod-uplinks`: 1,499,205 rows
-      under `device_id 1234567890` (verified 2026-07-16 — it's the entire
-      table). TTL is DONE (owner picked 30 days 2026-07-16): endpoint stamps
-      `expires_at`, template enables TimeToLiveSpecification — lands with the
-      next prod deploy. The delete itself remains: run
-      `purge_bench_uplinks.py` (2026-07-16 session scratchpad; a ~60-line
-      boto3 script — paginated keys-only query + batch-delete of that one
-      partition, `--dry-run` to recount; trivially regenerated if GC'd) —
-      the permission classifier blocks agents from running mass deletes
-      against prod, so this is operator-run.
-      **Unblocks:** owner-run (~10-25 min, ~\$2 of write units).
-
 - [ ] Reconcile `.claude/settings.json` (added to this repo mid-session by a
       concurrent session while the same files were being deleted from the
       `~/.claude` config repo — since restored there). Decide which level owns
