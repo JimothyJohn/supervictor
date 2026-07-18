@@ -117,6 +117,13 @@ pub const MAIN_LOOP_DELAY: Duration = Duration::from_secs(UPLINK_INTERVAL_S as u
 pub const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
 /// Maximum backoff delay — caps exponential growth.
 pub const BACKOFF_MAX: Duration = Duration::from_secs(60);
+/// RTC watchdog window: the board resets unless a successful uplink
+/// round-trip feeds the RWDT within this window. Must comfortably exceed
+/// boot→first-uplink (~2 min worst observed on WiFi) and a full BACKOFF_MAX
+/// retry cycle, or healthy devices reboot-loop. Plain u64 seconds — the
+/// esp-hal Duration is constructed at the arming site in embedded_main.
+pub const WATCHDOG_TIMEOUT_S: u64 = 300;
+const _: () = assert!(WATCHDOG_TIMEOUT_S > 2 * BACKOFF_MAX.as_secs());
 /// Maximum byte length of a single JSON map key.
 pub const JSON_MAP_KEY_CAPACITY: usize = 8;
 /// Maximum byte length of a single JSON map value.

@@ -24,6 +24,7 @@ use esp_hal::clock::CpuClock;
 #[cfg(feature = "chip-esp32c3")]
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::rng::{Rng, Trng, TrngSource};
+use esp_hal::rtc_cntl::{Rtc, RwdtStage};
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
 use mbedtls_rs::Tls;
@@ -70,6 +71,17 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let timg0 = TimerGroup::new(peripherals.TIMG0);
+
+    // RTC watchdog, armed before radio/network init: it sits in the RTC
+    // power domain, so it fires even when both cores wedge (the esp-radio
+    // silent-hang mode on classic ESP32). Fed only on successful uplink
+    // round-trips in app() — any failure that stops uplinks resets the board.
+    let mut rwdt = Rtc::new(peripherals.LPWR).rwdt;
+    rwdt.set_timeout(
+        RwdtStage::Stage0,
+        esp_hal::time::Duration::from_secs(WATCHDOG_TIMEOUT_S),
+    );
+    rwdt.enable();
 
     // Enable true RNG (needs RNG + ADC1 peripherals for entropy)
     let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1);
@@ -170,7 +182,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     };
     tls.set_debug(TLS_DEBUG_LEVEL);
 
-    spawner.spawn(app(stack, tls)).ok();
+    spawner.spawn(app(stack, tls, rwdt)).ok();
 
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;

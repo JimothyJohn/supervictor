@@ -7,6 +7,8 @@ use embassy_net::tcp::TcpSocket;
 use embassy_net::Runner;
 use embassy_net::Stack;
 use embassy_time::{Duration, Timer};
+#[cfg(feature = "embedded")]
+use esp_hal::rtc_cntl::Rwdt;
 use esp_println::println;
 #[cfg(feature = "wifi")]
 use esp_radio::wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState};
@@ -62,7 +64,7 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
 /// Main application loop: resolves DNS, establishes mTLS, and sends uplink telemetry.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
-pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
+pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt) {
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;
         if stack.is_link_up() {
@@ -185,6 +187,9 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
             let mut buffer = [0u8; 1024];
             match embassy_time::with_timeout(HTTP_READ_TIMEOUT, session.read(&mut buffer)).await {
                 Ok(Ok(n)) if n > 0 => {
+                    // A completed round-trip is the liveness proof the
+                    // watchdog contract wants — feed nowhere else.
+                    rwdt.feed();
                     #[cfg(debug_assertions)]
                     match core::str::from_utf8(&buffer[..n]) {
                         Ok(s) => println!("Received response:\n---\n{}\n---", s),
