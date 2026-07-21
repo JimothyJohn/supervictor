@@ -4,7 +4,7 @@
 
 **One language. One toolchain. Sensor to cloud.**
 
-Supervictor is an all-Rust IoT framework that covers the entire stack — bare-metal firmware on a RISC-V microcontroller, a cloud API with a fleet dashboard, and mTLS certificate management — wired together by a single `./Quickstart` entry point. No Node.js lambdas. No YAML-driven code generators. Rust from the register to the database; one deliberate shell script for orchestration.
+Supervictor is an all-Rust IoT framework that covers the entire stack — bare-metal firmware on any ESP32-family microcontroller (Xtensa and RISC-V cores alike), a cloud API with a fleet dashboard, and mTLS certificate management — wired together by a single `./Quickstart` entry point. Other MCU families are a welcome future port. No Node.js lambdas. No YAML-driven code generators. Rust from the register to the database; one deliberate shell script for orchestration.
 
 ## Why One Language Matters
 
