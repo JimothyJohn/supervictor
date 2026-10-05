@@ -453,7 +453,7 @@ dependencies = [
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.26.5",
+ "tokio-rustls 0.26.6",
  "tower",
  "tracing",
 ]
@@ -2761,7 +2761,7 @@ dependencies = [
  "rustls 0.23.45",
  "rustls-native-certs",
  "tokio",
- "tokio-rustls 0.26.5",
+ "tokio-rustls 0.26.6",
  "tower-service",
  "webpki-roots",
 ]
@@ -3898,7 +3898,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-native-tls",
- "tokio-rustls 0.26.5",
+ "tokio-rustls 0.26.6",
  "tower",
  "tower-http 0.6.11",
  "tower-service",
@@ -4589,7 +4589,7 @@ dependencies = [
  "serde-json-core",
  "static_cell",
  "tokio",
- "tokio-rustls 0.26.5",
+ "tokio-rustls 0.26.6",
 ]
 
 [[package]]
@@ -4875,9 +4875,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.26.5"
+version = "0.26.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0c85f2c3ef0b1cd58b36682f4b17aaa995f0e5db534d85692b4903abce21f67"
+checksum = "c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db"
 dependencies = [
  "rustls 0.23.45",
  "tokio",
