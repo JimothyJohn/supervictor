@@ -34,7 +34,10 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   `subject_dn` are grandfathered with a warn log. Payload identifiers are
   validated in `validate.rs` (≤64 bytes, non-empty, no control characters —
   the firmware's `HString<64>` contract).
-- Tests use in-memory SQLite. No AWS dependencies in tests.
+- Tests use in-memory SQLite by default (no AWS in the default suite).
+  The `dynamo` backend has its own contract suite, `tests/test_store_dynamo.rs`,
+  against a real DynamoDB Local (`DYNAMODB_LOCAL_ENDPOINT`, see the file
+  header); CI runs it in the `dynamo` job with a service container.
 - Wire contract (routes, field names) is shared with the firmware via
   `supervictor-common` — change it there, and the compiler finds every
   callsite on both sides.
