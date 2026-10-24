@@ -52,26 +52,31 @@ fn malformed_lwa_json_returns_none() {
     assert!(extract_client_subject(&headers).is_none());
 }
 
+/// Regression (2026-10-24): behind the adapter, a request with no client
+/// certificate must have NO identity. Falling through to the proxy header let
+/// any caller pick a device subject on dev and prod (raw execute-api URL, or
+/// the mTLS domain with someone else's valid cert).
 #[test]
-fn lwa_missing_cert_falls_through() {
+fn lwa_present_without_cert_ignores_forged_proxy_header() {
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-amzn-request-context",
-        r#"{"identity":{}}"#.parse().unwrap(),
+        r#"{"identity":{"sourceIp":"1.2.3.4"}}"#.parse().unwrap(),
+    );
+    headers.insert(
+        "x-ssl-client-subject-dn",
+        "OU=devices,O=Supervictor,CN=c3-wifi-01".parse().unwrap(),
     );
     assert!(extract_client_subject(&headers).is_none());
 }
 
+/// Same when the adapter header is present but unparseable: still no fallback.
 #[test]
-fn lwa_missing_cert_falls_through_to_proxy() {
+fn lwa_malformed_ignores_forged_proxy_header() {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "x-amzn-request-context",
-        r#"{"identity":{}}"#.parse().unwrap(),
-    );
-    headers.insert("x-ssl-client-subject-dn", "CN=fallback".parse().unwrap());
-    let subject = extract_client_subject(&headers);
-    assert_eq!(subject.as_deref(), Some("CN=fallback"));
+    headers.insert("x-amzn-request-context", "{bad json}".parse().unwrap());
+    headers.insert("x-ssl-client-subject-dn", "CN=forged".parse().unwrap());
+    assert!(extract_client_subject(&headers).is_none());
 }
 
 // ── dn_matches ────────────────────────────────────────────────────────
