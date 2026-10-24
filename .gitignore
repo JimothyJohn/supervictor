@@ -275,3 +275,4 @@ certs/
 .ruff_cache/
 !certs/AmazonRootCA1.pem
 .claude
+scratch/
