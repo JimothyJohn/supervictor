@@ -18,3 +18,7 @@ pub const FLEET: &str = "/fleet";
 
 /// Fleet summary — GET (admin mTLS). Aggregate counts for alerting.
 pub const FLEET_SUMMARY: &str = "/fleet/summary";
+
+/// Fleet history — GET (admin mTLS). Time-bucketed telemetry + status
+/// timeline for a `?window=` preset (see `endpoint::history::Window`).
+pub const FLEET_HISTORY: &str = "/fleet/history";

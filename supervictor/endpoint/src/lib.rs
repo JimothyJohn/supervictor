@@ -11,6 +11,8 @@ pub mod error;
 pub mod fleet;
 /// Framework-agnostic request handlers (pure functions).
 pub mod handlers;
+/// Fleet history: bucketed telemetry and status timeline (pure functions).
+pub mod history;
 /// mTLS client certificate extraction middleware.
 pub mod middleware;
 /// Domain models, wire types, and API response structs.

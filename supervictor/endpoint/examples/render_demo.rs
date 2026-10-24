@@ -8,9 +8,19 @@
 use std::fs;
 use std::path::Path;
 
+use supervictor_endpoint::fleet::FleetSummary;
+use supervictor_endpoint::history::{
+    bucket_series, status_timeline, History, Window, BUCKETS, METRICS,
+};
 use supervictor_endpoint::models::{DeviceRecord, UplinkRecord};
-use supervictor_endpoint::ui::views::{self, FleetRow, Staleness};
+use supervictor_endpoint::time::format_rfc3339;
+use supervictor_endpoint::ui::views::{self, DeviceHistory, FleetRow, Staleness};
 use supervictor_endpoint::ui::{assets, views::LIVE_SCRIPT};
+
+/// "Now" for the seeded history: 2026-07-11T04:00:00Z, just after the
+/// newest canned uplink.
+const DEMO_NOW: u64 = 1_783_828_800;
+const DEMO_WINDOW: Window = Window::H1;
 
 const DEMO_SUBJECT: &str = "CN=demo-viewer,OU=admin,O=supervictor";
 const DEMO_CSRF: &str = "static-demo";
@@ -60,14 +70,30 @@ fn uplink(id: &str, at: &str, current: i32) -> UplinkRecord {
     }
 }
 
-/// Rewrite app-absolute paths and the SSE script for static hosting.
+/// Rewrite app-absolute paths and the SSE script for static hosting; the
+/// window filters all point at the one rendered page, and the periodic
+/// reload is dropped (nothing changes on a static site).
 fn staticize(html: String, devices: &[&str]) -> String {
     let mut out = html
         .replace("href=\"/ui/assets/style.css\"", "href=\"style.css\"")
         .replace("href=\"/ui\"", "href=\"index.html\"")
         .replace("action=\"/ui/devices\"", "action=\"#\"")
+        .replace(" data-refresh=\"60\"", "")
         .replace(LIVE_SCRIPT, DEMO_SCRIPT);
+    for w in Window::ALL {
+        out = out.replace(
+            &format!("href=\"/ui/history?window={}\"", w.label()),
+            "href=\"history.html\"",
+        );
+    }
+    out = out.replace("href=\"/ui/history\"", "href=\"history.html\"");
     for id in devices {
+        for w in Window::ALL {
+            out = out.replace(
+                &format!("href=\"/ui/devices/{id}?window={}\"", w.label()),
+                &format!("href=\"{id}.html\""),
+            );
+        }
         out = out
             .replace(
                 &format!("href=\"/ui/devices/{id}\""),
@@ -79,6 +105,60 @@ fn staticize(html: String, devices: &[&str]) -> String {
             );
     }
     out
+}
+
+/// Deterministic telemetry for the demo: a tiny LCG per device, one uplink
+/// every 30 s across the hour, with the same shape the firmware simulator
+/// produces (drifting current, slow temperature, jittery RSSI, leaking heap).
+fn demo_rows(id: &str, seed: u64, step_s: u64) -> Vec<UplinkRecord> {
+    let mut state = seed;
+    let mut next = move |n: u64| {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (state >> 33) % n
+    };
+    let base = 400 + (seed % 7) * 180;
+    let mut rows = Vec::new();
+    let mut t = DEMO_NOW - 3600;
+    let mut temp = 22_000 + next(6_000) as i64;
+    let mut heap = 96_000u64;
+    while t <= DEMO_NOW {
+        let current = base as i64 + next(60) as i64 - 30 + if next(40) == 0 { 300 } else { 0 };
+        temp += next(300) as i64 - 150;
+        heap = heap.saturating_sub(next(40));
+        rows.push(uplink_full(
+            id,
+            &format_rfc3339(t, 0),
+            current as i32,
+            temp as f64 / 1000.0,
+            40.0 + next(80) as f64 / 10.0,
+            -60 - next(8) as i64,
+            heap,
+        ));
+        t += step_s;
+    }
+    rows
+}
+
+#[allow(clippy::too_many_arguments)]
+fn uplink_full(
+    id: &str,
+    at: &str,
+    current: i32,
+    temp_c: f64,
+    humidity_pct: f64,
+    rssi_dbm: i64,
+    heap_free: u64,
+) -> UplinkRecord {
+    UplinkRecord {
+        device_id: id.into(),
+        received_at: at.into(),
+        payload: serde_json::json!({
+            "current": current, "fw": "0.1.0", "temp_c": temp_c,
+            "humidity_pct": humidity_pct, "rssi_dbm": rssi_dbm, "heap_free": heap_free,
+        }),
+    }
 }
 
 fn main() {
@@ -135,6 +215,46 @@ fn main() {
     let fleet = views::fleet_page(&rows, DEMO_CSRF, DEMO_SUBJECT).into_string();
     fs::write(outdir.join("index.html"), staticize(fleet, &ids)).expect("write fleet page");
 
+    // History page: an hour of seeded telemetry for the two live devices.
+    let step = DEMO_WINDOW.step();
+    let since = DEMO_NOW - step * BUCKETS as u64;
+    let mut rows = demo_rows("factory-01", 11, 30);
+    rows.extend(demo_rows("factory-02", 23, 30));
+    let latest = rows
+        .iter()
+        .fold(std::collections::HashMap::new(), |mut m, r| {
+            m.insert(r.device_id.clone(), DEMO_NOW);
+            m
+        });
+    let timeline = status_timeline(&devices, &latest, &rows, since, step);
+    let series: Vec<_> = devices
+        .iter()
+        .map(|d| bucket_series(&d.device_id, &rows, since, step))
+        .collect();
+    let fleet_history = History {
+        window: DEMO_WINDOW.label(),
+        since: format_rfc3339(since, 0),
+        until: format_rfc3339(DEMO_NOW, 0),
+        step_s: step,
+        timeline,
+        devices: series.clone(),
+        truncated: false,
+    };
+    let summary = FleetSummary {
+        total: 4,
+        active: 3,
+        inactive: 1,
+        fresh: 2,
+        stale: 0,
+        dark: 0,
+        never: 1,
+    };
+    let history_html =
+        views::history_page(&fleet_history, &summary, DEMO_WINDOW, DEMO_SUBJECT).into_string();
+    fs::write(outdir.join("history.html"), staticize(history_html, &ids))
+        .expect("write history page");
+    assert_eq!(METRICS.len(), series[0].points[0].values.len());
+
     // Detail pages: a lively one for factory-01, sparser ones for the rest.
     let history = [
         ("2026-07-11T03:58:12+00:00", 41),
@@ -146,7 +266,7 @@ fn main() {
         ("2026-07-11T03:28:12+00:00", 38),
         ("2026-07-11T03:23:08+00:00", 42),
     ];
-    for record in &devices {
+    for (slot, record) in devices.iter().enumerate() {
         let uplinks: Vec<UplinkRecord> = if record.device_id == "factory-01" {
             history
                 .iter()
@@ -157,7 +277,14 @@ fn main() {
         } else {
             Vec::new()
         };
-        let page = views::device_page(record, &uplinks, DEMO_CSRF, DEMO_SUBJECT).into_string();
+        let device_history = DeviceHistory {
+            series: &series[slot],
+            window: DEMO_WINDOW,
+            truncated: false,
+            slot,
+        };
+        let page = views::device_page(record, &device_history, &uplinks, DEMO_CSRF, DEMO_SUBJECT)
+            .into_string();
         fs::write(
             outdir.join(format!("{}.html", record.device_id)),
             staticize(page, &ids),
@@ -168,7 +295,7 @@ fn main() {
     fs::write(outdir.join("style.css"), assets::STYLESHEET).expect("write stylesheet");
     println!(
         "demo rendered: {} pages -> {}",
-        devices.len() + 1,
+        devices.len() + 2,
         outdir.display()
     );
 }

@@ -136,4 +136,18 @@ pub trait DeviceStore: Send + Sync {
     /// Most recent uplink per device (devices that never uplinked are
     /// absent). One query on SQLite; per-device on DynamoDB (see impl notes).
     fn latest_uplinks(&self) -> Result<Vec<UplinkRecord>, AppError>;
+    /// One device's uplinks received at or after `since` (RFC 3339, compared
+    /// as the fixed-width UTC strings the store writes), oldest first, at
+    /// most `limit` rows. Feeds the history charts.
+    fn device_uplinks_since(
+        &self,
+        device_id: &str,
+        since: &str,
+        limit: usize,
+    ) -> Result<Vec<UplinkRecord>, AppError>;
+    /// Every device's uplinks received at or after `since`, oldest first,
+    /// at most `limit` rows in total (the oldest `limit` — a truncated
+    /// window is reported by the caller, not silently shortened at the
+    /// recent end where the reader is looking).
+    fn uplinks_since(&self, since: &str, limit: usize) -> Result<Vec<UplinkRecord>, AppError>;
 }

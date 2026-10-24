@@ -43,7 +43,9 @@ impl SqliteDeviceStore {
                 payload     TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_uplinks_device_received
-                ON uplinks(device_id, received_at DESC);",
+                ON uplinks(device_id, received_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_uplinks_received
+                ON uplinks(received_at);",
         )
         .map_err(|e| AppError::Store(StoreError::io("migration", e)))?;
         Ok(())
@@ -219,4 +221,63 @@ impl DeviceStore for SqliteDeviceStore {
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| AppError::Store(StoreError::io("get_uplinks collect", e)))
     }
+
+    fn device_uplinks_since(
+        &self,
+        device_id: &str,
+        since: &str,
+        limit: usize,
+    ) -> Result<Vec<UplinkRecord>, AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Store(StoreError::Poisoned))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT device_id, received_at, payload FROM uplinks \
+                 WHERE device_id = ?1 AND received_at >= ?2 \
+                 ORDER BY received_at ASC, id ASC LIMIT ?3",
+            )
+            .map_err(|e| AppError::Store(StoreError::io("device_uplinks_since prepare", e)))?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![device_id, since, limit], row_to_uplink)
+            .map_err(|e| AppError::Store(StoreError::io("device_uplinks_since query", e)))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Store(StoreError::io("device_uplinks_since collect", e)))
+    }
+
+    fn uplinks_since(&self, since: &str, limit: usize) -> Result<Vec<UplinkRecord>, AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Store(StoreError::Poisoned))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT device_id, received_at, payload FROM uplinks \
+                 WHERE received_at >= ?1 \
+                 ORDER BY received_at ASC, id ASC LIMIT ?2",
+            )
+            .map_err(|e| AppError::Store(StoreError::io("uplinks_since prepare", e)))?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![since, limit], row_to_uplink)
+            .map_err(|e| AppError::Store(StoreError::io("uplinks_since query", e)))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Store(StoreError::io("uplinks_since collect", e)))
+    }
+}
+
+/// Map a `(device_id, received_at, payload)` row; an unparseable payload
+/// becomes `null` rather than failing the whole query (same policy as the
+/// other readers).
+fn row_to_uplink(row: &rusqlite::Row<'_>) -> rusqlite::Result<UplinkRecord> {
+    let payload_str: String = row.get(2)?;
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null);
+    Ok(UplinkRecord {
+        device_id: row.get(0)?,
+        received_at: row.get(1)?,
+        payload,
+    })
 }

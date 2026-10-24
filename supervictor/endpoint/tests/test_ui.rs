@@ -53,7 +53,10 @@ async fn every_ui_route_requires_a_certificate() {
     let (server, _) = server_with_store();
     for path in [
         "/ui",
+        "/ui/history",
+        "/ui/history?window=6h",
         "/ui/devices/some-device",
+        "/ui/devices/some-device?window=6h",
         "/ui/events",
         "/ui/assets/style.css",
     ] {
@@ -193,7 +196,10 @@ async fn device_detail_shows_uplinks_and_sparkline() {
     assert_eq!(resp.status_code(), 200);
     let html = resp.text();
     assert!(html.contains("CN=factory-01,OU=devices"));
-    assert!(html.contains("polyline"), "sparkline should render");
+    assert!(
+        html.contains("<figure class=\"chart\""),
+        "metric charts should render"
+    );
     // maud escapes the JSON's quotes in the payload cell
     assert!(html.contains("&quot;current&quot;:30"));
 }
@@ -348,4 +354,168 @@ async fn malformed_form_body_is_client_error_not_5xx() {
         "malformed body must be 4xx, got {}",
         resp.status_code()
     );
+}
+
+// ── History page ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn history_page_renders_tiles_status_chart_and_a_chart_per_metric() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+    seed_device(store.as_ref(), "factory-02", "active");
+    seed_device(store.as_ref(), "retired", "inactive");
+    store
+        .put_uplink(UplinkRecord {
+            device_id: "factory-01".into(),
+            received_at: supervictor_endpoint::time::now_rfc3339(),
+            payload: serde_json::json!({
+                "current": 1240, "temp_c": 23.5, "humidity_pct": 41.0,
+                "rssi_dbm": -63, "heap_free": 90112, "fw": "0.1.0"
+            }),
+        })
+        .unwrap();
+
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server.get("/ui/history").add_header(name, value).await;
+    assert_eq!(resp.status_code(), 200);
+    let html = resp.text();
+    // Filter row with every preset, the default marked.
+    for w in ["15m", "1h", "6h", "24h", "7d"] {
+        assert!(
+            html.contains(&format!("href=\"/ui/history?window={w}\"")),
+            "missing window link {w}"
+        );
+    }
+    assert!(html.contains("class=\"active\" href=\"/ui/history?window=1h\""));
+    // Headline tiles reflect the fleet right now.
+    assert!(html.contains("active devices"));
+    assert!(html.contains("3 registered, 1 inactive"));
+    // One status chart plus one chart per metric, each with a table twin.
+    assert_eq!(
+        html.matches("<figure class=\"chart status-chart\"").count(),
+        1
+    );
+    for key in ["current", "temp_c", "humidity_pct", "rssi_dbm", "heap_free"] {
+        assert!(
+            html.contains(&format!("<figure class=\"chart\" id=\"{key}\"")),
+            "no chart for {key}"
+        );
+    }
+    assert_eq!(html.matches("class=\"table-view\"").count(), 6);
+    // Both active devices appear as series (legend + end labels); the
+    // retired one is in the series list too (every registered device).
+    assert!(html.contains("factory-01"));
+    assert!(html.contains("factory-02"));
+    // The live value made it into the bucket table of the current chart.
+    assert!(html.contains("1240"), "current value should be tabulated");
+    assert!(html.contains("data-refresh=\"60\""));
+    assert!(!html.contains("NaN"), "no NaN may leak into the markup");
+}
+
+#[tokio::test]
+async fn history_page_rejects_bad_window_and_accepts_each_preset() {
+    let (server, _) = server_with_store();
+    for bad in ["2h", "1H", "1h%0A", "../etc/passwd", "%00"] {
+        let (name, value) = dn(ADMIN_DN);
+        let resp = server
+            .get(&format!("/ui/history?window={bad}"))
+            .add_header(name, value)
+            .await;
+        assert_eq!(resp.status_code(), 422, "window={bad}");
+    }
+    for w in ["15m", "1h", "6h", "24h", "7d"] {
+        let (name, value) = dn(ADMIN_DN);
+        let resp = server
+            .get(&format!("/ui/history?window={w}"))
+            .add_header(name, value)
+            .await;
+        assert_eq!(resp.status_code(), 200, "window={w}");
+        assert!(resp
+            .text()
+            .contains(&format!("class=\"active\" href=\"/ui/history?window={w}\"")));
+    }
+}
+
+/// A device id is untrusted text: it reaches the legend, the end label,
+/// the table header and the JSON in `data-chart`. It must be inert in all
+/// four places — no `<script>` survives, no attribute breakout.
+#[tokio::test]
+async fn history_page_keeps_hostile_device_ids_inert_in_charts() {
+    let (server, store) = server_with_store();
+    let hostile = "x\"><script>alert(1)</script>";
+    seed_device(store.as_ref(), hostile, "active");
+    seed_uplink(
+        store.as_ref(),
+        hostile,
+        &supervictor_endpoint::time::now_rfc3339(),
+        7,
+    );
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server.get("/ui/history").add_header(name, value).await;
+    assert_eq!(resp.status_code(), 200);
+    let html = resp.text();
+    assert!(!html.contains("<script>alert(1)"), "raw script tag leaked");
+    assert!(
+        !html.contains("\"><script"),
+        "attribute breakout: a quote survived unescaped before <script"
+    );
+    assert!(
+        html.contains("&lt;script&gt;alert(1)"),
+        "id should be escaped, not dropped"
+    );
+    // The device page for it is also fine.
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server
+        .get(&format!("/ui/devices/{}", urlencoding(hostile)))
+        .add_header(name, value)
+        .await;
+    assert_eq!(resp.status_code(), 200);
+    assert!(!resp.text().contains("<script>alert(1)"));
+}
+
+fn urlencoding(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn device_page_has_window_filters_and_metric_charts() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+    seed_uplink(
+        store.as_ref(),
+        "factory-01",
+        &supervictor_endpoint::time::now_rfc3339(),
+        55,
+    );
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server
+        .get("/ui/devices/factory-01?window=6h")
+        .add_header(name, value)
+        .await;
+    assert_eq!(resp.status_code(), 200);
+    let html = resp.text();
+    assert!(html.contains("class=\"active\" href=\"/ui/devices/factory-01?window=6h\""));
+    assert_eq!(html.matches("<figure class=\"chart\"").count(), 5);
+    assert!(
+        !html.contains("class=\"legend\""),
+        "a single series needs no legend"
+    );
+    assert!(html.contains("recent uplinks"));
+    assert!(html.contains("&quot;current&quot;:55"));
+
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server
+        .get("/ui/devices/factory-01?window=bogus")
+        .add_header(name, value)
+        .await;
+    assert_eq!(resp.status_code(), 422);
 }
