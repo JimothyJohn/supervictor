@@ -214,6 +214,27 @@ mod tests {
         )));
     }
 
+    /// The body is the serialized struct, and it round-trips. Regression for
+    /// the desktop client, which pre-serialized the message and passed the
+    /// resulting string in as `data`, so the body went out double-encoded as
+    /// a JSON string literal (`"{\"id\":..."`) and the endpoint rejected it.
+    #[test]
+    fn test_post_request_body_round_trips_as_object() {
+        let message = UplinkMessage::new("pi-edge-01".try_into().unwrap(), 7);
+        let request = post_request("h", &message, None).unwrap();
+        let body = request.split("\r\n\r\n").nth(1).unwrap();
+        assert!(body.starts_with('{'), "body is not a JSON object: {body}");
+        let (parsed, _) = serde_json_core::from_str::<UplinkMessage>(body).unwrap();
+        assert_eq!(parsed.id.as_str(), "pi-edge-01");
+        assert_eq!(parsed.current, 7);
+
+        // Passing an already-serialized string is the trap: it becomes a string literal.
+        let pre: HString<64> = "{\"id\":\"x\"}".try_into().unwrap();
+        let bad = post_request("h", &pre, None).unwrap();
+        let bad_body = bad.split("\r\n\r\n").nth(1).unwrap();
+        assert!(bad_body.starts_with('"'));
+    }
+
     /// GET and POST speak the same dialect: HTTP/1.1 + Connection: close.
     #[test]
     fn test_get_request_dialect_matches_post() {
