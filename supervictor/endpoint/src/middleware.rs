@@ -8,25 +8,32 @@ use axum::response::{IntoResponse, Response};
 
 /// Extract mTLS client certificate subject DN from request headers.
 ///
-/// Checks (in order):
-/// 1. x-amzn-request-context header (Lambda Web Adapter / API Gateway)
-/// 2. x-ssl-client-subject-dn header (nginx/Caddy reverse proxy)
-/// 3. None (local dev, no mTLS)
+/// Trust order:
+/// 1. `x-amzn-request-context` (Lambda Web Adapter / API Gateway). The adapter
+///    sets this header on every request and overwrites whatever the client
+///    sent, so its presence proves we are behind the adapter and its contents
+///    are the gateway's, not the caller's. When it is present it is the ONLY
+///    source: a missing `identity.clientCert` means "no client certificate",
+///    not "ask another header" — behind API Gateway nothing trustworthy sets
+///    `x-ssl-client-subject-dn`, so falling through would let any caller
+///    choose its own identity (observed on dev and prod, 2026-10-24).
+/// 2. `x-ssl-client-subject-dn` (reverse proxy / ingress convention), only
+///    when no adapter header is present. The proxy in front must strip it
+///    from incoming requests; this binary cannot tell.
 pub fn extract_client_subject(headers: &HeaderMap) -> Option<String> {
-    // Lambda Web Adapter passes API Gateway requestContext as a header
+    // Lambda Web Adapter passes API Gateway requestContext as a header. Its
+    // presence is authoritative: no fallback to client-controllable headers.
     if let Some(ctx_header) = headers.get("x-amzn-request-context") {
-        if let Ok(ctx_str) = ctx_header.to_str() {
-            if let Ok(ctx) = serde_json::from_str::<serde_json::Value>(ctx_str) {
-                if let Some(subject) = ctx
-                    .get("identity")
-                    .and_then(|id| id.get("clientCert"))
-                    .and_then(|cert| cert.get("subjectDN"))
-                    .and_then(|s| s.as_str())
-                {
-                    return Some(subject.to_string());
-                }
-            }
-        }
+        return ctx_header
+            .to_str()
+            .ok()
+            .and_then(|ctx_str| serde_json::from_str::<serde_json::Value>(ctx_str).ok())
+            .as_ref()
+            .and_then(|ctx| ctx.get("identity"))
+            .and_then(|id| id.get("clientCert"))
+            .and_then(|cert| cert.get("subjectDN"))
+            .and_then(|s| s.as_str())
+            .map(str::to_string);
     }
 
     // Reverse proxy / ingress controller convention
