@@ -18,6 +18,15 @@ updates:
       # unstable APIs still used by esp-rtos 0.2 / esp-radio 0.17. Unpin there
       # first, then drop this ignore.
       - dependency-name: "esp-hal"
+      # esp-rtos 0.2's embassy feature links embassy-executor 0.9; a direct
+      # bump splits Spawner into two incompatible versions. Both ignores lift
+      # together with the esp-rtos 0.3 migration (TODO.md P2).
+      - dependency-name: "embassy-executor"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # esp-alloc 0.10 belongs to the esp-hal 1.1 line: bumping it alone
+      # yields two allocator versions and an unconfigurable esp-sync 0.2.
+      - dependency-name: "esp-alloc"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

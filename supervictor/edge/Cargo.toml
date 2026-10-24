@@ -52,7 +52,7 @@ name = "tls_dns_dhcp_wifi"
 required-features = ["embedded"]
 
 [dependencies]
-embassy-net = { version = "0.8.0", features = [
+embassy-net = { version = "0.9.1", features = [
   "dhcpv4",
   "medium-ethernet",
   "tcp",
@@ -89,12 +89,14 @@ esp-radio = { version = "0.17", features = [
   "log-04",
   "unstable",
 ], optional = true }
-heapless = { version = "0.8.0", default-features = false }
+# serde feature: heapless 0.9 gates its Serialize/Deserialize impls behind
+# it (0.8 got them transitively via serde-json-core's feature unification).
+heapless = { version = "0.9.3", default-features = false, features = ["serde"] }
 static_cell = { version = "2.1.0", optional = true, features = ["nightly"] }
 serde = { version = "1.0.219", default-features = false, features = ["alloc"] }
-serde-json-core = "0.6.0"
+serde-json-core = "0.7.0"
 mbedtls-rs = { git = "https://github.com/esp-rs/mbedtls-rs.git", rev = "4329f17", optional = true, features = ["log"] }
-esp-bootloader-esp-idf = { version = "0.4", optional = true, features = ["esp32c3"] }
+esp-bootloader-esp-idf = { version = "0.5", optional = true, features = ["esp32c3"] }
 rustls = { version = "0.23.26", optional = true }
 tokio-rustls = { version = "0.26.2", optional = true }
 rustls-pemfile = { version = "2.2.0", optional = true }
@@ -104,4 +106,4 @@ reqwest = { version = "0.12.15", features = ["json", "rustls-tls"] }
 tokio = { version = "1.0", features = ["full"] }
 rustls = "0.23.26"
 tokio-rustls = "0.26.2"
-rcgen = "0.13"
+rcgen = "0.14"

@@ -26,10 +26,12 @@ pub async fn create_store(config: &Config) -> Result<Arc<dyn DeviceStore>, AppEr
                     &sdk_config,
                     &config.devices_table,
                     &config.messages_table,
+                    config.uplink_ttl_days,
                 );
                 tracing::info!(
                     devices_table = %config.devices_table,
                     messages_table = %config.messages_table,
+                    uplink_ttl_days = config.uplink_ttl_days,
                     "dynamo store initialized"
                 );
                 Ok(Arc::new(store))

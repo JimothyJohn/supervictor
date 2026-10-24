@@ -16,8 +16,8 @@ jobs:
     name: Lint + test (host)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203 # stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
         with:
           toolchain: stable
           components: rustfmt, clippy
@@ -31,6 +31,30 @@ jobs:
         run: cargo check -p supervictor-edge --features desktop
       - name: Check endpoint API-only build (no ui)
         run: cargo check -p supervictor-endpoint --no-default-features --features sqlite
+
+  dynamo:
+    name: DynamoDB store (DynamoDB Local)
+    runs-on: ubuntu-latest
+    # The production backend, tested against a real DynamoDB rather than
+    # compiled and hoped for. tests/test_store_dynamo.rs refuses to run
+    # without the endpoint, so a missing container fails loudly.
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:3.3.2
+        ports:
+          - 8000:8000
+    env:
+      DYNAMODB_LOCAL_ENDPOINT: http://localhost:8000
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Clippy (dynamo feature, deny warnings)
+        run: cargo clippy -p supervictor-endpoint --all-targets --features dynamo -- -D warnings
+      - name: Test endpoint against DynamoDB Local
+        run: cargo test -p supervictor-endpoint --features dynamo --locked
 
   embedded:
     name: Embedded build (riscv32, ESP32-C3)
@@ -46,8 +70,8 @@ jobs:
       PASSWORD: ci-password
       TLS_VERSION: "1.3"
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203 # nightly
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # nightly
         with:
           toolchain: nightly
           components: rust-src

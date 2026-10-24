@@ -10,6 +10,8 @@ pub struct DynamoDeviceStore {
     client: Client,
     devices_table: String,
     messages_table: String,
+    /// Days before an uplink row expires via DynamoDB TTL; 0 disables.
+    uplink_ttl_days: u32,
 }
 
 /// Run an async block synchronously on the current tokio runtime.
@@ -20,16 +22,21 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 }
 
 impl DynamoDeviceStore {
-    /// Create a new DynamoDB store backed by the given AWS SDK config and table names.
+    /// Create a new DynamoDB store backed by the given AWS SDK config and
+    /// table names. `uplink_ttl_days` stamps each uplink row with an
+    /// `expires_at` epoch attribute for DynamoDB TTL (0 = rows never expire);
+    /// the table's TimeToLiveSpecification (template.yaml) does the reaping.
     pub fn new(
         sdk_config: &aws_config::SdkConfig,
         devices_table: &str,
         messages_table: &str,
+        uplink_ttl_days: u32,
     ) -> Self {
         Self {
             client: Client::new(sdk_config),
             devices_table: devices_table.to_string(),
             messages_table: messages_table.to_string(),
+            uplink_ttl_days,
         }
     }
 
@@ -136,16 +143,21 @@ impl DeviceStore for DynamoDeviceStore {
         let payload_str = serde_json::to_string(&record.payload)
             .map_err(|e| AppError::Store(StoreError::serde("serialize payload", e)))?;
 
-        block_on(
-            self.client
-                .put_item()
-                .table_name(&self.messages_table)
-                .item("device_id", AttributeValue::S(record.device_id))
-                .item("received_at", AttributeValue::S(record.received_at))
-                .item("payload", AttributeValue::S(payload_str))
-                .send(),
-        )
-        .map_err(|e| AppError::Store(StoreError::io("put_uplink", e)))?;
+        let expires_at =
+            crate::store::uplink_expires_at_unix(&record.received_at, self.uplink_ttl_days);
+
+        let mut put = self
+            .client
+            .put_item()
+            .table_name(&self.messages_table)
+            .item("device_id", AttributeValue::S(record.device_id))
+            .item("received_at", AttributeValue::S(record.received_at))
+            .item("payload", AttributeValue::S(payload_str));
+        if let Some(epoch) = expires_at {
+            put = put.item("expires_at", AttributeValue::N(epoch.to_string()));
+        }
+
+        block_on(put.send()).map_err(|e| AppError::Store(StoreError::io("put_uplink", e)))?;
 
         Ok(())
     }

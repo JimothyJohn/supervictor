@@ -4,6 +4,8 @@
 //!
 //! Environment variables (all runtime):
 //!   HOST        - Target host for HTTP requests (e.g. supervictor.advin.io)
+//!   DEVICE_ID   - Device id to post as (default "1234567890"); should match
+//!                 the client cert's CN once the device is registered
 //!   CA_PEM      - Path to CA certificate PEM for server verification
 //!   CLIENT_CERT - Path to client certificate PEM for mTLS
 //!   CLIENT_KEY  - Path to client private key PEM for mTLS
@@ -48,15 +50,19 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
     // SNI server name must match the server's certificate
     let server_name = ServerName::try_from(base_host.as_str())?.to_owned();
 
-    let message = UplinkMessage::new("1234567890".try_into().unwrap(), 100);
-    let json_body: HString<512> =
-        serde_json_core::to_string(&message).unwrap_or_else(|_| "{}".try_into().unwrap());
+    let device_id: HString<64> = env_or("DEVICE_ID", "1234567890")
+        .as_str()
+        .try_into()
+        .map_err(|_| "DEVICE_ID longer than 64 bytes")?;
+    // post_request serializes its payload itself; handing it a pre-serialized
+    // string double-encoded the body as a JSON string literal.
+    let message = UplinkMessage::new(device_id, 100);
 
     loop {
         match TcpStream::connect(socket_addr).await {
             Ok(socket) => match connector.connect(server_name.clone(), socket).await {
                 Ok(mut tls_stream) => {
-                    let request = match post_request(&base_host, &json_body, None) {
+                    let request = match post_request(&base_host, &message, None) {
                         Ok(r) => r,
                         Err(e) => {
                             println!("Error building request: {}", e);

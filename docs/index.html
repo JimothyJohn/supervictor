@@ -100,20 +100,16 @@
 
   .sheetno {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.22em;
-    color: var(--accent); text-transform: uppercase;
+    color: var(--faint); text-transform: uppercase;
     display: flex; align-items: center; gap: 12px;
   }
-  .sheetno::after { content: ""; height: 1px; width: 64px; background: var(--accent-dim); }
+  .sheetno::after { content: ""; height: 1px; width: 64px; background: var(--line-hi); }
 
   h1 {
     font-size: clamp(2.6rem, 6vw, 4.3rem);
     font-weight: 700; line-height: 1.02;
     text-transform: uppercase; letter-spacing: 0.01em;
     margin: 18px 0 22px;
-  }
-  h1 .stroke {
-    color: transparent;
-    -webkit-text-stroke: 1.5px var(--accent);
   }
   .hero p.sub { color: var(--muted); font-size: 1.06rem; max-width: 46ch; }
   .hero-ctas { display: flex; gap: 14px; margin-top: 34px; flex-wrap: wrap; }
@@ -151,31 +147,6 @@
     font-family: var(--mono); font-size: 10px; color: var(--faint);
     letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 18px;
   }
-  .wirepath { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
-  .node { text-align: center; font-family: var(--mono); }
-  .node .box {
-    width: 58px; height: 58px; border: 1px solid var(--line-hi);
-    display: grid; place-items: center; margin: 0 auto 8px;
-    font-size: 22px; background: var(--bg);
-    transition: border-color .2s;
-  }
-  .node:hover .box { border-color: var(--accent); }
-  .node .lbl { font-size: 9px; letter-spacing: 0.14em; color: var(--muted); text-transform: uppercase; }
-  .wire { flex: 1; height: 1px; background: var(--line-hi); position: relative; margin: 0 8px 26px; }
-  .wire .pulse {
-    position: absolute; top: -2px; left: 0;
-    width: 5px; height: 5px; border-radius: 50%;
-    background: var(--accent); box-shadow: 0 0 8px var(--accent);
-    animation: travel 2.8s linear infinite;
-  }
-  .wire.w2 .pulse { animation-delay: 0.9s; }
-  .wire.w3 .pulse { animation-delay: 1.8s; }
-  @keyframes travel { 0% { left: 0; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { left: calc(100% - 5px); opacity: 0; } }
-  .wire .tag {
-    position: absolute; top: -22px; left: 50%; transform: translateX(-50%);
-    font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
-    color: var(--accent); text-transform: uppercase; white-space: nowrap;
-  }
 
   table.minifleet { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11.5px; }
   .minifleet th {
@@ -189,6 +160,8 @@
   .pill.fresh { color: var(--green); border-color: var(--green); }
   .pill.stale { color: var(--amber); border-color: var(--amber); }
   .pill.dark  { color: var(--red); border-color: var(--red); }
+  .minifleet tr { transition: background .45s ease; }
+  .minifleet tr.blip { background: rgba(249,115,22,0.12); transition: none; }
 
   /* ── section chrome ─────────────────────────────────────── */
   section { padding: 76px 0; border-top: 1px solid var(--line); }
@@ -201,27 +174,6 @@
   .dim::before, .dim::after { content: ""; position: absolute; top: -3px; width: 1px; height: 7px; background: var(--line-hi); }
   .dim::before { left: 0; } .dim::after { right: 0; }
 
-  /* ── problem cards ──────────────────────────────────────── */
-  .cards3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
-  @media (max-width: 800px) { .cards3 { grid-template-columns: 1fr; } }
-  .card {
-    background: var(--bg2); padding: 30px 26px;
-    position: relative; transition: background .2s;
-  }
-  .card:hover { background: var(--surface); }
-  .card::before {
-    content: ""; position: absolute; top: 0; left: 0; right: 100%;
-    height: 2px; background: var(--accent); transition: right .3s ease;
-  }
-  .card:hover::before { right: 0; }
-  .card .idx { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 0.18em; }
-  .card h3 { font-size: 1.12rem; font-weight: 600; margin: 12px 0 10px; text-transform: uppercase; letter-spacing: 0.03em; }
-  .card p { color: var(--muted); font-size: 0.94rem; }
-  .card p code, .spec td code, .arch-note code {
-    font-family: var(--mono); font-size: 0.86em;
-    background: var(--bg); border: 1px solid var(--line);
-    padding: 1px 6px; color: var(--text);
-  }
 
   /* ── pillars ────────────────────────────────────────────── */
   .pillar { display: grid; grid-template-columns: 210px 1fr; gap: 34px; padding: 34px 0; border-bottom: 1px dashed var(--line); }
@@ -290,9 +242,6 @@
     .top-nav a.solid { margin-left: auto; }
     .hero { padding: 56px 0 48px; }
     .schematic { padding: 20px 14px 12px; }
-    .node .box { width: 44px; height: 44px; font-size: 16px; }
-    .wire { margin: 0 4px 24px; }
-    .wire .tag { font-size: 8px; }
     .minifleet-wrap { overflow-x: auto; }
     .ctaband { padding: 40px 20px; }
   }
@@ -315,9 +264,9 @@
     <div class="brand">super<em>victor</em></div>
     <div class="sysdot">fleet nominal</div>
     <nav class="top-nav">
-      <a href="demo/">Demo</a>
       <a href="developers.html">Engineers</a>
       <a href="api/">API</a>
+      <a href="https://github.com/JimothyJohn/supervictor" aria-label="Source on GitHub" style="display:inline-flex;align-items:center"><svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg></a>
       <a class="solid" href="mailto:nick@advin.io?subject=Supervictor">Contact</a>
     </nav>
   </div>
@@ -329,84 +278,42 @@
     <!-- HERO -->
     <div class="hero">
       <div>
-        <div class="sheetno rv" style="--i:0">SHT SV-00 · FLEET OPERATIONS PLATFORM</div>
-        <h1 class="rv" style="--i:1">Your hardware fleet,<br><span class="stroke">under command.</span></h1>
+        <div class="sheetno rv" style="--i:0">SV·00</div>
+        <h1 class="rv" style="--i:1">Your fleet, captured<br>in real time.</h1>
         <p class="sub rv" style="--i:2">
-          Supervictor deploys, monitors, and sustains connected devices —
-          with a cryptographic identity for every unit, a live dashboard for
-          every site, and one command from bare board to reporting device.
+          Supervictor deploys and monitors your devices securely, with a
+          live dashboard for every site.
         </p>
-        <div class="hero-ctas rv" style="--i:3">
-          <a class="btn primary" href="demo/">&#9654;&nbsp;See the live dashboard</a>
-          <a class="btn" href="mailto:nick@advin.io?subject=Supervictor%20pilot">Start a pilot</a>
-        </div>
       </div>
 
       <div class="schematic rv" style="--i:2">
         <span class="corner tl"></span><span class="corner tr"></span>
         <span class="corner bl"></span><span class="corner br"></span>
-        <h3>Signal path — live</h3>
-        <div class="wirepath">
-          <div class="node"><div class="box">&#9632;</div><div class="lbl">Device</div></div>
-          <div class="wire w1"><span class="tag">mTLS 1.3</span><span class="pulse"></span></div>
-          <div class="node"><div class="box">&#9670;</div><div class="lbl">Gateway</div></div>
-          <div class="wire w2"><span class="pulse"></span></div>
-          <div class="node"><div class="box">&#9650;</div><div class="lbl">Cloud</div></div>
-          <div class="wire w3"><span class="pulse"></span></div>
-          <div class="node"><div class="box">&#9679;</div><div class="lbl">You</div></div>
-        </div>
+        <h3>Fleet status — live preview</h3>
         <div class="minifleet-wrap">
         <table class="minifleet" id="minifleet">
-          <thead><tr><th>Device</th><th>FW</th><th>Last uplink</th><th>State</th></tr></thead>
+          <thead><tr><th>Device</th><th>Uptime 24h</th><th>Last uplink</th><th>State</th></tr></thead>
           <tbody>
-            <tr><td>factory-01</td><td>0.1.0</td><td class="ts">2s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr><td>factory-02</td><td>0.1.0</td><td class="ts">11s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr><td>warehouse-07</td><td>0.0.9</td><td class="ts">46m ago</td><td><span class="pill stale">stale</span></td></tr>
-            <tr><td>lab-bench-3</td><td>—</td><td class="ts">3h ago</td><td><span class="pill dark">dark</span></td></tr>
+            <tr data-period="5"><td>conveyor</td><td>99.9%</td><td class="ts">1s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="8"><td>extruder</td><td>98.7%</td><td class="ts">3s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="12"><td>lathe</td><td>99.4%</td><td class="ts">6s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="15"><td>press</td><td>99.8%</td><td class="ts">2s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="18"><td>welder</td><td>99.5%</td><td class="ts">11s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="21"><td>mill</td><td>99.1%</td><td class="ts">9s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="30"><td>compressor</td><td>98.3%</td><td class="ts">17s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="45"><td>kiln</td><td>97.2%</td><td class="ts">28s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr><td>grinder</td><td>92.6%</td><td class="ts">46m ago</td><td><span class="pill stale">stale</span></td></tr>
+            <tr><td>packer</td><td>84.1%</td><td class="ts">3h ago</td><td><span class="pill dark">dark</span></td></tr>
           </tbody>
         </table>
         </div>
       </div>
     </div>
 
-    <!-- SV-01 PROBLEM -->
-    <section id="problem">
-      <div class="sechead rv">
-        <div class="sheetno">SHT SV-01</div>
-        <h2>Fleets don't fail loudly. They go quiet.</h2>
-        <div class="dim"></div>
-      </div>
-      <div class="cards3">
-        <div class="card rv">
-          <div class="idx">FAULT&nbsp;/&nbsp;01</div>
-          <h3>The silent dropout</h3>
-          <p>A sensor stops reporting on a Friday. Nobody notices until the
-          month-end report has a hole in it. Supervictor classifies every
-          device <code>fresh / stale / dark</code> continuously and raises the
-          dark ones before your customer does.</p>
-        </div>
-        <div class="card rv">
-          <div class="idx">FAULT&nbsp;/&nbsp;02</div>
-          <h3>The password spreadsheet</h3>
-          <p>Shared API keys in a wiki, one leak away from a fleet-wide
-          incident. Here every device carries its own X.509 certificate —
-          mutual TLS on every request, revocable per unit, no shared secrets
-          anywhere.</p>
-        </div>
-        <div class="card rv">
-          <div class="idx">FAULT&nbsp;/&nbsp;03</div>
-          <h3>The mystery firmware</h3>
-          <p>Which units still run the version with the bug? Every uplink
-          reports its firmware build, so the dashboard answers in one glance —
-          the question every recall, patch, and audit starts with.</p>
-        </div>
-      </div>
-    </section>
-
     <!-- SV-02 PLATFORM -->
     <section id="platform">
       <div class="sechead rv">
-        <div class="sheetno">SHT SV-02</div>
+        <div class="sheetno">SV·01</div>
         <h2>Deploy. Monitor. Sustain.</h2>
         <div class="dim"></div>
       </div>
@@ -423,7 +330,7 @@
       <div class="pillar rv">
         <div class="k">Monitor <span>SEE EVERY UNIT</span></div>
         <ul>
-          <li><strong>Live fleet dashboard</strong> — telemetry streams in as it happens; freshness badges triage the fleet at a glance. <a href="demo/" style="color:var(--accent)">Try the demo →</a></li>
+          <li><strong>Live fleet dashboard</strong> — telemetry streams in as it happens; freshness badges triage the fleet at a glance.</li>
           <li><strong>Machine-readable health</strong> — the same fleet view as JSON, for your alerting, your scripts, your ops tooling.</li>
           <li><strong>Dark-device watchdog</strong> — a device that goes quiet past its threshold is logged, flagged, and ready to page you.</li>
         </ul>
@@ -439,28 +346,43 @@
       </div>
     </section>
 
+    <!-- CTA -->
+    <section id="contact">
+      <div class="ctaband rv">
+        <h2>Put your fleet on the board.</h2>
+        <p>Talk to us about running Supervictor for your devices.</p>
+        <div class="hero-ctas" style="justify-content:center">
+          <a class="btn primary" href="mailto:nick@advin.io?subject=Supervictor">Talk to us</a>
+          <a class="btn" href="https://github.com/JimothyJohn/supervictor">View the source</a>
+        </div>
+      </div>
+    </section>
+
     <!-- SV-03 SECURITY -->
     <section id="security">
       <div class="sechead rv">
-        <div class="sheetno">SHT SV-03</div>
+        <div class="sheetno">SV·02</div>
         <h2>Security spec</h2>
         <div class="dim"></div>
       </div>
       <table class="spec rv">
-        <tr><th>Transport</th><td>Mutual TLS 1.2/1.3 on every connection, device-to-cloud and operator-to-dashboard. There is no unauthenticated surface.</td></tr>
-        <tr><th>Device identity</th><td>Per-device X.509 client certificate signed by your CA. No shared keys, no passwords, revocable per unit.</td></tr>
-        <tr><th>Operator access</th><td>Dashboard and fleet API require operator certificates with an admin role encoded in the certificate itself — spoof-resistant, parsed component-wise.</td></tr>
-        <tr><th>Actions</th><td>All fleet mutations are CSRF-protected and audit-logged with the acting operator's identity; log output is injection-sanitized.</td></tr>
-        <tr><th>Blast-radius controls</th><td>API throttling and compute concurrency caps are set explicitly — a runaway client can't melt the bill or the service.</td></tr>
-        <tr><th>Memory safety</th><td>100% Rust from device firmware to cloud handler — the class of memory-corruption CVEs that dominates embedded security simply isn't in the codebase. Dependencies are audited weekly.</td></tr>
+        <tr><th>Built on standards</th><td>Mutual TLS 1.2/1.3 for every connection and X.509 public-key
+            infrastructure for every identity — the same standards that secure banking
+            and the modern web, applied device-to-cloud.</td></tr>
+        <tr><th>Best practices</th><td>No passwords or shared keys anywhere. Least-privilege access,
+            per-device revocation, request throttling, and audit logging of every
+            operator action, following OWASP-aligned web practices.</td></tr>
+        <tr><th>The short version</th><td>Each device and each operator carries its own revocable
+            cryptographic identity, and nothing talks to anything without proving who
+            it is. It just works — and keeps working when a credential is lost.</td></tr>
       </table>
     </section>
 
     <!-- SV-04 ARCHITECTURE -->
     <section id="architecture">
       <div class="sechead rv">
-        <div class="sheetno">SHT SV-04</div>
-        <h2>One binary, laptop to cloud</h2>
+        <div class="sheetno">SV·03</div>
+        <h2>Self-host it, or scale it in the cloud</h2>
         <div class="dim"></div>
       </div>
       <pre class="arch rv">
@@ -474,35 +396,13 @@ DEVICE (ESP32-C3, no_std Rust)
                         ├── /fleet   health API for your tooling
                         └── watchdog dark-device alerting</pre>
       <p class="arch-note rv">
-        The same wire types compile into the firmware and the cloud service —
-        change a field and the compiler finds every affected line on both
-        sides before anything ships. That's the practical meaning of
-        <code>one language, register to database</code>: fleet bugs get caught
-        at build time, not at 2&nbsp;AM.
+        The same product runs both ways: self-host on your own hardware for
+        full control, or push to the cloud for enterprise scale — your
+        budget and your needs decide, and you can change your mind later
+        without changing your devices.
       </p>
     </section>
 
-    <!-- SV-05 NUMBERS -->
-    <section id="numbers">
-      <div class="stats rv">
-        <div class="stat"><div class="n">1</div><div class="d">command to onboard a device</div></div>
-        <div class="stat"><div class="n">0</div><div class="d">passwords or shared keys</div></div>
-        <div class="stat"><div class="n">100%</div><div class="d">Rust, firmware to cloud</div></div>
-        <div class="stat"><div class="n">2</div><div class="d">deploy targets: AWS or yours</div></div>
-      </div>
-    </section>
-
-    <!-- CTA -->
-    <section id="contact">
-      <div class="ctaband rv">
-        <h2>Put your fleet on the board.</h2>
-        <p>Watch the live dashboard demo, or talk to us about a pilot for your devices.</p>
-        <div class="hero-ctas" style="justify-content:center">
-          <a class="btn primary" href="demo/">&#9654;&nbsp;Open the demo</a>
-          <a class="btn" href="mailto:nick@advin.io?subject=Supervictor%20pilot">Talk to us</a>
-        </div>
-      </div>
-    </section>
 
   </div>
 </main>
@@ -512,7 +412,7 @@ DEVICE (ESP32-C3, no_std Rust)
     <span>© 2026 ADVIN</span>
     <a href="developers.html">For engineers</a>
     <a href="https://github.com/JimothyJohn/supervictor">Source</a>
-    <span class="sp">SHT SV-00 · REV A</span>
+    <span class="sp">SV·00 · REV A</span>
   </div>
 </footer>
 
@@ -527,20 +427,26 @@ DEVICE (ESP32-C3, no_std Rust)
   }, { threshold: 0.12 });
   document.querySelectorAll(".rv").forEach(function (el) { io.observe(el); });
 
-  // ticking mini fleet: ages count up; the fresh rows occasionally reset
-  var rows = document.querySelectorAll("#minifleet tbody tr");
-  var ages = [2, 11, 2760, 10800]; // seconds
-  function fmt(s) {
-    if (s < 60) return s + "s ago";
-    if (s < 3600) return Math.floor(s / 60) + "m ago";
-    return Math.floor(s / 3600) + "h ago";
+  // ticking mini fleet: each device has its own uplink period; ages tick once a
+  // second, and a row flashes when its uplink lands.
+  var rows = Array.prototype.slice.call(
+    document.querySelectorAll("#minifleet tbody tr[data-period]"));
+  var state = rows.map(function (row, i) {
+    return { row: row, period: +row.dataset.period, age: (i * 1.7) % +row.dataset.period };
+  });
+  function fmt(age) {
+    if (age < 60) return Math.floor(age) + "s ago";
+    return Math.floor(age / 60) + "m ago";
   }
   setInterval(function () {
-    ages = ages.map(function (a) { return a + 1; });
-    if (ages[0] > 14) ages[0] = 1;         // factory-01 uplinks every ~14s
-    if (ages[1] > 23) ages[1] = 2;         // factory-02 every ~23s
-    rows.forEach(function (row, i) {
-      row.querySelector(".ts").textContent = fmt(ages[i]);
+    state.forEach(function (d) {
+      d.age += 1;
+      if (d.age >= d.period) {
+        d.age = 0;
+        d.row.classList.add("blip");
+        setTimeout(function () { d.row.classList.remove("blip"); }, 350);
+      }
+      d.row.querySelector(".ts").textContent = fmt(d.age);
     });
   }, 1000);
 })();

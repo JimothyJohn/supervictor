@@ -24,8 +24,14 @@ single entry point (the `qs` CLI is retired): deployment is
 `Quickstart fleet`, and the dashboard; sustainment is firmware-version
 reporting per uplink plus the staleness watchdog. Release artifacts ship the
 endpoint for Linux aarch64 (the t4g staging host). API Gateway is explicitly
-throttled and the Lambda concurrency-capped; weekly Dependabot + cargo-audit
-watch the dependency tree.
+throttled and the Lambda concurrency-capped.
+
+The delivery loop runs itself: PRs auto-merge into `dev` on green required
+checks; weekly Dependabot bumps flow through the same gate (grouped minors
+silently, majors adjudicated — three esp-ecosystem crates are ignored until
+the Phase-2 esp migration); cargo-audit sweeps advisories weekly. The
+customer-facing site lives at www.supervictor.advin.io (GitHub Pages,
+HTTPS-enforced), publishing from `master` on promotion.
 
 **Operating principle, unchanged: don't orchestrate what doesn't need
 orchestrating.** Each phase below has an explicit trigger; before the trigger

@@ -201,6 +201,8 @@ impl DeviceStore for SqliteDeviceStore {
             .prepare("SELECT device_id, received_at, payload FROM uplinks WHERE device_id = ?1 ORDER BY received_at DESC LIMIT ?2")
             .map_err(|e| AppError::Store(StoreError::io("get_uplinks prepare", e)))?;
 
+        // rusqlite 0.40 dropped ToSql for usize (platform-width); bind i64.
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = stmt
             .query_map(params![device_id, limit], |row| {
                 let payload_str: String = row.get(2)?;

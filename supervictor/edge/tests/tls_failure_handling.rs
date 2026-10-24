@@ -87,7 +87,7 @@ async fn tls_wrong_ca_returns_error_not_panic() {
     let client_ca = generate_simple_self_signed(vec!["other-ca".to_string()]).unwrap();
 
     let server_cert = CertificateDer::from(server_ca.cert.der().to_vec());
-    let server_key = PrivateKeyDer::try_from(server_ca.key_pair.serialize_der()).unwrap();
+    let server_key = PrivateKeyDer::try_from(server_ca.signing_key.serialize_der()).unwrap();
     let client_trusted = CertificateDer::from(client_ca.cert.der().to_vec());
 
     let (listener, acceptor) = bind_tls_server(server_cert, server_key);
@@ -151,7 +151,7 @@ async fn tls_correct_ca_succeeds() {
     let ca = generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
 
     let cert = CertificateDer::from(ca.cert.der().to_vec());
-    let key = PrivateKeyDer::try_from(ca.key_pair.serialize_der()).unwrap();
+    let key = PrivateKeyDer::try_from(ca.signing_key.serialize_der()).unwrap();
     let trusted = CertificateDer::from(ca.cert.der().to_vec());
 
     let (listener, acceptor) = bind_tls_server(cert, key);
@@ -183,7 +183,7 @@ async fn tls_retry_after_failure_succeeds() {
     let wrong_ca = generate_simple_self_signed(vec!["wrong".to_string()]).unwrap();
 
     let server_cert = CertificateDer::from(server_ca.cert.der().to_vec());
-    let server_key = PrivateKeyDer::try_from(server_ca.key_pair.serialize_der()).unwrap();
+    let server_key = PrivateKeyDer::try_from(server_ca.signing_key.serialize_der()).unwrap();
     let wrong_trusted = CertificateDer::from(wrong_ca.cert.der().to_vec());
     let correct_trusted = CertificateDer::from(server_ca.cert.der().to_vec());
 

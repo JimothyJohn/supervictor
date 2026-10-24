@@ -1,0 +1,53 @@
+# Mutation testing: the real coverage number. Monthly (and on demand) rather
+# than per-PR — a full run over endpoint + common takes hours, not minutes.
+# Reads `dev`: that is where work integrates; master only receives it.
+# Scheduled workflows run from the default branch, so this file is inert
+# until it reaches master.
+name: Mutation testing
+
+on:
+  schedule:
+    - cron: "17 6 1 * *" # 06:17 UTC on the 1st of the month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mutants:
+    name: cargo-mutants (endpoint + common)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: dev
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
+        with:
+          toolchain: stable
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+      - name: Mutate the host crates
+        # The edge crate is no_std firmware and does not build on the host;
+        # the endpoint and the shared wire types are what the test suites
+        # claim to cover. Exit status is honest: missed mutants fail the job.
+        # Baseline sizing 2026-10-23: 456 mutants across the two crates.
+        # Report lands in mutants.out/ (cargo-mutants' default directory).
+        run: >-
+          cargo mutants
+          --package supervictor-endpoint
+          --package supervictor-common
+          --timeout-multiplier 3
+          --jobs 2
+          --
+          --locked
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutants-report
+          path: mutants.out/
+          if-no-files-found: warn
