@@ -27,6 +27,15 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   compiled) share staleness logic with the dashboard via `src/fleet.rs`;
   `src/watchdog.rs` logs dark-device transitions on long-running deploys
   (`WATCHDOG_INTERVAL_SECS`, 0 disables).
+- Fleet history: `GET /fleet/history?window=` (JSON) and `/ui/history`,
+  `/ui/devices/{id}?window=` (charts) in `src/history.rs` + `src/ui/charts.rs`.
+  `window` is an exact whitelist (15m, 1h, 6h, 24h, 7d; default 1h; else
+  422), always 90 buckets, row cap `MAX_ROWS` (response says `truncated`).
+  Store support: `uplinks_since` / `device_uplinks_since` (SQLite range on
+  `received_at`, DynamoDB sort-key range). Charts are server-rendered SVG
+  (no JS chart lib); the inline script only adds hover/keyboard tooltips
+  and a visible-tab reload. Colours by fleet slot (`.s0`–`.s7`), validated
+  against the dark surface — don't hand-pick new ones.
 - Uplink identity: a device registered with a `subject_dn` is bound to that
   certificate — `POST /` for it must carry a matching mTLS subject or it is
   403'd (`handlers::authorize_uplink`). `REQUIRE_REGISTRATION=true` further

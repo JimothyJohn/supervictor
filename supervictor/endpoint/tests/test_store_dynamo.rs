@@ -614,3 +614,110 @@ async fn concurrent_status_flips_end_in_a_valid_state() {
     assert_eq!(fx.store.list_devices().unwrap().len(), 1);
     fx.teardown().await;
 }
+
+// ── Window queries for the history views (sort-key range on the real table) ──
+
+async fn seed_window(fx: &Fixture) {
+    fx.store.put_device(device("dev-1", None)).unwrap();
+    fx.store.put_device(device("dev-2", None)).unwrap();
+    for (id, at) in [
+        ("dev-1", "2099-07-01T09:59:59+00:00"),
+        ("dev-1", "2099-07-01T10:00:00+00:00"),
+        ("dev-2", "2099-07-01T10:00:00.250+00:00"),
+        ("dev-1", "2099-07-01T10:05:00+00:00"),
+        ("dev-2", "2099-07-01T10:10:00+00:00"),
+        ("dev-1", "2099-07-01T10:15:00+00:00"),
+    ] {
+        fx.store.put_uplink(uplink(id, at, 1)).unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn uplinks_since_matches_the_sqlite_contract() {
+    let fx = Fixture::new("since", TTL_DAYS).await;
+    seed_window(&fx).await;
+
+    let rows = fx
+        .store
+        .uplinks_since("2099-07-01T10:00:00+00:00", 100)
+        .unwrap();
+    let got: Vec<(String, String)> = rows
+        .into_iter()
+        .map(|u| (u.received_at, u.device_id))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("2099-07-01T10:00:00+00:00".to_string(), "dev-1".to_string()),
+            ("2099-07-01T10:00:00.250+00:00".into(), "dev-2".into()),
+            ("2099-07-01T10:05:00+00:00".into(), "dev-1".into()),
+            ("2099-07-01T10:10:00+00:00".into(), "dev-2".into()),
+            ("2099-07-01T10:15:00+00:00".into(), "dev-1".into()),
+        ]
+    );
+
+    let capped = fx
+        .store
+        .uplinks_since("2099-07-01T10:00:00+00:00", 2)
+        .unwrap();
+    let got: Vec<String> = capped.into_iter().map(|u| u.received_at).collect();
+    assert_eq!(
+        got,
+        vec![
+            "2099-07-01T10:00:00+00:00".to_string(),
+            "2099-07-01T10:00:00.250+00:00".to_string(),
+        ],
+        "cap keeps the oldest rows across devices"
+    );
+    assert!(fx
+        .store
+        .uplinks_since("2099-07-01T10:00:00+00:00", 0)
+        .unwrap()
+        .is_empty());
+    assert!(fx
+        .store
+        .uplinks_since("2100-01-01T00:00:00+00:00", 100)
+        .unwrap()
+        .is_empty());
+
+    fx.teardown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn device_uplinks_since_is_a_sort_key_range() {
+    let fx = Fixture::new("dsince", TTL_DAYS).await;
+    seed_window(&fx).await;
+
+    let rows = fx
+        .store
+        .device_uplinks_since("dev-2", "2099-07-01T10:00:00+00:00", 100)
+        .unwrap();
+    let got: Vec<String> = rows.iter().map(|u| u.received_at.clone()).collect();
+    assert_eq!(
+        got,
+        vec![
+            "2099-07-01T10:00:00.250+00:00".to_string(),
+            "2099-07-01T10:10:00+00:00".to_string(),
+        ]
+    );
+    let capped = fx
+        .store
+        .device_uplinks_since("dev-1", "2099-07-01T00:00:00+00:00", 1)
+        .unwrap();
+    assert_eq!(capped.len(), 1);
+    assert_eq!(capped[0].received_at, "2099-07-01T09:59:59+00:00");
+    assert!(fx
+        .store
+        .device_uplinks_since("ghost", "2099-07-01T00:00:00+00:00", 100)
+        .unwrap()
+        .is_empty());
+    // A hostile `since` is a key value, not an expression.
+    for hostile in ["' OR 1=1 --", "\u{0}", "a AND received_at >= :x"] {
+        let _ = fx
+            .store
+            .device_uplinks_since("dev-1", hostile, 100)
+            .unwrap();
+    }
+
+    fx.teardown().await;
+}

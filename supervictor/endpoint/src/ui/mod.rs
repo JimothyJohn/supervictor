@@ -7,6 +7,8 @@
 
 /// Embedded CSS and other static assets.
 pub mod assets;
+/// Inline-SVG charts for the history views.
+pub mod charts;
 /// Server-Sent Events uplink stream.
 pub mod sse;
 /// maud page templates.
@@ -15,7 +17,7 @@ pub mod views;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-use axum::extract::{Form, Path, State};
+use axum::extract::{Form, Path, Query, State};
 use axum::http::{header, HeaderMap};
 use axum::middleware;
 use axum::response::{IntoResponse, Redirect, Response};
@@ -25,8 +27,9 @@ use serde::Deserialize;
 
 use crate::error::AppError;
 use crate::fleet;
+use crate::history::{self, Window};
 use crate::middleware::{extract_client_subject, forbidden, require_admin, sanitize_for_log};
-use crate::routes::AppState;
+use crate::routes::{AppState, HistoryQuery};
 use crate::store::DeviceStore;
 use supervictor_common::status;
 use views::FleetRow;
@@ -38,6 +41,7 @@ const CSRF_COOKIE: &str = "sv_csrf";
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/ui", get(fleet).post(register_device))
+        .route("/ui/history", get(history_view))
         .route("/ui/devices", axum::routing::post(register_device))
         .route("/ui/devices/{device_id}", get(device_detail))
         .route(
@@ -160,20 +164,65 @@ async fn fleet(State(state): State<AppState>, headers: HeaderMap) -> Result<Resp
     })
 }
 
+fn now_unix() -> u64 {
+    crate::time::parse_rfc3339_unix(&crate::time::now_rfc3339()).unwrap_or(0)
+}
+
+/// `GET /ui/history?window=` — fleet status timeline + per-metric charts.
+async fn history_view(
+    State(state): State<AppState>,
+    Query(query): Query<HistoryQuery>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let window = Window::parse(query.window.as_deref())?;
+    let store = state.store.as_ref();
+    let now = now_unix();
+    let history = history::fleet_history(store, window, now)?;
+    let summary = fleet::summarize(&fleet::snapshot(store, now)?);
+    let page = views::history_page(&history, &summary, window, &subject_of(&headers));
+    Ok(page.into_response())
+}
+
+/// `GET /ui/devices/{id}?window=` — one device's charts + raw uplinks.
 async fn device_detail(
     State(state): State<AppState>,
     Path(device_id): Path<String>,
+    Query(query): Query<HistoryQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
+    let window = Window::parse(query.window.as_deref())?;
     let device = state
         .store
         .get_device(&device_id)?
         .ok_or(AppError::DeviceNotFound {
             device_id: device_id.clone(),
         })?;
+    // Colour slot = position in the fleet, so the device wears the same
+    // colour here as on the fleet history page.
+    let mut ids: Vec<String> = state
+        .store
+        .list_devices()?
+        .into_iter()
+        .map(|d| d.device_id)
+        .collect();
+    ids.sort();
+    let slot = ids.iter().position(|id| *id == device_id).unwrap_or(0);
+    let (series, truncated) =
+        history::device_history(state.store.as_ref(), &device_id, window, now_unix())?;
     let uplinks = state.store.get_uplinks(&device_id, 20)?;
     let (token, set_cookie) = ensure_csrf(&headers);
-    let page = views::device_page(&device, &uplinks, &token, &subject_of(&headers));
+    let page = views::device_page(
+        &device,
+        &views::DeviceHistory {
+            series: &series,
+            window,
+            truncated,
+            slot,
+        },
+        &uplinks,
+        &token,
+        &subject_of(&headers),
+    );
     Ok(match set_cookie {
         Some(cookie) => (cookie, page).into_response(),
         None => page.into_response(),
