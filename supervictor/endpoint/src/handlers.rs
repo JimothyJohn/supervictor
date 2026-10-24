@@ -46,9 +46,15 @@ pub fn handle_uplink(
     }
 
     if let Some(s) = store {
-        let mut payload = serde_json::json!({ "current": uplink.current });
-        if let Some(ref fw) = uplink.fw {
-            payload["fw"] = serde_json::Value::String(fw.clone());
+        // Persist every field the device sent (health metadata, sensor
+        // readings — absent Options are already off the wire), minus the id,
+        // which is the record key.
+        let mut payload = serde_json::to_value(&uplink).map_err(|e| AppError::InvalidPayload {
+            detail: e.to_string(),
+            structured: None,
+        })?;
+        if let Some(obj) = payload.as_object_mut() {
+            obj.remove("id");
         }
         s.put_uplink(UplinkRecord {
             device_id: uplink.id.clone(),

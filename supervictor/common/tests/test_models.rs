@@ -8,6 +8,7 @@ fn uplink_roundtrip() {
         id: "dev-1".into(),
         current: 42,
         fw: Some("0.1.0".into()),
+        ..Default::default()
     };
     let json = serde_json::to_string(&msg).unwrap();
     let back: UplinkMessage = serde_json::from_str(&json).unwrap();
@@ -19,7 +20,7 @@ fn uplink_field_names() {
     let msg = UplinkMessage {
         id: "d".into(),
         current: 0,
-        fw: None,
+        ..Default::default()
     };
     let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
     assert!(val.get("id").is_some(), "expected 'id' key");
@@ -34,7 +35,7 @@ fn uplink_i32_extremes() {
         let msg = UplinkMessage {
             id: "x".into(),
             current: v,
-            fw: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&msg).unwrap();
         let back: UplinkMessage = serde_json::from_str(&json).unwrap();
@@ -66,6 +67,113 @@ fn uplink_ignores_extra_fields() {
 fn uplink_i64_overflow_rejected() {
     let json = format!(r#"{{"id": "x", "current": {}}}"#, i64::MAX);
     assert!(serde_json::from_str::<UplinkMessage>(&json).is_err());
+}
+
+// ── UplinkMessage telemetry fields ───────────────────────────────────
+
+/// Full-telemetry uplink survives a JSON roundtrip with every field intact.
+#[test]
+fn uplink_full_telemetry_roundtrip() {
+    let msg = UplinkMessage {
+        id: "dev-1".into(),
+        current: -42,
+        fw: Some("0.1.0".into()),
+        seq: Some(u32::MAX),
+        uptime_s: Some(86_400),
+        interval_s: Some(300),
+        heap_free: Some(73_728),
+        rssi_dbm: Some(-67),
+        temp_c: Some(23.5),
+        humidity_pct: Some(41.2),
+        accel_g: Some([0.01, -0.02, 1.0]),
+        gyro_dps: Some([0.5, -0.5, 0.0]),
+        mag_ut: Some([22.1, -4.3, 40.0]),
+    };
+    let json = serde_json::to_string(&msg).unwrap();
+    let back: UplinkMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(msg, back);
+}
+
+/// Absent telemetry is omitted from the wire, not serialized as null —
+/// a minimal uplink stays byte-identical to the pre-telemetry format.
+#[test]
+fn uplink_absent_telemetry_off_the_wire() {
+    let msg = UplinkMessage {
+        id: "d".into(),
+        current: 1,
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&msg).unwrap();
+    assert_eq!(json, r#"{"id":"d","current":1}"#);
+}
+
+/// Old firmware → new endpoint: pre-telemetry JSON parses with all
+/// telemetry fields None (forward compat).
+#[test]
+fn uplink_pre_telemetry_json_parses() {
+    let old: UplinkMessage = serde_json::from_str(r#"{"id":"a","current":1}"#).unwrap();
+    assert_eq!(old.seq, None);
+    assert_eq!(old.uptime_s, None);
+    assert_eq!(old.interval_s, None);
+    assert_eq!(old.heap_free, None);
+    assert_eq!(old.rssi_dbm, None);
+    assert_eq!(old.temp_c, None);
+    assert_eq!(old.humidity_pct, None);
+    assert_eq!(old.accel_g, None);
+    assert_eq!(old.gyro_dps, None);
+    assert_eq!(old.mag_ut, None);
+}
+
+/// Wire field names carry their units — the schema contract with the
+/// firmware's heapless twin and with everything reading stored payloads.
+#[test]
+fn uplink_telemetry_field_names() {
+    let msg = UplinkMessage {
+        id: "d".into(),
+        current: 0,
+        fw: Some("1".into()),
+        seq: Some(1),
+        uptime_s: Some(1),
+        interval_s: Some(1),
+        heap_free: Some(1),
+        rssi_dbm: Some(-1),
+        temp_c: Some(0.0),
+        humidity_pct: Some(0.0),
+        accel_g: Some([0.0; 3]),
+        gyro_dps: Some([0.0; 3]),
+        mag_ut: Some([0.0; 3]),
+    };
+    let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+    let obj = val.as_object().unwrap();
+    use supervictor_common::fields;
+    for key in [
+        fields::UPLINK_ID,
+        fields::UPLINK_CURRENT,
+        fields::UPLINK_FW,
+        fields::UPLINK_SEQ,
+        fields::UPLINK_UPTIME_S,
+        fields::UPLINK_INTERVAL_S,
+        fields::UPLINK_HEAP_FREE,
+        fields::UPLINK_RSSI_DBM,
+        fields::UPLINK_TEMP_C,
+        fields::UPLINK_HUMIDITY_PCT,
+        fields::UPLINK_ACCEL_G,
+        fields::UPLINK_GYRO_DPS,
+        fields::UPLINK_MAG_UT,
+    ] {
+        assert!(obj.contains_key(key), "expected '{key}' on the wire");
+    }
+    assert_eq!(obj.len(), 13);
+}
+
+/// IMU vectors reject wrong arity — [x, y] is a malformed packet, not a
+/// silently-padded one.
+#[test]
+fn uplink_imu_vector_wrong_arity_rejected() {
+    let json = r#"{"id":"d","current":0,"accel_g":[0.1,0.2]}"#;
+    assert!(serde_json::from_str::<UplinkMessage>(json).is_err());
+    let json = r#"{"id":"d","current":0,"accel_g":[0.1,0.2,0.3,0.4]}"#;
+    assert!(serde_json::from_str::<UplinkMessage>(json).is_err());
 }
 
 // ── RegisterDeviceRequest ────────────────────────────────────────────
@@ -236,6 +344,7 @@ fn uplink_fw_wire_compat_both_directions() {
         id: "a".into(),
         current: 1,
         fw: Some("1.2.3".into()),
+        ..Default::default()
     };
     let json = serde_json::to_string(&new).unwrap();
     assert!(json.contains(r#""fw":"1.2.3""#));
