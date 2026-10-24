@@ -87,6 +87,9 @@ Resources:
                     STORE_BACKEND: dynamo
                     DEVICES_TABLE: !Ref DevicesTable
                     MESSAGES_TABLE: !Ref UplinkTable
+                    # Retention horizon for uplink rows (owner call 2026-07-16);
+                    # rows carry expires_at = received_at + this many days.
+                    UPLINK_TTL_DAYS: "30"
             Policies:
                 - Statement:
                       - Effect: Allow
@@ -183,6 +186,12 @@ Resources:
                   KeyType: HASH
                 - AttributeName: received_at
                   KeyType: RANGE
+            # Uplinks age out instead of accreting forever (the 1.5M-row
+            # bench-pollution lesson). The endpoint stamps expires_at
+            # (epoch seconds) on each row — horizon set by UPLINK_TTL_DAYS.
+            TimeToLiveSpecification:
+                AttributeName: expires_at
+                Enabled: true
 
     # -------------------------------------------------------------------------
     # ACM Certificate (prod only)

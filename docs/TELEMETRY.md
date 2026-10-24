@@ -82,6 +82,14 @@ the wire and config always carry the period. The device reports it in every
 uplink so the cloud can judge staleness against each device's own cadence
 instead of a fleet-wide guess.
 
+## Retention
+
+Uplink rows are not forever: the DynamoDB store stamps each row with
+`expires_at = received_at + UPLINK_TTL_DAYS` (epoch seconds; default 30,
+`0` disables) and the table's TTL reaps them. Long-lived history belongs in
+a future rollup layer, not the raw ping table — this is the guardrail the
+1.5M-row bench-pollution incident bought. Local SQLite ignores TTL.
+
 ## Payload budget
 
 Worst case (64-char id, every field at its widest printing) is ~475 bytes.

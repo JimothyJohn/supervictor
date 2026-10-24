@@ -11,6 +11,60 @@ pub mod dynamo;
 use crate::error::AppError;
 use crate::models::{DeviceRecord, UplinkRecord};
 
+/// Unix-seconds expiry for an uplink received at `received_at` (RFC 3339)
+/// with a retention of `ttl_days`. `None` when TTL is disabled (0 days) or
+/// the timestamp doesn't parse — callers store the row without an expiry
+/// rather than failing the write; losing retention on one row beats losing
+/// the row.
+pub fn uplink_expires_at_unix(received_at: &str, ttl_days: u32) -> Option<u64> {
+    if ttl_days == 0 {
+        return None;
+    }
+    let received = crate::time::parse_rfc3339_unix(received_at)?;
+    Some(received + u64::from(ttl_days) * 86_400)
+}
+
+#[cfg(test)]
+mod ttl_tests {
+    use super::uplink_expires_at_unix;
+
+    #[test]
+    fn thirty_days_after_received_at() {
+        // 2026-07-16T00:00:00Z = 1784160000
+        let expires = uplink_expires_at_unix("2026-07-16T00:00:00+00:00", 30).unwrap();
+        assert_eq!(expires, 1_784_160_000 + 30 * 86_400);
+    }
+
+    #[test]
+    fn zero_days_disables_expiry() {
+        assert_eq!(uplink_expires_at_unix("2026-07-16T00:00:00+00:00", 0), None);
+    }
+
+    #[test]
+    fn unparseable_timestamp_yields_no_expiry_not_a_panic() {
+        assert_eq!(uplink_expires_at_unix("not-a-timestamp", 30), None);
+        assert_eq!(uplink_expires_at_unix("", 30), None);
+    }
+
+    #[test]
+    fn max_ttl_does_not_overflow() {
+        // u32::MAX days on a far-future timestamp stays within u64.
+        let expires = uplink_expires_at_unix("2100-01-01T00:00:00Z", u32::MAX);
+        assert!(expires.is_some());
+    }
+
+    #[test]
+    fn accepts_the_stores_own_timestamp_format() {
+        // now_rfc3339() emits fractional seconds + "+00:00"; the TTL parse
+        // must accept exactly what put_uplink receives.
+        let stamped = crate::time::now_rfc3339();
+        assert!(
+            uplink_expires_at_unix(&stamped, 30).is_some(),
+            "failed to parse own timestamp: {stamped}"
+        );
+    }
+}
+
 /// Typed failure channel for storage backends. Not-found and conflict are
 /// already first-class [`AppError`] variants; this classifies everything
 /// else so callers can branch (and log/alert) without string matching.
