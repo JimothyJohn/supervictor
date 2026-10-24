@@ -1,0 +1,69 @@
+# supervictor-endpoint — single-binary deployment on a generic Linux box.
+# Installed by scripts/install-endpoint.sh; config in /etc/supervictor/env.
+#
+# The three PEMs are handed to the service as systemd credentials: they stay
+# root-only on disk (/etc/supervictor, mode 0700) and appear read-only to the
+# dynamic user under $CREDENTIALS_DIRECTORY. Nothing else in the unit can
+# read the private key.
+
+[Unit]
+Description=Supervictor endpoint (mTLS terminated in-process, SQLite)
+Documentation=https://github.com/JimothyJohn/supervictor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/supervictor-endpoint
+EnvironmentFile=-/etc/supervictor/env
+
+# mTLS material via credentials (see header). TLS_* must not be set in the
+# env file — these paths are only valid inside the service.
+LoadCredential=server.pem:/etc/supervictor/server.pem
+LoadCredential=server.key:/etc/supervictor/server.key
+LoadCredential=ca.pem:/etc/supervictor/ca.pem
+Environment=TLS_CERT=%d/server.pem
+Environment=TLS_KEY=%d/server.key
+Environment=TLS_CLIENT_CA=%d/ca.pem
+
+# State: the SQLite file lives in /var/lib/supervictor, owned by the
+# dynamic user for the lifetime of the service.
+DynamicUser=yes
+StateDirectory=supervictor
+StateDirectoryMode=0700
+
+# Bind :443 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Hardening. The binary is pure Rust + SQLite: no exec, no JIT, no sockets
+# other than TCP.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077
+
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target

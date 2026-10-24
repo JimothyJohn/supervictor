@@ -4634,13 +4634,17 @@ dependencies = [
  "maud",
  "proptest",
  "rusqlite",
+ "rustls 0.23.46",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "supervictor-common",
  "tokio",
+ "tokio-rustls 0.26.6",
  "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",
+ "x509-parser",
 ]
 
 [[package]]
