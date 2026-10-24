@@ -36,3 +36,8 @@ required-features = ["ui"]
 
 [dev-dependencies]
 axum-test = "21"
+# Property tests for payload validation (tests/test_payload_props.rs).
+# Minimal feature set: no fork/timeout runners (rusty-fork, tempfile,
+# wait-timeout stay out of the tree); `std` brings the regex string
+# strategies. Dep review in the PR that added it (2026-10-23).
+proptest = { version = "1.12", default-features = false, features = ["std"] }
