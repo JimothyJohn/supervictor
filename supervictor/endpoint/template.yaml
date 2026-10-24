@@ -27,8 +27,16 @@ Parameters:
         Default: s3://supervictor/truststore.pem
         Description: S3 URI of the CA PEM file used as the mTLS truststore.
 
+    DomainName:
+        Type: String
+        Default: ""
+        Description: >-
+            Custom domain for the API (ACM cert, mTLS, base-path mapping, Route53
+            alias). Empty disables all of it. The hosted zone id is read from the
+            SSM parameter /<AppName>/<StackName>/hosted_zone_id.
+
 Conditions:
-    IsProd: !Equals [!Ref Environment, prod]
+    HasDomain: !Not [!Equals [!Ref DomainName, ""]]
 
 Globals:
     Function:
@@ -201,26 +209,26 @@ Resources:
                 Enabled: true
 
     # -------------------------------------------------------------------------
-    # ACM Certificate (prod only)
+    # ACM Certificate (when DomainName is set)
     # -------------------------------------------------------------------------
     ApiCertificate:
         Type: AWS::CertificateManager::Certificate
-        Condition: IsProd
+        Condition: HasDomain
         Properties:
-            DomainName: supervictor.advin.io
+            DomainName: !Ref DomainName
             ValidationMethod: DNS
             DomainValidationOptions:
-                - DomainName: supervictor.advin.io
+                - DomainName: !Ref DomainName
                   HostedZoneId: !Sub "{{resolve:ssm:/${AppName}/${StackName}/hosted_zone_id}}"
 
     # -------------------------------------------------------------------------
-    # Custom Domain with mTLS (prod only)
+    # Custom Domain with mTLS (when DomainName is set)
     # -------------------------------------------------------------------------
     SupervictorDomainName:
         Type: AWS::ApiGateway::DomainName
-        Condition: IsProd
+        Condition: HasDomain
         Properties:
-            DomainName: supervictor.advin.io
+            DomainName: !Ref DomainName
             RegionalCertificateArn: !Ref ApiCertificate
             MutualTlsAuthentication:
                 TruststoreUri: !Ref TruststoreUri
@@ -231,21 +239,21 @@ Resources:
 
     ApiBasePathMapping:
         Type: AWS::ApiGateway::BasePathMapping
-        Condition: IsProd
+        Condition: HasDomain
         Properties:
             DomainName: !Ref SupervictorDomainName
             RestApiId: !Ref SupervictorApi
             Stage: !Ref Environment
 
     # -------------------------------------------------------------------------
-    # Route53 (prod only)
+    # Route53 (when DomainName is set)
     # -------------------------------------------------------------------------
     Route53RecordSet:
         Type: AWS::Route53::RecordSet
-        Condition: IsProd
+        Condition: HasDomain
         Properties:
             HostedZoneId: !Sub "{{resolve:ssm:/${AppName}/${StackName}/hosted_zone_id}}"
-            Name: supervictor.advin.io
+            Name: !Ref DomainName
             Type: A
             AliasTarget:
                 HostedZoneId: !GetAtt SupervictorDomainName.RegionalHostedZoneId
@@ -281,6 +289,6 @@ Outputs:
         Value: !GetAtt EndpointFunctionRole.Arn
 
     CustomDomainUrl:
-        Description: Custom domain endpoint (prod only)
-        Condition: IsProd
-        Value: "https://supervictor.advin.io/"
+        Description: Custom domain endpoint (mTLS; only when DomainName is set)
+        Condition: HasDomain
+        Value: !Sub "https://${DomainName}/"
