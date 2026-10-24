@@ -58,33 +58,22 @@ no Caddy, no on-box source build — one static binary, three PEMs, a
 SQLite file, a systemd unit. Single instance; scaling TBD. Today's
 staging path (EC2 → dnf docker → compose → `cargo build` on a t4g.micro
 with swap → Caddy for mTLS) is the thing this replaces. Approach chosen:
-in-binary mTLS via rustls (decision 2026-10-23).
+in-binary mTLS via rustls (decision 2026-10-23). Landed: `tls` feature +
+`TlsListener`, musl release matrix, `scripts/install-endpoint.sh` +
+hardened unit (`supervictor/endpoint/deploy/`).
 
-- [ ] In-binary mTLS termination: `TLS_CERT` / `TLS_KEY` / `TLS_CLIENT_CA`
-      env; when set, listen TLS with `require_and_verify` client certs and
-      take the subject DN from the peer certificate itself (no forwarded
-      header). Also closes the gap where anything reaching :8000 directly
-      can forge `x-ssl-client-subject-dn`. Plain-HTTP mode stays for Lambda
-      (API Gateway terminates) and local dev. rustls 0.23, tokio-rustls
-      0.26, rustls-pki-types, rustls-pemfile and x509-parser are already in
-      the workspace lock (edge desktop + AWS SDK) — no new crates, only new
-      edges into the endpoint tree.
-      **Unblocks:** nothing — in progress.
-- [ ] Static release artifacts: `release.yml` builds
-      `aarch64-unknown-linux-musl` and `x86_64-unknown-linux-musl`
-      (`sqlite` feature; `dynamo` stays Lambda-image-only), sha256 beside
-      each tarball.
-      **Unblocks:** nothing — pure CI addition.
-- [ ] `Quickstart install` / `scripts/install-endpoint.sh`: fetch + verify
-      a release, drop `/usr/local/bin/supervictor-endpoint`,
-      `/etc/supervictor/env`, `StateDirectory=supervictor` for the DB, a
-      hardened unit (`DynamicUser`, `ProtectSystem=strict`,
-      `AmbientCapabilities=CAP_NET_BIND_SERVICE`).
-      **Unblocks:** the two items above.
+- [ ] First tagged release off the musl matrix, then install it on a real
+      box end to end (`install-endpoint.sh <tag>` → certs → `systemctl
+      start` → `Quickstart ping`). The musl + ring + bundled-SQLite link was
+      only ever exercised by CI; the unit's hardening set
+      (`SystemCallFilter`, `MemoryDenyWriteExecute`) is unverified against
+      the binary until it runs under systemd once.
+      **Unblocks:** a `v*` tag (owner) and a throwaway Linux host.
+
 - [ ] Retire the compose/Caddy staging path: `template-staging.yaml`
       UserData becomes "run the install script"; `docker-compose.staging.yml`
       and `Caddyfile.staging` go.
-      **Unblocks:** the three items above + an ops window.
+      **Unblocks:** the first real install above + an ops window.
 
 ## P2 — Firmware (edge)
 
