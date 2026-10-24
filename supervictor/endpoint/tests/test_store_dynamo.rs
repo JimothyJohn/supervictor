@@ -17,6 +17,13 @@
 //! CI runs it in the `dynamo` job (service container, see ci.yml). Every
 //! test creates its own uniquely named pair of tables, so tests run in
 //! parallel without sharing rows.
+//!
+//! Fixture rows are dated 2099. DynamoDB Local really does run a TTL
+//! reaper: rows whose `expires_at` is already in the past get deleted in
+//! the background in batches of 20, so July-2026 rows with a 30-day TTL
+//! vanished mid-test (2 of 8 runs lost exactly the 20 oldest rows, in
+//! the container's file-backed `-sharedDb` mode). Not a store bug — the
+//! real service would reap them too, just within 48h instead of seconds.
 #![cfg(feature = "dynamo")]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -172,7 +179,7 @@ fn device(id: &str, subject_dn: Option<&str>) -> DeviceRecord {
         owner_id: "owner-1".into(),
         subject_dn: subject_dn.map(str::to_string),
         status: "active".into(),
-        created_at: "2026-07-01T00:00:00+00:00".into(),
+        created_at: "2099-07-01T00:00:00+00:00".into(),
     }
 }
 
@@ -230,7 +237,7 @@ async fn device_round_trip_duplicate_and_missing() {
     assert_eq!(fetched.owner_id, "owner-1");
     assert_eq!(fetched.status, "active");
     assert_eq!(fetched.subject_dn.as_deref(), Some("CN=dev-1,OU=devices"));
-    assert_eq!(fetched.created_at, "2026-07-01T00:00:00+00:00");
+    assert_eq!(fetched.created_at, "2099-07-01T00:00:00+00:00");
 
     let err = store.put_device(device("dev-1", None)).unwrap_err();
     assert!(
@@ -318,18 +325,18 @@ async fn uplinks_are_newest_first_with_limit() {
     assert!(fx.store.get_uplinks("dev-1", 10).unwrap().is_empty());
     for i in 0..5 {
         fx.store
-            .put_uplink(uplink("dev-1", &format!("2026-07-01T00:00:0{i}+00:00"), i))
+            .put_uplink(uplink("dev-1", &format!("2099-07-01T00:00:0{i}+00:00"), i))
             .unwrap();
     }
     fx.store
-        .put_uplink(uplink("dev-2", "2026-07-01T00:00:09+00:00", 99))
+        .put_uplink(uplink("dev-2", "2099-07-01T00:00:09+00:00", 99))
         .unwrap();
 
     let all = fx.store.get_uplinks("dev-1", 10).unwrap();
     assert_eq!(all.len(), 5, "other devices' rows must not leak in");
-    assert_eq!(all[0].received_at, "2026-07-01T00:00:04+00:00");
+    assert_eq!(all[0].received_at, "2099-07-01T00:00:04+00:00");
     assert_eq!(all[0].payload["current"], 4);
-    assert_eq!(all[4].received_at, "2026-07-01T00:00:00+00:00");
+    assert_eq!(all[4].received_at, "2099-07-01T00:00:00+00:00");
 
     let two = fx.store.get_uplinks("dev-1", 2).unwrap();
     assert_eq!(two.len(), 2);
@@ -344,9 +351,9 @@ async fn latest_uplinks_is_max_per_device_with_that_rows_payload() {
         fx.store.put_device(device(id, None)).unwrap();
     }
     for (at, fw) in [
-        ("2026-07-01T10:00:00+00:00", "0.0.9"),
-        ("2026-07-01T12:00:00+00:00", "0.1.0"),
-        ("2026-07-01T11:00:00+00:00", "0.0.9"),
+        ("2099-07-01T10:00:00+00:00", "0.0.9"),
+        ("2099-07-01T12:00:00+00:00", "0.1.0"),
+        ("2099-07-01T11:00:00+00:00", "0.0.9"),
     ] {
         fx.store
             .put_uplink(UplinkRecord {
@@ -357,7 +364,7 @@ async fn latest_uplinks_is_max_per_device_with_that_rows_payload() {
             .unwrap();
     }
     fx.store
-        .put_uplink(uplink("dev-2", "2026-06-30T00:00:00+00:00", 2))
+        .put_uplink(uplink("dev-2", "2099-06-30T00:00:00+00:00", 2))
         .unwrap();
 
     let mut latest: Vec<(String, String, String)> = fx
@@ -376,12 +383,12 @@ async fn latest_uplinks_is_max_per_device_with_that_rows_payload() {
         vec![
             (
                 "dev-1".to_string(),
-                "2026-07-01T12:00:00+00:00".to_string(),
+                "2099-07-01T12:00:00+00:00".to_string(),
                 "0.1.0".to_string()
             ),
             (
                 "dev-2".to_string(),
-                "2026-06-30T00:00:00+00:00".to_string(),
+                "2099-06-30T00:00:00+00:00".to_string(),
                 "-".to_string()
             ),
         ],
@@ -396,7 +403,7 @@ async fn latest_uplinks_is_max_per_device_with_that_rows_payload() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn uplink_rows_carry_the_ttl_expiry() {
     let fx = Fixture::new("ttl", TTL_DAYS).await;
-    let received_at = "2026-07-16T00:00:00+00:00";
+    let received_at = "2099-07-16T00:00:00+00:00";
     fx.store
         .put_uplink(uplink("dev-1", received_at, 1))
         .unwrap();
@@ -436,7 +443,7 @@ async fn uplink_rows_carry_the_ttl_expiry() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ttl_disabled_stores_no_expiry() {
     let fx = Fixture::new("nottl", 0).await;
-    let received_at = "2026-07-16T00:00:00+00:00";
+    let received_at = "2099-07-16T00:00:00+00:00";
     fx.store
         .put_uplink(uplink("dev-1", received_at, 1))
         .unwrap();
@@ -528,17 +535,47 @@ async fn concurrent_uplinks_are_all_persisted() {
             store
                 .put_uplink(UplinkRecord {
                     device_id: "sensor".into(),
-                    received_at: format!("2026-07-11T{thread_id:02}:{i:02}:00+00:00"),
+                    received_at: format!("2099-07-11T{thread_id:02}:{i:02}:00+00:00"),
                     payload: serde_json::json!({ "current": thread_id * 1000 + i }),
                 })
                 .expect("uplink put must not fail under contention");
         }
     });
+    // On failure, say which rows vanished and how many the table really
+    // holds (paginated raw query) — a store truncation and a backend
+    // deletion look identical from get_uplinks alone.
+    let raw_total = fx
+        .client
+        .query()
+        .table_name(&fx.uplinks)
+        .key_condition_expression("device_id = :did")
+        .expression_attribute_values(":did", AttributeValue::S("sensor".into()))
+        .into_paginator()
+        .items()
+        .send()
+        .collect::<Result<Vec<_>, _>>()
+        .await
+        .unwrap()
+        .len();
     let rows = fx
         .store
         .get_uplinks("sensor", THREADS * OPS_PER_THREAD + 1)
         .unwrap();
-    assert_eq!(rows.len(), THREADS * OPS_PER_THREAD);
+    let mut missing: Vec<(usize, usize)> = Vec::new();
+    for t in 0..THREADS {
+        for i in 0..OPS_PER_THREAD {
+            let at = format!("2099-07-11T{t:02}:{i:02}:00+00:00");
+            if !rows.iter().any(|r| r.received_at == at) {
+                missing.push((t, i));
+            }
+        }
+    }
+    assert_eq!(
+        rows.len(),
+        THREADS * OPS_PER_THREAD,
+        "get_uplinks returned {} rows; table holds {raw_total}; missing (thread, op): {missing:?}",
+        rows.len(),
+    );
     let mut currents: Vec<i64> = rows
         .iter()
         .map(|u| u.payload["current"].as_i64().unwrap())
