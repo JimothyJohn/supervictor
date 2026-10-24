@@ -45,12 +45,6 @@ them — git history is the changelog. Every remaining item is gated; the
       shows who still lacks one; `Quickstart onboard` re-registers.
       **Unblocks:** fleet re-registration pass.
 
-- [ ] Reconcile `.claude/settings.json` (added to this repo mid-session by a
-      concurrent session while the same files were being deleted from the
-      `~/.claude` config repo — since restored there). Decide which level owns
-      the config and delete the other copy.
-      **Unblocks:** owner adjudication.
-
 ## P1b — Single-binary deployment (owner direction, 2026-10-23)
 
 Goal: `supervictor-endpoint` runs on any generic Linux box with no Docker,
@@ -60,20 +54,25 @@ staging path (EC2 → dnf docker → compose → `cargo build` on a t4g.micro
 with swap → Caddy for mTLS) is the thing this replaces. Approach chosen:
 in-binary mTLS via rustls (decision 2026-10-23). Landed: `tls` feature +
 `TlsListener`, musl release matrix, `scripts/install-endpoint.sh` +
-hardened unit (`supervictor/endpoint/deploy/`).
-
-- [ ] First tagged release off the musl matrix, then install it on a real
-      box end to end (`install-endpoint.sh <tag>` → certs → `systemctl
-      start` → `Quickstart ping`). The musl + ring + bundled-SQLite link was
-      only ever exercised by CI; the unit's hardening set
-      (`SystemCallFilter`, `MemoryDenyWriteExecute`) is unverified against
-      the binary until it runs under systemd once.
-      **Unblocks:** a `v*` tag (owner) and a throwaway Linux host.
+hardened unit (`supervictor/endpoint/deploy/`). **Running since
+2026-10-24:** `v0.1.0` (aarch64 musl) on the staging box
+`staging.supervictor.advin.io` (i-0672688a9ae6a2614, t4g.micro, SQLite,
+`REQUIRE_REGISTRATION=false`) — installed by hand over SSM; device ping,
+admin `/fleet/summary`, and no-cert refusal all verified. The old
+compose/Caddy stack on that box is stopped and disabled, docker disabled.
 
 - [ ] Retire the compose/Caddy staging path: `template-staging.yaml`
-      UserData becomes "run the install script"; `docker-compose.staging.yml`
-      and `Caddyfile.staging` go.
-      **Unblocks:** the first real install above + an ops window.
+      UserData becomes "run the install script"; `docker-compose.staging.yml`,
+      `Caddyfile.staging`, and `scripts/deploy-staging.sh`'s bundle upload go.
+      The stack `supervictor-endpoint-staging` is already drifted: its EIP was
+      released at some point, so a new one (`100.56.171.238`, tagged
+      `Name=supervictor-staging`) was allocated out-of-band and the Route53
+      record repointed. Fold that EIP into the template when it is rewritten.
+      **Unblocks:** an ops window.
+- [ ] Point one bench board at the box (firmware bakes `HOST` at compile
+      time → reflash with `HOST=staging.supervictor.advin.io`) so the
+      running reference carries real uplinks, not just `Quickstart ping`.
+      **Unblocks:** bench time.
 
 ## P2 — Firmware (edge)
 
