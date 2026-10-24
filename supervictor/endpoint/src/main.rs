@@ -21,7 +21,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let store = supervictor_endpoint::store::factory::create_store(&config).await?;
     supervictor_endpoint::watchdog::spawn(store.clone(), config.watchdog_interval_secs);
-    let app = supervictor_endpoint::routes::router(store);
+    let app = supervictor_endpoint::routes::router_with(
+        store,
+        supervictor_endpoint::routes::RouterOptions {
+            require_registration: config.require_registration,
+        },
+    );
 
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

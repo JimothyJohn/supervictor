@@ -29,11 +29,62 @@ them — git history is the changelog. Every remaining item is gated; the
 
 ## P1 — Hygiene
 
+- [ ] `dev` branch protection contexts (owner-run, after `esp32-poe-iso`
+      merges): required checks are still `Lint + test (host)` and
+      `Embedded build (riscv32, ESP32-C3)`. esp32-poe-iso renames the
+      embedded job to `Embedded build (ESP32 xtensa + ESP32-C3 riscv)` and
+      the backend PR adds `DynamoDB store (DynamoDB Local)`; until the
+      contexts match, PRs into dev wait forever on the old name and the
+      dynamo job isn't required. `gh api -X PUT
+      repos/JimothyJohn/supervictor/branches/dev/protection` per
+      ~/.claude/templates/github/README.md.
+      **Unblocks:** esp32-poe-iso landing (owner decision 2026-10-23).
+- [ ] Flip `REQUIRE_REGISTRATION=true` in template.yaml (prod) once every
+      live device is registered *with* its `subject_dn` (strict mode
+      rejects unbound registrations — owner call 2026-10-23). `GET /fleet`
+      shows who still lacks one; `Quickstart onboard` re-registers.
+      **Unblocks:** fleet re-registration pass.
+
 - [ ] Reconcile `.claude/settings.json` (added to this repo mid-session by a
       concurrent session while the same files were being deleted from the
       `~/.claude` config repo — since restored there). Decide which level owns
       the config and delete the other copy.
       **Unblocks:** owner adjudication.
+
+## P1b — Single-binary deployment (owner direction, 2026-10-23)
+
+Goal: `supervictor-endpoint` runs on any generic Linux box with no Docker,
+no Caddy, no on-box source build — one static binary, three PEMs, a
+SQLite file, a systemd unit. Single instance; scaling TBD. Today's
+staging path (EC2 → dnf docker → compose → `cargo build` on a t4g.micro
+with swap → Caddy for mTLS) is the thing this replaces. Approach chosen:
+in-binary mTLS via rustls (decision 2026-10-23).
+
+- [ ] In-binary mTLS termination: `TLS_CERT` / `TLS_KEY` / `TLS_CLIENT_CA`
+      env; when set, listen TLS with `require_and_verify` client certs and
+      take the subject DN from the peer certificate itself (no forwarded
+      header). Also closes the gap where anything reaching :8000 directly
+      can forge `x-ssl-client-subject-dn`. Plain-HTTP mode stays for Lambda
+      (API Gateway terminates) and local dev. rustls 0.23, tokio-rustls
+      0.26, rustls-pki-types, rustls-pemfile and x509-parser are already in
+      the workspace lock (edge desktop + AWS SDK) — no new crates, only new
+      edges into the endpoint tree.
+      **Unblocks:** nothing — in progress.
+- [ ] Static release artifacts: `release.yml` builds
+      `aarch64-unknown-linux-musl` and `x86_64-unknown-linux-musl`
+      (`sqlite` feature; `dynamo` stays Lambda-image-only), sha256 beside
+      each tarball.
+      **Unblocks:** nothing — pure CI addition.
+- [ ] `Quickstart install` / `scripts/install-endpoint.sh`: fetch + verify
+      a release, drop `/usr/local/bin/supervictor-endpoint`,
+      `/etc/supervictor/env`, `StateDirectory=supervictor` for the DB, a
+      hardened unit (`DynamicUser`, `ProtectSystem=strict`,
+      `AmbientCapabilities=CAP_NET_BIND_SERVICE`).
+      **Unblocks:** the two items above.
+- [ ] Retire the compose/Caddy staging path: `template-staging.yaml`
+      UserData becomes "run the install script"; `docker-compose.staging.yml`
+      and `Caddyfile.staging` go.
+      **Unblocks:** the three items above + an ops window.
 
 ## P2 — Firmware (edge)
 
@@ -70,20 +121,13 @@ them — git history is the changelog. Every remaining item is gated; the
       buffering (by design); if live push matters there, that's the
       ECS-migration trigger per ROADMAP.md Phase 3.
       **Unblocks:** a real need for live push on the serverless path.
-- [ ] Property tests (`proptest`) for payload validation.
-      **Unblocks:** a dep review for the new dev-dependency.
-- [ ] DynamoDB integration tests in CI (DynamoDB Local container or moto),
-      so the `dynamo` feature is tested, not just compiled — and extend the
-      store concurrency stress suite to it.
-      **Unblocks:** container service in the CI job (docker-in-runner
-      setup); no code blockers.
-
 ## P4 — CI/CD & release
 
-- [ ] Periodic `cargo-mutants` run; mutation-catch rate is the real coverage
-      number.
-      **Unblocks:** nothing hard — needs a first baseline run to size the
-      job (likely hours; schedule monthly, not per-PR).
+- [ ] Promote `.github/workflows/mutants.yml` (monthly cargo-mutants over
+      endpoint + common, 456 mutants at the 2026-10-23 baseline) — scheduled
+      workflows only run from the default branch, so it is inert on `dev`.
+      First real run sizes the job; `--jobs 2` and a 6h ceiling are guesses.
+      **Unblocks:** the next `dev` → `master` merge (owner).
 
 ## P5 — Enterprise track
 

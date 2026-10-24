@@ -27,7 +27,18 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   compiled) share staleness logic with the dashboard via `src/fleet.rs`;
   `src/watchdog.rs` logs dark-device transitions on long-running deploys
   (`WATCHDOG_INTERVAL_SECS`, 0 disables).
-- Tests use in-memory SQLite. No AWS dependencies in tests.
+- Uplink identity: a device registered with a `subject_dn` is bound to that
+  certificate — `POST /` for it must carry a matching mTLS subject or it is
+  403'd (`handlers::authorize_uplink`). `REQUIRE_REGISTRATION=true` further
+  rejects unregistered, inactive, and unbound (no `subject_dn`) devices;
+  with the flag off, unbound registered devices are accepted with a warn
+  log. Payload identifiers are
+  validated in `validate.rs` (≤64 bytes, non-empty, no control characters —
+  the firmware's `HString<64>` contract).
+- Tests use in-memory SQLite by default (no AWS in the default suite).
+  The `dynamo` backend has its own contract suite, `tests/test_store_dynamo.rs`,
+  against a real DynamoDB Local (`DYNAMODB_LOCAL_ENDPOINT`, see the file
+  header); CI runs it in the `dynamo` job with a service container.
 - Wire contract (routes, field names) is shared with the firmware via
   `supervictor-common` — change it there, and the compiler finds every
   callsite on both sides.

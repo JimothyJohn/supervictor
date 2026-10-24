@@ -50,6 +50,34 @@ pub fn is_admin_subject(dn: &str) -> bool {
     })
 }
 
+/// True when two subject DNs name the same certificate subject.
+///
+/// Component-wise: split on `,`, trim, upper-case the attribute type, sort.
+/// The same certificate is rendered differently by API Gateway, Caddy and
+/// `openssl -nameopt RFC2253` (spacing, component order), so byte equality
+/// would reject legitimate devices. Anything looser than this — case-folding
+/// values, collapsing escapes — risks admitting a subject the CA never
+/// issued, so it is deliberately not done. An empty DN matches nothing,
+/// including another empty DN: a bound device with a blank record fails
+/// closed rather than open.
+pub fn dn_matches(a: &str, b: &str) -> bool {
+    fn canonical(dn: &str) -> Vec<(String, String)> {
+        let mut parts: Vec<(String, String)> = dn
+            .split(',')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(|c| {
+                let (key, value) = c.split_once('=').unwrap_or((c, ""));
+                (key.trim().to_ascii_uppercase(), value.trim().to_string())
+            })
+            .collect();
+        parts.sort();
+        parts
+    }
+    let (ca, cb) = (canonical(a), canonical(b));
+    !ca.is_empty() && ca == cb
+}
+
 /// Route-layer gate: 403 unless the forwarded mTLS subject is an admin.
 /// Shared by the dashboard (`/ui/*`) and the fleet JSON API (`/fleet*`).
 pub async fn require_admin(request: Request, next: Next) -> Response {

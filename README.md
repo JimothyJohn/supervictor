@@ -89,7 +89,7 @@ supervictor/
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
 | `GET` | `/` | Greeting + mTLS subject (if present) |
-| `POST` | `/` | Device uplink — accepts `{ id, current }` |
+| `POST` | `/` | Device uplink — `{ id, current, ...telemetry }` ([schema](docs/TELEMETRY.md)) |
 | `GET` | `/devices` | List all registered devices |
 | `POST` | `/devices` | Register a new device |
 | `GET` | `/devices/{id}` | Get device details |

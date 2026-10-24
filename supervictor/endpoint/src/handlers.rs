@@ -1,12 +1,14 @@
 use crate::time::now_rfc3339;
 
 use crate::error::AppError;
+use crate::middleware::{dn_matches, sanitize_for_log};
 use crate::models::{
     DeviceRecord, DeviceResponse, HelloResponse, RegisterDeviceRequest, UplinkMessage,
     UplinkRecord, UplinkResponse,
 };
 use crate::store::DeviceStore;
-use supervictor_common::status;
+use crate::validate;
+use supervictor_common::{fields, status};
 
 /// Return a greeting, optionally echoing the mTLS client subject.
 pub fn handle_hello(client_subject: Option<String>) -> HelloResponse {
@@ -16,9 +18,76 @@ pub fn handle_hello(client_subject: Option<String>) -> HelloResponse {
     }
 }
 
+/// Decide whether an uplink claiming `device_id` may proceed, given what is
+/// on record for that device and the mTLS subject the proxy forwarded.
+///
+/// Independent of `require_registration`: a device registered with a
+/// `subject_dn` is *bound* to that certificate, and an uplink for it must
+/// present a matching subject — no certificate (e.g. a path that bypasses
+/// mTLS) or a different device's certificate is rejected. This is what stops
+/// one valid device cert from spoofing another device's telemetry.
+///
+/// With `require_registration`: the device must also exist, be `active`,
+/// and be bound — a registered device with no `subject_dn` on record is
+/// rejected (owner call 2026-10-23: strict mode means every device is
+/// re-registered with its certificate first). Without the flag such a
+/// device is still accepted, with a warn log, so today's fleet keeps
+/// reporting until the flag is flipped.
+pub fn authorize_uplink(
+    device_id: &str,
+    device: Option<&DeviceRecord>,
+    client_subject: Option<&str>,
+    require_registration: bool,
+) -> Result<(), AppError> {
+    let Some(device) = device else {
+        return if require_registration {
+            Err(AppError::DeviceNotRegistered)
+        } else {
+            Ok(())
+        };
+    };
+
+    if require_registration && device.status != status::ACTIVE {
+        return Err(AppError::DeviceNotRegistered);
+    }
+
+    match device.subject_dn.as_deref() {
+        Some(bound) => match client_subject {
+            Some(presented) if dn_matches(bound, presented) => Ok(()),
+            presented => {
+                tracing::warn!(
+                    device_id = %sanitize_for_log(device_id),
+                    presented = %sanitize_for_log(presented.unwrap_or("<none>")),
+                    "uplink rejected: client certificate does not match registered subject"
+                );
+                Err(AppError::SubjectMismatch {
+                    device_id: device_id.to_string(),
+                })
+            }
+        },
+        None if require_registration => {
+            tracing::warn!(
+                device_id = %sanitize_for_log(device_id),
+                "uplink rejected: registered device has no bound subject_dn (REQUIRE_REGISTRATION)"
+            );
+            Err(AppError::DeviceNotRegistered)
+        }
+        None => {
+            tracing::warn!(
+                device_id = %sanitize_for_log(device_id),
+                "uplink from registered device with no bound subject_dn (accepted; unbound)"
+            );
+            Ok(())
+        }
+    }
+}
+
 /// Parse and persist a device uplink message.
 ///
-/// When `require_registration` is true, the device must exist and be active.
+/// The payload `id` must pass [`validate::check_device_id`]. When a store is
+/// present the device record is looked up and [`authorize_uplink`] decides
+/// whether the request may proceed; `require_registration` additionally
+/// demands an `active` registration.
 pub fn handle_uplink(
     raw_body: Option<&str>,
     client_subject: Option<String>,
@@ -35,20 +104,26 @@ pub fn handle_uplink(
             structured: None,
         })?;
 
-    if require_registration {
-        if let Some(s) = store {
-            let device = s.get_device(&uplink.id)?;
-            match device {
-                Some(d) if d.status == status::ACTIVE => {}
-                _ => return Err(AppError::DeviceNotRegistered),
-            }
-        }
-    }
+    validate::check_device_id(fields::UPLINK_ID, &uplink.id)?;
 
     if let Some(s) = store {
-        let mut payload = serde_json::json!({ "current": uplink.current });
-        if let Some(ref fw) = uplink.fw {
-            payload["fw"] = serde_json::Value::String(fw.clone());
+        let device = s.get_device(&uplink.id)?;
+        authorize_uplink(
+            &uplink.id,
+            device.as_ref(),
+            client_subject.as_deref(),
+            require_registration,
+        )?;
+
+        // Persist every field the device sent (health metadata, sensor
+        // readings — absent Options are already off the wire), minus the id,
+        // which is the record key.
+        let mut payload = serde_json::to_value(&uplink).map_err(|e| AppError::InvalidPayload {
+            detail: e.to_string(),
+            structured: None,
+        })?;
+        if let Some(obj) = payload.as_object_mut() {
+            obj.remove("id");
         }
         s.put_uplink(UplinkRecord {
             device_id: uplink.id.clone(),
@@ -81,6 +156,12 @@ pub fn handle_register_device(
             detail: e.to_string(),
             structured: None,
         })?;
+
+    validate::check_device_id(fields::DEVICE_ID, &req.device_id)?;
+    validate::check_text(fields::OWNER_ID, &req.owner_id, validate::MAX_OWNER_ID_LEN)?;
+    if let Some(dn) = req.subject_dn.as_deref() {
+        validate::check_text(fields::SUBJECT_DN, dn, validate::MAX_SUBJECT_DN_LEN)?;
+    }
 
     let record = DeviceRecord {
         device_id: req.device_id,
