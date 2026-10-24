@@ -30,7 +30,7 @@ warm_containers = "EAGER"
 [dev]
 [dev.deploy.parameters]
 stack_name = "supervictor-dev"
-parameter_overrides = "Environment=dev StackName=supervictor-dev AppName=supervictor TruststoreUri=s3://supervictor/truststore-dev.pem"
+parameter_overrides = "Environment=dev StackName=supervictor-dev AppName=supervictor TruststoreUri=s3://supervictor/truststore-dev.pem DomainName=dev.supervictor.advin.io"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 fail_on_empty_changeset = false
@@ -40,7 +40,7 @@ resolve_image_repos = true
 [prod]
 [prod.deploy.parameters]
 stack_name = "supervictor-prod"
-parameter_overrides = "Environment=prod StackName=supervictor-prod AppName=supervictor TruststoreUri=s3://supervictor/truststore.pem"
+parameter_overrides = "Environment=prod StackName=supervictor-prod AppName=supervictor TruststoreUri=s3://supervictor/truststore.pem DomainName=supervictor.advin.io"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 fail_on_empty_changeset = false
