@@ -141,8 +141,10 @@ fn client_config(ca: &Path, identity: Option<(&Path, &Path)>) -> Arc<ClientConfi
         }
         None => builder.with_no_client_auth(),
     };
-    // Raw HTTP/1.1 below; don't let the server pick h2.
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    // Offer what curl and browsers offer. The server must settle on
+    // http/1.1 — it cannot speak h2 — and the raw HTTP/1.1 below must
+    // then work. (Advertising h2 server-side once broke every curl.)
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Arc::new(config)
 }
 
@@ -162,6 +164,11 @@ async fn request(
         .connect(ServerName::try_from("localhost").unwrap(), tcp)
         .await
         .map_err(|e| format!("handshake: {e}"))?;
+    assert_eq!(
+        tls.get_ref().1.alpn_protocol(),
+        Some(&b"http/1.1"[..]),
+        "server must negotiate http/1.1 even when h2 is offered"
+    );
     let mut req = format!(
         "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
         body.len()

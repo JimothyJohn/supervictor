@@ -120,7 +120,11 @@ pub fn server_config(paths: &TlsPaths) -> Result<Arc<ServerConfig>, AppError> {
         .with_client_cert_verifier(verifier)
         .with_single_cert(certs, key)
         .map_err(|e| AppError::Config(format!("TLS_CERT/TLS_KEY mismatch: {e}")))?;
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    // HTTP/1.1 only. axum::serve speaks h2 only with axum's `http2` feature,
+    // which this crate does not enable; advertising h2 made curl negotiate
+    // it and fail in the framing layer (found by the first manual smoke).
+    // The firmware talks HTTP/1.1 and the fleet is small — no reason for h2.
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
     Ok(Arc::new(config))
 }
 
