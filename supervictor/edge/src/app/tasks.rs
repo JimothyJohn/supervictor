@@ -1,4 +1,5 @@
 use crate::config::*;
+use crate::models::sim::{seed_from, Hardware, Simulator};
 use crate::models::uplink::UplinkMessage;
 use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
@@ -89,6 +90,13 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt) {
     let mut uplink = UplinkMessage::new(env!("DEVICE_NAME").try_into().unwrap(), 100);
     uplink.interval_s = Some(UPLINK_INTERVAL_S);
 
+    // Simulated readings until real sensors land (docs/TELEMETRY.md): a
+    // per-board personality from DEVICE_NAME, salted by the hardware RNG so
+    // two boots don't replay the same trace. Heap and uptime stay real.
+    let rng = esp_hal::rng::Rng::new();
+    let salt = (u64::from(rng.random()) << 32) | u64::from(rng.random());
+    let mut sim = Simulator::new(seed_from(env!("DEVICE_NAME"), salt));
+
     // Uplink path from API_PATH at compile time: "/" against a custom domain
     // (base-path mapping supplies the stage), "/<stage>" against a raw
     // execute-api URL. Must start with '/'.
@@ -165,11 +173,24 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt) {
         backoff = BACKOFF_INITIAL;
 
         loop {
-            // Refresh health metadata for this ping. Sensor fields stay None
-            // until real sensors land (see docs/TELEMETRY.md).
+            // Refresh health metadata for this ping; sensor fields come from
+            // the simulator (real heap wins over its simulated leak).
+            let heap_free = esp_alloc::HEAP.free() as u32;
+            let sample = sim.sample(Hardware {
+                heap_free: Some(heap_free),
+                rssi_dbm: None,
+            });
             uplink.seq = Some(uplink.seq.map_or(1, |n| n.wrapping_add(1)));
             uplink.uptime_s = Some(embassy_time::Instant::now().as_secs() as u32);
-            uplink.heap_free = Some(esp_alloc::HEAP.free() as u32);
+            uplink.heap_free = Some(heap_free);
+            uplink.current = sample.current;
+            uplink.temp_c = Some(sample.temp_c);
+            uplink.humidity_pct = Some(sample.humidity_pct);
+            // RSSI is a WiFi notion; wired boards leave it off the wire.
+            #[cfg(feature = "wifi")]
+            {
+                uplink.rssi_dbm = Some(sample.rssi_dbm);
+            }
 
             let request = match post_request(HOST, &uplink, Some(API_PATH)) {
                 Ok(r) => r,
@@ -213,7 +234,9 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt) {
                 }
             }
 
-            Timer::after(MAIN_LOOP_DELAY).await;
+            // ±20 % jitter so boards flashed together don't phase-lock.
+            let delay_ms = sim.next_delay_ms(MAIN_LOOP_DELAY.as_millis() as u32);
+            Timer::after(Duration::from_millis(u64::from(delay_ms))).await;
         }
 
         let _ = session.close().await;
