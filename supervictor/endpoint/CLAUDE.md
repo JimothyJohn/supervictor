@@ -30,8 +30,9 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
 - Uplink identity: a device registered with a `subject_dn` is bound to that
   certificate — `POST /` for it must carry a matching mTLS subject or it is
   403'd (`handlers::authorize_uplink`). `REQUIRE_REGISTRATION=true` further
-  rejects unregistered/inactive devices; registered devices with no
-  `subject_dn` are grandfathered with a warn log. Payload identifiers are
+  rejects unregistered, inactive, and unbound (no `subject_dn`) devices;
+  with the flag off, unbound registered devices are accepted with a warn
+  log. Payload identifiers are
   validated in `validate.rs` (≤64 bytes, non-empty, no control characters —
   the firmware's `HString<64>` contract).
 - Tests use in-memory SQLite by default (no AWS in the default suite).

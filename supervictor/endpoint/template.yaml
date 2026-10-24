@@ -91,10 +91,11 @@ Resources:
                     # rows carry expires_at = received_at + this many days.
                     UPLINK_TTL_DAYS: "30"
                     # Uplink admission. "true" rejects uplinks from devices
-                    # that are not registered and active (403). Certificate
-                    # binding — a registered subject_dn must match the client
-                    # cert — is enforced regardless of this flag. Flip once
-                    # every fleet device is registered (Quickstart onboard).
+                    # that are not registered, active, and bound to a cert
+                    # (subject_dn on record) — 403. Binding of bound devices
+                    # is enforced regardless of this flag. Flip once every
+                    # fleet device is re-registered (Quickstart onboard);
+                    # GET /fleet shows who still lacks a subject_dn.
                     REQUIRE_REGISTRATION: "false"
             Policies:
                 - Statement:

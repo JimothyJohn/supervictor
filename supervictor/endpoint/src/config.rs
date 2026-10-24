@@ -25,9 +25,9 @@ pub struct Config {
     pub watchdog_interval_secs: u64,
     /// Days before an uplink row expires (DynamoDB TTL); 0 keeps rows forever.
     pub uplink_ttl_days: u32,
-    /// Reject uplinks from devices that are not registered and `active`.
-    /// Certificate binding (registered `subject_dn` must match the client
-    /// cert) is enforced regardless of this flag.
+    /// Reject uplinks from devices that are not registered, `active`, and
+    /// bound to a certificate (`subject_dn` on record). Certificate binding
+    /// for devices that *are* bound is enforced regardless of this flag.
     pub require_registration: bool,
 }
 

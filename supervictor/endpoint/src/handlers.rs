@@ -27,9 +27,12 @@ pub fn handle_hello(client_subject: Option<String>) -> HelloResponse {
 /// mTLS) or a different device's certificate is rejected. This is what stops
 /// one valid device cert from spoofing another device's telemetry.
 ///
-/// With `require_registration`: the device must also exist and be `active`.
-/// A registered device with no `subject_dn` on record is grandfathered
-/// (accepted, warn-logged) so pre-binding registrations keep reporting.
+/// With `require_registration`: the device must also exist, be `active`,
+/// and be bound — a registered device with no `subject_dn` on record is
+/// rejected (owner call 2026-10-23: strict mode means every device is
+/// re-registered with its certificate first). Without the flag such a
+/// device is still accepted, with a warn log, so today's fleet keeps
+/// reporting until the flag is flipped.
 pub fn authorize_uplink(
     device_id: &str,
     device: Option<&DeviceRecord>,
@@ -62,13 +65,18 @@ pub fn authorize_uplink(
                 })
             }
         },
+        None if require_registration => {
+            tracing::warn!(
+                device_id = %sanitize_for_log(device_id),
+                "uplink rejected: registered device has no bound subject_dn (REQUIRE_REGISTRATION)"
+            );
+            Err(AppError::DeviceNotRegistered)
+        }
         None => {
-            if require_registration {
-                tracing::warn!(
-                    device_id = %sanitize_for_log(device_id),
-                    "uplink from registered device with no bound subject_dn (grandfathered)"
-                );
-            }
+            tracing::warn!(
+                device_id = %sanitize_for_log(device_id),
+                "uplink from registered device with no bound subject_dn (accepted; unbound)"
+            );
             Ok(())
         }
     }

@@ -81,11 +81,21 @@ fn policy_bound_device_requires_matching_subject_regardless_of_flag() {
 }
 
 #[test]
-fn policy_unbound_device_is_grandfathered() {
+fn policy_unbound_device_accepted_only_without_the_flag() {
     let unbound = record("dev-1", "active", None);
-    for required in [false, true] {
-        assert!(authorize_uplink("dev-1", Some(&unbound), None, required).is_ok());
-        assert!(authorize_uplink("dev-1", Some(&unbound), Some(OTHER_DN), required).is_ok());
+    // Open ingest: an unbound registration is not a binding, nothing to
+    // compare against.
+    assert!(authorize_uplink("dev-1", Some(&unbound), None, false).is_ok());
+    assert!(authorize_uplink("dev-1", Some(&unbound), Some(OTHER_DN), false).is_ok());
+    // Strict: registered-but-unbound is not fully registered.
+    for subject in [None, Some(OTHER_DN)] {
+        assert!(
+            matches!(
+                authorize_uplink("dev-1", Some(&unbound), subject, true),
+                Err(AppError::DeviceNotRegistered)
+            ),
+            "unbound device must be rejected under REQUIRE_REGISTRATION (subject={subject:?})"
+        );
     }
 }
 
@@ -192,19 +202,27 @@ fn registration_flow_binds_the_subject() {
 }
 
 #[test]
-fn require_registration_rejects_unknown_and_inactive() {
+fn require_registration_rejects_unknown_unbound_and_inactive() {
     let store = common::test_store();
     assert!(matches!(
         uplink(store.as_ref(), "ghost", Some(BOUND_DN), true),
         Err(AppError::DeviceNotRegistered)
     ));
     store.put_device(record("dev-1", "active", None)).unwrap();
+    assert!(
+        matches!(
+            uplink(store.as_ref(), "dev-1", Some(BOUND_DN), true),
+            Err(AppError::DeviceNotRegistered)
+        ),
+        "active but unbound: rejected under the flag"
+    );
+    uplink(store.as_ref(), "dev-1", None, false).unwrap();
     store.set_device_status("dev-1", "inactive").unwrap();
     assert!(matches!(
         uplink(store.as_ref(), "dev-1", None, true),
         Err(AppError::DeviceNotRegistered)
     ));
-    assert!(store.get_uplinks("dev-1", 10).unwrap().is_empty());
+    assert_eq!(store.get_uplinks("dev-1", 10).unwrap().len(), 1);
 }
 
 // ── Payload validation ───────────────────────────────────────────────
@@ -372,6 +390,9 @@ async fn http_lambda_request_context_subject_is_bound_too() {
 async fn http_require_registration_option() {
     let store = common::test_store();
     store.put_device(record("dev-1", "active", None)).unwrap();
+    store
+        .put_device(record("dev-2", "active", Some(BOUND_DN)))
+        .unwrap();
     let server = TestServer::new(router_with(
         store,
         RouterOptions {
@@ -383,10 +404,18 @@ async fn http_require_registration_option() {
         .text(body("ghost"))
         .await
         .assert_status(StatusCode::FORBIDDEN);
-    // Grandfathered: registered, no subject_dn on record.
+    // Registered but unbound: not enough under the flag.
     server
         .post("/")
         .text(body("dev-1"))
+        .await
+        .assert_status(StatusCode::FORBIDDEN);
+    // Registered, bound, matching cert: through.
+    let (name, value) = header(BOUND_DN);
+    server
+        .post("/")
+        .add_header(name, value)
+        .text(body("dev-2"))
         .await
         .assert_status_ok();
 }

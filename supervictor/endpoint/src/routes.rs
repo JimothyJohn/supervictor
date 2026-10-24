@@ -30,8 +30,9 @@ pub struct AppState {
 /// Runtime policy knobs the router needs beyond the store.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RouterOptions {
-    /// Reject uplinks from devices that are not registered and `active`
-    /// (`REQUIRE_REGISTRATION`). Certificate binding is always enforced.
+    /// Reject uplinks from devices that are not registered, `active` and
+    /// cert-bound (`REQUIRE_REGISTRATION`). Binding of bound devices is
+    /// always enforced.
     pub require_registration: bool,
 }
 
