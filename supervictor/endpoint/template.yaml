@@ -90,6 +90,12 @@ Resources:
                     # Retention horizon for uplink rows (owner call 2026-07-16);
                     # rows carry expires_at = received_at + this many days.
                     UPLINK_TTL_DAYS: "30"
+                    # Uplink admission. "true" rejects uplinks from devices
+                    # that are not registered and active (403). Certificate
+                    # binding — a registered subject_dn must match the client
+                    # cert — is enforced regardless of this flag. Flip once
+                    # every fleet device is registered (Quickstart onboard).
+                    REQUIRE_REGISTRATION: "false"
             Policies:
                 - Statement:
                       - Effect: Allow

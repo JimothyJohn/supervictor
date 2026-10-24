@@ -20,15 +20,32 @@ use supervictor_common::routes as wire;
 pub struct AppState {
     /// Active persistence backend.
     pub store: Arc<dyn DeviceStore>,
+    /// Uplink admission policy (see [`RouterOptions`]).
+    pub require_registration: bool,
     /// Publisher for dashboard live updates; sends never block.
     #[cfg(feature = "ui")]
     pub events: crate::ui::sse::EventSender,
 }
 
-/// Build the axum [`Router`] with all API routes and tracing middleware.
+/// Runtime policy knobs the router needs beyond the store.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RouterOptions {
+    /// Reject uplinks from devices that are not registered and `active`
+    /// (`REQUIRE_REGISTRATION`). Certificate binding is always enforced.
+    pub require_registration: bool,
+}
+
+/// Build the axum [`Router`] with default options (open ingest: unknown
+/// devices may uplink; registered-and-bound devices must match their cert).
 pub fn router(store: Arc<dyn DeviceStore>) -> Router {
+    router_with(store, RouterOptions::default())
+}
+
+/// Build the axum [`Router`] with all API routes and tracing middleware.
+pub fn router_with(store: Arc<dyn DeviceStore>, options: RouterOptions) -> Router {
     let state = AppState {
         store,
+        require_registration: options.require_registration,
         #[cfg(feature = "ui")]
         events: crate::ui::sse::channel(),
     };
@@ -88,7 +105,12 @@ async fn uplink(
     } else {
         Some(body.as_str())
     };
-    let resp = handlers::handle_uplink(body_opt, subject, Some(state.store.as_ref()), false)?;
+    let resp = handlers::handle_uplink(
+        body_opt,
+        subject,
+        Some(state.store.as_ref()),
+        state.require_registration,
+    )?;
 
     // Push to dashboard SSE subscribers; never blocks, no-op with no listeners.
     #[cfg(feature = "ui")]

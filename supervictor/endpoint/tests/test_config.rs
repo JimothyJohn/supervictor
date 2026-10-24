@@ -15,6 +15,7 @@ fn env_var_parsing() {
         "DEVICES_TABLE",
         "MESSAGES_TABLE",
         "SQLITE_DB_PATH",
+        "REQUIRE_REGISTRATION",
     ];
     let saved: Vec<_> = keys.iter().map(|k| std::env::var(k).ok()).collect();
     for k in &keys {
@@ -31,6 +32,37 @@ fn env_var_parsing() {
     assert_eq!(cfg.devices_table, "devices");
     assert_eq!(cfg.messages_table, "messages");
     assert_eq!(cfg.sqlite_db_path, ":memory:");
+    assert!(!cfg.require_registration, "open ingest by default");
+
+    // --- REQUIRE_REGISTRATION: accepted spellings ---
+    for (raw, expected) in [
+        ("true", true),
+        ("TRUE", true),
+        ("1", true),
+        ("yes", true),
+        ("on", true),
+        ("false", false),
+        ("0", false),
+        ("no", false),
+        ("off", false),
+        ("", false),
+    ] {
+        std::env::set_var("REQUIRE_REGISTRATION", raw);
+        assert_eq!(
+            Config::from_env().unwrap().require_registration,
+            expected,
+            "REQUIRE_REGISTRATION={raw:?}"
+        );
+    }
+    // A typo in a security knob fails the boot instead of silently
+    // disabling the check.
+    std::env::set_var("REQUIRE_REGISTRATION", "ture");
+    let err = Config::from_env().unwrap_err();
+    assert!(
+        format!("{err}").contains("REQUIRE_REGISTRATION"),
+        "got: {err}"
+    );
+    std::env::remove_var("REQUIRE_REGISTRATION");
 
     // --- PORT override ---
     std::env::set_var("PORT", "3000");

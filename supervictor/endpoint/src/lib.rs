@@ -24,5 +24,7 @@ pub mod time;
 /// Fleet dashboard: server-rendered HTML + SSE behind admin mTLS (feature `ui`).
 #[cfg(feature = "ui")]
 pub mod ui;
+/// Request payload validation beyond what serde enforces.
+pub mod validate;
 /// Periodic fleet-health logging for long-running deployments.
 pub mod watchdog;

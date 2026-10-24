@@ -27,6 +27,13 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   compiled) share staleness logic with the dashboard via `src/fleet.rs`;
   `src/watchdog.rs` logs dark-device transitions on long-running deploys
   (`WATCHDOG_INTERVAL_SECS`, 0 disables).
+- Uplink identity: a device registered with a `subject_dn` is bound to that
+  certificate — `POST /` for it must carry a matching mTLS subject or it is
+  403'd (`handlers::authorize_uplink`). `REQUIRE_REGISTRATION=true` further
+  rejects unregistered/inactive devices; registered devices with no
+  `subject_dn` are grandfathered with a warn log. Payload identifiers are
+  validated in `validate.rs` (≤64 bytes, non-empty, no control characters —
+  the firmware's `HString<64>` contract).
 - Tests use in-memory SQLite. No AWS dependencies in tests.
 - Wire contract (routes, field names) is shared with the firmware via
   `supervictor-common` — change it there, and the compiler finds every

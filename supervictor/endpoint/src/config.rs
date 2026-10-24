@@ -25,6 +25,24 @@ pub struct Config {
     pub watchdog_interval_secs: u64,
     /// Days before an uplink row expires (DynamoDB TTL); 0 keeps rows forever.
     pub uplink_ttl_days: u32,
+    /// Reject uplinks from devices that are not registered and `active`.
+    /// Certificate binding (registered `subject_dn` must match the client
+    /// cert) is enforced regardless of this flag.
+    pub require_registration: bool,
+}
+
+/// Parse a boolean environment value: `true`/`false`, `1`/`0`, `yes`/`no`,
+/// `on`/`off` (case-insensitive); empty means `false`. Anything else is a
+/// configuration error rather than a silent `false` — a typo in a security
+/// knob must fail the boot, not disable the check.
+fn parse_bool(name: &str, raw: &str) -> Result<bool, AppError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" | "false" | "0" | "no" | "off" => Ok(false),
+        "true" | "1" | "yes" | "on" => Ok(true),
+        _ => Err(AppError::Config(format!(
+            "invalid {name} '{raw}': expected true/false"
+        ))),
+    }
 }
 
 impl Config {
@@ -57,6 +75,10 @@ impl Config {
                 raw.parse().map_err(|e| {
                     AppError::Config(format!("invalid UPLINK_TTL_DAYS '{raw}': {e}"))
                 })?
+            },
+            require_registration: {
+                let raw = env::var("REQUIRE_REGISTRATION").unwrap_or_default();
+                parse_bool("REQUIRE_REGISTRATION", &raw)?
             },
         })
     }

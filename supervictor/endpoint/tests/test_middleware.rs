@@ -73,3 +73,71 @@ fn lwa_missing_cert_falls_through_to_proxy() {
     let subject = extract_client_subject(&headers);
     assert_eq!(subject.as_deref(), Some("CN=fallback"));
 }
+
+// ── dn_matches ────────────────────────────────────────────────────────
+
+mod dn_matches {
+    use supervictor_endpoint::middleware::dn_matches;
+
+    #[test]
+    fn identical_strings_match() {
+        assert!(dn_matches(
+            "CN=dev-1,OU=devices,O=supervictor",
+            "CN=dev-1,OU=devices,O=supervictor"
+        ));
+    }
+
+    #[test]
+    fn proxy_formatting_differences_are_tolerated() {
+        // Caddy / openssl spacing and component order vary for one cert.
+        let rfc2253 = "CN=dev-1,OU=devices,O=supervictor";
+        assert!(dn_matches(rfc2253, "CN=dev-1, OU=devices, O=supervictor"));
+        assert!(dn_matches(rfc2253, "O=supervictor,OU=devices,CN=dev-1"));
+        assert!(dn_matches(
+            rfc2253,
+            " cn=dev-1 , ou=devices , o=supervictor "
+        ));
+    }
+
+    #[test]
+    fn values_are_case_sensitive() {
+        // Only attribute types fold; `CN=Dev-1` is a different subject.
+        assert!(!dn_matches("CN=dev-1", "CN=Dev-1"));
+    }
+
+    #[test]
+    fn prefix_and_superset_subjects_do_not_match() {
+        assert!(!dn_matches("CN=dev-1", "CN=dev-10"));
+        assert!(!dn_matches("CN=dev-1", "CN=dev-1,OU=admin"));
+        assert!(!dn_matches("CN=dev-1,OU=admin", "CN=dev-1"));
+        assert!(!dn_matches("CN=dev-1,OU=devices", "CN=dev-1,OU=admin"));
+    }
+
+    #[test]
+    fn empty_never_matches_even_empty() {
+        assert!(!dn_matches("", ""));
+        assert!(!dn_matches("", "CN=dev-1"));
+        assert!(!dn_matches("CN=dev-1", ""));
+        assert!(!dn_matches(" , , ", ","));
+    }
+
+    #[test]
+    fn duplicate_components_are_significant() {
+        assert!(!dn_matches("CN=a,CN=a", "CN=a"));
+    }
+
+    #[test]
+    fn is_symmetric_and_reflexive_for_real_subjects() {
+        for dn in [
+            "CN=dev-1",
+            "CN=dev-1,OU=devices,O=supervictor",
+            "CN=ops,OU=admin,O=supervictor,C=US",
+        ] {
+            assert!(dn_matches(dn, dn), "{dn} must match itself");
+            let reversed: Vec<&str> = dn.split(',').rev().collect();
+            let reversed = reversed.join(",");
+            assert!(dn_matches(dn, &reversed));
+            assert!(dn_matches(&reversed, dn));
+        }
+    }
+}
