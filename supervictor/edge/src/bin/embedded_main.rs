@@ -56,6 +56,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1);
     let rng = Rng::new();
     let net_seed = (rng.random() as u64) << 32 | rng.random() as u64;
+    let sim_seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
     // esp-rtos requires explicit start on RISC-V with SoftwareInterrupt<0>
     let software_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
@@ -122,7 +123,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     spawner.spawn(connection(controller)).ok();
     spawner.spawn(net_task(runner)).ok();
-    spawner.spawn(app(stack, tls)).ok();
+    spawner.spawn(app(stack, tls, sim_seed)).ok();
 
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;
