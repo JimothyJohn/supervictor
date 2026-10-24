@@ -35,6 +35,14 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   log. Payload identifiers are
   validated in `validate.rs` (≤64 bytes, non-empty, no control characters —
   the firmware's `HString<64>` contract).
+- In-binary mTLS (feature `tls`, default-on; `src/tls.rs`): set `TLS_CERT`,
+  `TLS_KEY`, `TLS_CLIENT_CA` (all three or boot fails) and the binary
+  terminates TLS itself with mandatory client-cert verification. Identity
+  then comes from the verified peer certificate via `ConnectInfo<TlsPeer>`;
+  `middleware::client_identity` ignores the forwarded-subject headers in
+  that mode. Unset → plain HTTP, identity from the proxy headers (Lambda /
+  Caddy). `tests/test_tls.rs` is a real TLS end-to-end with certs minted by
+  `scripts/gen_certs.sh` (openssl required).
 - Tests use in-memory SQLite by default (no AWS in the default suite).
   The `dynamo` backend has its own contract suite, `tests/test_store_dynamo.rs`,
   against a real DynamoDB Local (`DYNAMODB_LOCAL_ENDPOINT`, see the file

@@ -2,7 +2,7 @@ use std::convert::Infallible;
 
 use axum::extract::{FromRequestParts, Request};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{Extensions, HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -37,6 +37,26 @@ pub fn extract_client_subject(headers: &HeaderMap) -> Option<String> {
     }
 
     None
+}
+
+/// The request's authenticated client identity.
+///
+/// When this binary terminated TLS itself (feature `tls`, `TLS_*` set), the
+/// identity is the verified peer certificate's subject carried in
+/// `ConnectInfo<TlsPeer>` — and forwarded headers are ignored, whatever they
+/// say: nothing upstream vouched for them. Otherwise (API Gateway / Caddy in
+/// front) it is whatever the trusted proxy forwarded, per
+/// [`extract_client_subject`].
+pub fn client_identity(extensions: &Extensions, headers: &HeaderMap) -> Option<String> {
+    #[cfg(feature = "tls")]
+    if let Some(axum::extract::ConnectInfo(peer)) =
+        extensions.get::<axum::extract::ConnectInfo<crate::tls::TlsPeer>>()
+    {
+        return peer.subject.clone();
+    }
+    #[cfg(not(feature = "tls"))]
+    let _ = extensions;
+    extract_client_subject(headers)
 }
 
 /// True when the DN has an `OU=admin` component. Component-wise parse, not a
@@ -81,7 +101,7 @@ pub fn dn_matches(a: &str, b: &str) -> bool {
 /// Route-layer gate: 403 unless the forwarded mTLS subject is an admin.
 /// Shared by the dashboard (`/ui/*`) and the fleet JSON API (`/fleet*`).
 pub async fn require_admin(request: Request, next: Next) -> Response {
-    match extract_client_subject(request.headers()) {
+    match client_identity(request.extensions(), request.headers()) {
         Some(subject) if is_admin_subject(&subject) => next.run(request).await,
         Some(subject) => {
             tracing::warn!(
@@ -115,6 +135,9 @@ where
     type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        Ok(ClientSubject(extract_client_subject(&parts.headers)))
+        Ok(ClientSubject(client_identity(
+            &parts.extensions,
+            &parts.headers,
+        )))
     }
 }

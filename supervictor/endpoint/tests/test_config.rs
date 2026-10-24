@@ -16,6 +16,9 @@ fn env_var_parsing() {
         "MESSAGES_TABLE",
         "SQLITE_DB_PATH",
         "REQUIRE_REGISTRATION",
+        "TLS_CERT",
+        "TLS_KEY",
+        "TLS_CLIENT_CA",
     ];
     let saved: Vec<_> = keys.iter().map(|k| std::env::var(k).ok()).collect();
     for k in &keys {
@@ -63,6 +66,37 @@ fn env_var_parsing() {
         "got: {err}"
     );
     std::env::remove_var("REQUIRE_REGISTRATION");
+
+    // --- TLS: all or nothing ---
+    assert!(
+        Config::from_env().unwrap().tls.is_none(),
+        "plain HTTP by default"
+    );
+    std::env::set_var("TLS_CERT", "/etc/supervictor/server.pem");
+    std::env::set_var("TLS_KEY", "/etc/supervictor/server.key");
+    std::env::set_var("TLS_CLIENT_CA", "/etc/supervictor/ca.pem");
+    let tls = Config::from_env().unwrap().tls.expect("all three set");
+    assert_eq!(tls.cert.to_str(), Some("/etc/supervictor/server.pem"));
+    assert_eq!(tls.key.to_str(), Some("/etc/supervictor/server.key"));
+    assert_eq!(tls.client_ca.to_str(), Some("/etc/supervictor/ca.pem"));
+    // A partial set must not silently fall back to plaintext.
+    std::env::remove_var("TLS_CLIENT_CA");
+    let err = Config::from_env().unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("TLS_CLIENT_CA"), "got: {msg}");
+    assert!(
+        !msg.contains("TLS_CERT,"),
+        "only the missing one is named: {msg}"
+    );
+    std::env::set_var("TLS_CERT", "   ");
+    let msg = format!("{}", Config::from_env().unwrap_err());
+    assert!(
+        msg.contains("TLS_CERT") && msg.contains("TLS_CLIENT_CA"),
+        "got: {msg}"
+    );
+    for k in ["TLS_CERT", "TLS_KEY", "TLS_CLIENT_CA"] {
+        std::env::remove_var(k);
+    }
 
     // --- PORT override ---
     std::env::set_var("PORT", "3000");

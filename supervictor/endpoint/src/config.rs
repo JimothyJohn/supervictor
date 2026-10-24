@@ -1,6 +1,20 @@
 use std::env;
+use std::path::PathBuf;
 
 use crate::error::AppError;
+
+/// Paths for in-binary mTLS termination (`TLS_CERT`, `TLS_KEY`,
+/// `TLS_CLIENT_CA`). All three or none: a partial set is a configuration
+/// error, never a silent fallback to plaintext.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TlsConfig {
+    /// Server certificate chain, PEM.
+    pub cert: PathBuf,
+    /// Server private key, PEM.
+    pub key: PathBuf,
+    /// CA bundle client certificates must chain to, PEM.
+    pub client_ca: PathBuf,
+}
 
 /// Runtime configuration loaded from environment variables.
 #[derive(Debug, Clone)]
@@ -29,6 +43,38 @@ pub struct Config {
     /// bound to a certificate (`subject_dn` on record). Certificate binding
     /// for devices that *are* bound is enforced regardless of this flag.
     pub require_registration: bool,
+    /// Terminate mTLS in-process when set (single-binary deployment);
+    /// plain HTTP behind API Gateway / a proxy when `None`.
+    pub tls: Option<TlsConfig>,
+}
+
+/// `TLS_CERT` + `TLS_KEY` + `TLS_CLIENT_CA` → `Some(TlsConfig)`; none set →
+/// `None`; anything in between → error naming the missing variables.
+fn tls_from_env() -> Result<Option<TlsConfig>, AppError> {
+    let read = |name: &str| env::var(name).ok().filter(|v| !v.trim().is_empty());
+    let (cert, key, ca) = (read("TLS_CERT"), read("TLS_KEY"), read("TLS_CLIENT_CA"));
+    match (cert, key, ca) {
+        (None, None, None) => Ok(None),
+        (Some(cert), Some(key), Some(ca)) => Ok(Some(TlsConfig {
+            cert: PathBuf::from(cert),
+            key: PathBuf::from(key),
+            client_ca: PathBuf::from(ca),
+        })),
+        (cert, key, ca) => {
+            let missing: Vec<&str> = [
+                ("TLS_CERT", cert.is_none()),
+                ("TLS_KEY", key.is_none()),
+                ("TLS_CLIENT_CA", ca.is_none()),
+            ]
+            .into_iter()
+            .filter_map(|(name, absent)| absent.then_some(name))
+            .collect();
+            Err(AppError::Config(format!(
+                "incomplete TLS configuration: missing {}",
+                missing.join(", ")
+            )))
+        }
+    }
 }
 
 /// Parse a boolean environment value: `true`/`false`, `1`/`0`, `yes`/`no`,
@@ -80,6 +126,7 @@ impl Config {
                 let raw = env::var("REQUIRE_REGISTRATION").unwrap_or_default();
                 parse_bool("REQUIRE_REGISTRATION", &raw)?
             },
+            tls: tls_from_env()?,
         })
     }
 }

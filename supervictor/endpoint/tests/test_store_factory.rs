@@ -14,6 +14,7 @@ fn test_config(backend: &str) -> Config {
         watchdog_interval_secs: 0,
         uplink_ttl_days: 30,
         require_registration: false,
+        tls: None,
     }
 }
 
