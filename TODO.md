@@ -8,15 +8,6 @@ them — git history is the changelog. Every remaining item is gated; the
 
 ## P0 — Security & cost guardrails
 
-- [ ] Repair the prod domain's truststore reference: `supervictor.advin.io`
-      still points at the deleted temp key from a failed reload. One command
-      (versioned pin, run as owner):
-      `aws apigateway update-domain-name --domain-name supervictor.advin.io
-      --patch-operations
-      "op=replace,path=/mutualTlsAuthentication/truststoreUri,value=s3://supervictor/truststore.pem"
-      "op=replace,path=/mutualTlsAuthentication/truststoreVersion,value=<current VersionId>"`
-      (`Quickstart truststore-reload` does exactly this going forward).
-      **Unblocks:** owner-run — API GW domain changes are gated.
 - [ ] Billing alarm: CloudWatch `EstimatedCharges` alarm + SNS topic. Shares
       the topic/endpoint with ROADMAP Phase 2's dark-device alerting.
       **Unblocks:** an alert email/endpoint decision + account-level billing
@@ -24,7 +15,14 @@ them — git history is the changelog. Every remaining item is gated; the
 - [ ] Cert lifecycle: `deploy-staging.sh` signs with `certs/ca/ca.key` from
       the local working tree (gitignored, single copy on one laptop). Move
       signing material to SSM Parameter Store / Secrets Manager; document
-      issuance + rotation; keep only public certs local.
+      issuance + rotation; keep only public certs local. **Two CAs exist
+      with the same subject** (found 2026-10-24 while repairing the prod
+      truststore): the Mac Studio's `certs/ca` (issued 2026-03-03, sha256
+      `CD:AC:FD:B1…`) signed every device/admin/server cert in use, and prod
+      now trusts it (truststore.pem version `1fmZKZzmgktCHdWvGdb4PPTv6oJUWG_S`).
+      An older truststore held a 2026-03-08 CA (`E7:3F:86:F4…`) whose key is
+      not on the Studio; API Gateway refuses a truststore with both (same
+      subject). Find or retire that key when the CA moves to SSM.
       **Unblocks:** an ops window — touches live staging deploys.
 
 ## P1 — Hygiene
