@@ -279,7 +279,7 @@
     <div class="hero">
       <div>
         <div class="sheetno rv" style="--i:0">SV·00</div>
-        <h1 class="rv" style="--i:1">Your hardware fleet,<br>under command.</h1>
+        <h1 class="rv" style="--i:1">Your fleet, captured<br>in real time.</h1>
         <p class="sub rv" style="--i:2">
           Supervictor deploys and monitors your devices securely, with a
           live dashboard for every site.
@@ -294,12 +294,12 @@
         <table class="minifleet" id="minifleet">
           <thead><tr><th>Device</th><th>Uptime 24h</th><th>Last uplink</th><th>State</th></tr></thead>
           <tbody>
-            <tr data-period="5"><td>conveyor</td><td>99.9%</td><td class="ts">1.2s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="8"><td>extruder</td><td>98.7%</td><td class="ts">3.5s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="12"><td>lathe</td><td>99.4%</td><td class="ts">6.1s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="15"><td>press</td><td>99.8%</td><td class="ts">2.8s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="5"><td>conveyor</td><td>99.9%</td><td class="ts">1s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="8"><td>extruder</td><td>98.7%</td><td class="ts">3s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="12"><td>lathe</td><td>99.4%</td><td class="ts">6s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="15"><td>press</td><td>99.8%</td><td class="ts">2s ago</td><td><span class="pill fresh">fresh</span></td></tr>
             <tr data-period="18"><td>welder</td><td>99.5%</td><td class="ts">11s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="21"><td>mill</td><td>99.1%</td><td class="ts">9.4s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="21"><td>mill</td><td>99.1%</td><td class="ts">9s ago</td><td><span class="pill fresh">fresh</span></td></tr>
             <tr data-period="30"><td>compressor</td><td>98.3%</td><td class="ts">17s ago</td><td><span class="pill fresh">fresh</span></td></tr>
             <tr data-period="45"><td>kiln</td><td>97.2%</td><td class="ts">28s ago</td><td><span class="pill fresh">fresh</span></td></tr>
             <tr><td>grinder</td><td>92.6%</td><td class="ts">46m ago</td><td><span class="pill stale">stale</span></td></tr>
@@ -427,21 +427,20 @@ DEVICE (ESP32-C3, no_std Rust)
   }, { threshold: 0.12 });
   document.querySelectorAll(".rv").forEach(function (el) { io.observe(el); });
 
-  // ticking mini fleet: each device has its own uplink period; ages tick at
-  // 4 Hz with sub-second readouts, and a row flashes when its uplink lands.
+  // ticking mini fleet: each device has its own uplink period; ages tick once a
+  // second, and a row flashes when its uplink lands.
   var rows = Array.prototype.slice.call(
     document.querySelectorAll("#minifleet tbody tr[data-period]"));
   var state = rows.map(function (row, i) {
     return { row: row, period: +row.dataset.period, age: (i * 1.7) % +row.dataset.period };
   });
   function fmt(age) {
-    if (age < 10) return age.toFixed(1) + "s ago";
     if (age < 60) return Math.floor(age) + "s ago";
     return Math.floor(age / 60) + "m ago";
   }
   setInterval(function () {
     state.forEach(function (d) {
-      d.age += 0.25;
+      d.age += 1;
       if (d.age >= d.period) {
         d.age = 0;
         d.row.classList.add("blip");
@@ -449,7 +448,7 @@ DEVICE (ESP32-C3, no_std Rust)
       }
       d.row.querySelector(".ts").textContent = fmt(d.age);
     });
-  }, 250);
+  }, 1000);
 })();
 </script>
 
