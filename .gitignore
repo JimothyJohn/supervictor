@@ -280,5 +280,5 @@ certs/
 !.claude/skills/
 scratch/
 
-# Pi cross-build output (scratch/12-pi-edge.sh)
+# Cross-build output (scripts/pi-edge.sh, scripts/deploy-staging-build.sh)
 target-pi/
