@@ -73,7 +73,7 @@ compose/Caddy stack on that box is stopped and disabled, docker disabled.
       record repointed. Fold that EIP into the template when it is rewritten.
       **Unblocks:** an ops window.
 - [ ] The box runs a hand-installed `dev` build (6912de9, deployed
-      2026-10-25 with the worktree copy of `scratch/deploy-staging-build.sh`:
+      2026-10-25 with `scripts/deploy-staging-build.sh`:
       musl build in an arm64 container → S3 → SSM install). `install-staging.sh`
       without a `TAG` still rolls it back to v0.1.0. Cut v0.2.0 (P4) and
       install from the release so staging is reproducible.
@@ -167,8 +167,8 @@ compose/Caddy stack on that box is stopped and disabled, docker disabled.
 - [ ] Cut v0.2.0: everything since v0.1.0 (simulator + machine profiles,
       per-device power threshold, live windows, POE2 board, history API,
       light theme) ships only as hand-installed staging builds. Tag push is
-      the owner's (`scratch/release.sh` on the Studio, `TAG=v0.2.0`), then
-      `install-staging.sh TAG=v0.2.0`.
+      the owner's (`TAG=v0.2.0 ./scripts/release.sh`), then
+      `TAG=v0.2.0 ./scripts/install-staging.sh`.
       **Unblocks:** owner tag push.
 
 - [ ] Promote `.github/workflows/mutants.yml` (monthly cargo-mutants over
@@ -197,13 +197,12 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       no galvanic isolation and Olimex says no Ethernet while USB is attached.
       Expect `poe2-wifi-01` fresh on https://staging.supervictor.advin.io/fleet
       with a new `last_uplink` and no `rssi_dbm`.
-- [ ] POE-ISO (`poe-iso-eth-01`): `./scratch/flash.sh poe-iso-eth-01 staging`
+- [ ] POE-ISO (`poe-iso-eth-01`): `./scripts/flash.sh poe-iso-eth-01 staging`
       over USB (re-identify the port by MAC e0:5a:1b:66:50:40 — hub positions
       moved), then rack it. Isolated board, USB + Ethernet together is fine.
-- [ ] Each additional board: `./Quickstart certs device <name>`, register
-      (`POST /devices` with device_id/owner_id/subject_dn — `onboard` bundles it
-      for Ethernet boards), add a `case` line to scratch/flash.sh (board →
-      port, `board-poe2` or `ethernet`), flash, rack. Names by board type and
+- [ ] Each additional board: `./scripts/rack-flash.sh staging` does the whole
+      loop (cert, `POST /devices`, flash, cabling prompt, uplink poll) and
+      records it in `certs/rack-inventory.tsv`. Names by board type and
       position, e.g. `poe2-rack-01`.
 - [ ] Fault test: pull one cable, watch the fleet row go stale → dark, plug it
       back, watch it recover. This is the baseline the mesh fallback has to beat.
