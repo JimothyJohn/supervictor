@@ -118,6 +118,35 @@ pub const CHART_SCRIPT: &str = r#"
 })();
 "#;
 
+/// Theme bootstrap + toggle. Runs in `<head>` so a stored choice applies
+/// before first paint (no flash); the click handler attaches once the
+/// header exists. The choice is a per-viewer convenience in localStorage,
+/// wrapped in try/catch — private windows and blocked storage just fall
+/// back to the OS preference.
+pub const THEME_SCRIPT: &str = r#"
+(function () {
+  var KEY = 'sv-theme', root = document.documentElement;
+  function stored() { try { return localStorage.getItem(KEY); } catch (_) { return null; } }
+  function effective() {
+    var t = root.getAttribute('data-theme');
+    if (t) return t;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  }
+  var saved = stored();
+  if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+  document.addEventListener('DOMContentLoaded', function () {
+    var button = document.getElementById('theme-toggle');
+    if (!button) return;
+    button.addEventListener('click', function () {
+      var next = effective() === 'light' ? 'dark' : 'light';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem(KEY, next); } catch (_) {}
+      button.setAttribute('aria-label', next === 'light' ? 'switch to dark mode' : 'switch to light mode');
+    });
+  });
+})();
+"#;
+
 /// Seconds between reloads of the history pages (visible tab only).
 const HISTORY_REFRESH_S: u32 = 60;
 
@@ -127,9 +156,13 @@ fn layout(title: &str, subject: &str, refresh: Option<u32>, body: Markup) -> Mar
         html lang="en" {
             head {
                 meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
+                meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover";
+                meta name="color-scheme" content="dark light";
+                meta name="theme-color" content="#0e0e10" media="(prefers-color-scheme: dark)";
+                meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)";
                 title { (title) " — supervictor fleet" }
                 link rel="stylesheet" href="/ui/assets/style.css";
+                script { (PreEscaped(THEME_SCRIPT)) }
             }
             body data-refresh=[refresh] {
                 header {
@@ -140,6 +173,15 @@ fn layout(title: &str, subject: &str, refresh: Option<u32>, body: Markup) -> Mar
                     }
                     span #live-dot { "static" }
                     span .subject { (subject) }
+                    button #theme-toggle type="button" aria-label="switch colour theme" title="light / dark" {
+                        svg .icon-sun viewBox="0 0 24 24" aria-hidden="true" {
+                            circle cx="12" cy="12" r="4" {}
+                            path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" {}
+                        }
+                        svg .icon-moon viewBox="0 0 24 24" aria-hidden="true" {
+                            path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" {}
+                        }
+                    }
                 }
                 main { (body) }
                 script { (PreEscaped(LIVE_SCRIPT)) }

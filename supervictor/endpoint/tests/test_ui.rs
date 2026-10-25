@@ -456,8 +456,8 @@ async fn history_page_keeps_hostile_device_ids_inert_in_charts() {
     let html = resp.text();
     assert!(!html.contains("<script>alert(1)"), "raw script tag leaked");
     assert!(
-        !html.contains("\"><script"),
-        "attribute breakout: a quote survived unescaped before <script"
+        !html.contains("x\"><script"),
+        "attribute breakout: the hostile id's quote survived unescaped"
     );
     assert!(
         html.contains("&lt;script&gt;alert(1)"),
@@ -518,4 +518,43 @@ async fn device_page_has_window_filters_and_metric_charts() {
         .add_header(name, value)
         .await;
     assert_eq!(resp.status_code(), 422);
+}
+
+// ── Theme + phones ────────────────────────────────────────────────────
+
+/// Every page carries the theme toggle and the pre-paint bootstrap; the
+/// stylesheet defines light tokens for both the explicit toggle and the OS
+/// preference, plus a phone breakpoint.
+#[tokio::test]
+async fn every_page_has_the_theme_toggle_and_light_tokens_exist() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+    for path in ["/ui", "/ui/history", "/ui/devices/factory-01"] {
+        let (name, value) = dn(ADMIN_DN);
+        let html = server.get(path).add_header(name, value).await.text();
+        assert!(html.contains("id=\"theme-toggle\""), "{path}: no toggle");
+        assert!(
+            html.contains("class=\"icon-sun\"") && html.contains("class=\"icon-moon\""),
+            "{path}: icons"
+        );
+        let head_end = html.find("</head>").expect("head");
+        assert!(
+            html[..head_end].contains("sv-theme"),
+            "{path}: theme bootstrap must run in <head>"
+        );
+        assert!(
+            html.contains("name=\"color-scheme\" content=\"dark light\""),
+            "{path}"
+        );
+    }
+    let (name, value) = dn(ADMIN_DN);
+    let css = server
+        .get("/ui/assets/style.css")
+        .add_header(name, value)
+        .await
+        .text();
+    assert!(css.contains(":root[data-theme=\"light\"]"));
+    assert!(css.contains("@media (prefers-color-scheme: light)"));
+    assert!(css.contains(":root:not([data-theme=\"dark\"])"));
+    assert!(css.contains("@media (max-width: 640px)"));
 }
