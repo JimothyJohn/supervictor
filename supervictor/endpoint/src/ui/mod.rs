@@ -146,9 +146,11 @@ pub fn fleet_rows(store: &dyn DeviceStore, threshold_ma: i64) -> Result<Vec<Flee
                 staleness: h.staleness,
                 current: h.current,
                 power: h.power,
+                threshold_ma: h.threshold_ma,
                 device,
             },
             None => FleetRow {
+                threshold_ma: device.effective_threshold_ma(threshold_ma),
                 device,
                 last_uplink: None,
                 staleness: fleet::Staleness::Unknown,

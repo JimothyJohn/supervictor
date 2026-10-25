@@ -21,8 +21,33 @@ pub struct FleetRow {
     pub staleness: Staleness,
     /// Last reported current in mA, if any.
     pub current: Option<i64>,
-    /// Power state from `current` against the fleet threshold.
+    /// Power state from `current` against `threshold_ma`.
     pub power: PowerState,
+    /// Current (mA) this device is judged against (own override or fleet
+    /// default); carried on the row so the live script can flip the badge.
+    pub threshold_ma: i64,
+}
+
+/// How a page keeps itself current.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageMode {
+    /// No reload; the SSE script patches rows in place (fleet table).
+    Rows,
+    /// Reload the visible tab every N seconds (long windows).
+    Timed(u32),
+    /// Re-render `<main>` on every uplink event (short windows).
+    Live,
+}
+
+impl PageMode {
+    /// Live for the short windows, timed reload otherwise.
+    pub fn for_window(window: Window) -> PageMode {
+        if window.is_live() {
+            PageMode::Live
+        } else {
+            PageMode::Timed(HISTORY_REFRESH_S)
+        }
+    }
 }
 
 /// Static SSE hookup — live row updates, with a reload fallback where SSE
@@ -32,23 +57,71 @@ pub struct FleetRow {
 pub const LIVE_SCRIPT: &str = r#"
 (function () {
   var dot = document.getElementById('live-dot');
-  var errors = 0;
-  var es = new EventSource('/ui/events');
-  es.onopen = function () { errors = 0; if (dot) { dot.textContent = 'live'; dot.className = 'connected'; } };
-  es.addEventListener('uplink', function (e) {
-    var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+  var live = document.body.getAttribute('data-live') === '1';
+  var errors = 0, pending = null, inflight = false, dirty = false;
+  function setDot(text, cls) { if (dot) { dot.textContent = text; dot.className = cls; } }
+  function flash(el) { el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick'); }
+  // Fleet table: patch the device's row in place — last uplink, freshness,
+  // current, and the power badge judged against the row's own threshold.
+  function patchRow(ev) {
     var row = document.querySelector('tr[data-device="' + CSS.escape(ev.device_id) + '"]');
     if (!row) return;
     var last = row.querySelector('.last-uplink');
     if (last) last.textContent = ev.received_at;
     var badge = row.querySelector('.staleness');
     if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
+    if (typeof ev.current === 'number') {
+      var now = row.querySelector('.current-now');
+      if (now) now.textContent = ev.current + ' mA';
+      var threshold = parseInt(row.getAttribute('data-threshold'), 10);
+      var power = row.querySelector('.badge.power');
+      if (power && Number.isFinite(threshold)) {
+        var state = ev.current >= threshold ? 'on' : 'off';
+        power.textContent = state; power.className = 'badge power ' + state;
+      }
+    }
+    flash(row);
+  }
+  // Live pages (short windows): re-render <main> from the server on every
+  // uplink. Bursts coalesce into one fetch (150 ms), fetches never overlap,
+  // and a form the operator is typing in is never swapped out.
+  function rerender() {
+    if (inflight) { dirty = true; return; }
+    inflight = true;
+    fetch(location.href, { credentials: 'same-origin', cache: 'no-store', headers: { 'Accept': 'text/html' } })
+      .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var next = doc.querySelector('main'), cur = document.querySelector('main');
+        if (!next || !cur) return;
+        var active = document.activeElement;
+        if (active && active.closest && active.closest('form') && cur.contains(active)) return;
+        cur.innerHTML = next.innerHTML;
+        if (window.svBindCharts) window.svBindCharts(cur);
+        flash(cur);
+      })
+      .catch(function () {})
+      .finally(function () { inflight = false; if (dirty) { dirty = false; schedule(); } });
+  }
+  function schedule() { clearTimeout(pending); pending = setTimeout(rerender, 150); }
+  var es = new EventSource('/ui/events');
+  es.onopen = function () { errors = 0; setDot('live', live ? 'connected live' : 'connected'); };
+  es.addEventListener('uplink', function (e) {
+    var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+    patchRow(ev);
+    if (live && document.visibilityState === 'visible') schedule();
   });
   es.onerror = function () {
     errors += 1;
-    if (dot) { dot.textContent = 'offline'; dot.className = ''; }
-    if (errors >= 3) { es.close(); setTimeout(function () { location.reload(); }, 30000); }
+    setDot('offline', '');
+    if (errors >= 3) { es.close(); setTimeout(function () { location.reload(); }, live ? 5000 : 30000); }
   };
+  if (live) {
+    // The time axis keeps moving even while every machine is quiet, and a
+    // tab coming back to the foreground catches up at once.
+    setInterval(function () { if (document.visibilityState === 'visible') schedule(); }, 15000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') schedule(); });
+  }
 })();
 "#;
 
@@ -69,7 +142,11 @@ pub const CHART_SCRIPT: &str = r#"
     return v.toFixed(2);
   }
   function when(t) { return new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' UTC'; }
-  document.querySelectorAll('figure.chart[data-chart]').forEach(function (fig) {
+  // Bind once per figure; re-run on a live re-render (`window.svBindCharts`).
+  function bind(root) {
+  root.querySelectorAll('figure.chart[data-chart]').forEach(function (fig) {
+    if (fig.dataset.bound) return;
+    fig.dataset.bound = '1';
     var data; try { data = JSON.parse(fig.dataset.chart); } catch (_) { return; }
     var svg = fig.querySelector('svg'), tip = fig.querySelector('.tooltip'), hair = fig.querySelector('.crosshair');
     var n = data.t.length;
@@ -115,6 +192,9 @@ pub const CHART_SCRIPT: &str = r#"
       else if (e.key === 'Escape') { hide(); }
     });
   });
+  }
+  window.svBindCharts = bind;
+  bind(document);
   var refresh = parseInt(document.body.getAttribute('data-refresh') || '0', 10);
   if (refresh > 0) {
     setInterval(function () { if (document.visibilityState === 'visible') location.reload(); }, refresh * 1000);
@@ -154,7 +234,12 @@ pub const THEME_SCRIPT: &str = r#"
 /// Seconds between reloads of the history pages (visible tab only).
 const HISTORY_REFRESH_S: u32 = 60;
 
-fn layout(title: &str, subject: &str, refresh: Option<u32>, body: Markup) -> Markup {
+fn layout(title: &str, subject: &str, mode: PageMode, body: Markup) -> Markup {
+    let refresh = match mode {
+        PageMode::Timed(secs) => Some(secs),
+        PageMode::Rows | PageMode::Live => None,
+    };
+    let live = (mode == PageMode::Live).then_some("1");
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -168,7 +253,7 @@ fn layout(title: &str, subject: &str, refresh: Option<u32>, body: Markup) -> Mar
                 link rel="stylesheet" href="/ui/assets/style.css";
                 script { (PreEscaped(THEME_SCRIPT)) }
             }
-            body data-refresh=[refresh] {
+            body data-refresh=[refresh] data-live=[live] {
                 header {
                     h1 { a href="/ui" { "supervictor fleet" } }
                     nav {
@@ -229,7 +314,7 @@ pub fn history_page(
     layout(
         "history",
         subject,
-        Some(HISTORY_REFRESH_S),
+        PageMode::for_window(window),
         html! {
             (window_filters("/ui/history", window))
             @if history.truncated {
@@ -298,7 +383,7 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
     layout(
         "fleet",
         subject,
-        None,
+        PageMode::Rows,
         html! {
             h2 { (rows.len()) " device(s) · " a href="/ui/history" { "status over time" } }
             table {
@@ -315,12 +400,12 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
                 }
                 tbody {
                     @for row in rows {
-                        tr data-device=(row.device.device_id) {
+                        tr data-device=(row.device.device_id) data-threshold=(row.threshold_ma) {
                             td { a href={ "/ui/devices/" (row.device.device_id) } { (row.device.device_id) } }
                             td { span .badge.(row.device.status) { (row.device.status) } }
                             td {
                                 span .badge.power.(row.power.label()) { (row.power.label()) }
-                                @if let Some(c) = row.current { " " span .current-inline { (c) " mA" } }
+                                " " span .current-inline.current-now { @if let Some(c) = row.current { (c) " mA" } }
                                 @if let Some(t) = row.device.power_threshold_ma { " " span .current-inline title="per-device power threshold" { "≥ " (t) } }
                             }
                             td { (row.device.owner_id) }
@@ -368,7 +453,7 @@ pub fn device_page(
     layout(
         &device.device_id,
         subject,
-        Some(HISTORY_REFRESH_S),
+        PageMode::for_window(history.window),
         html! {
             h2 { (device.device_id) }
             dl .meta {
