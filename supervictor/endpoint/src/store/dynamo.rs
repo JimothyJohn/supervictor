@@ -2,8 +2,9 @@ use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::Client;
 
 use crate::error::AppError;
-use crate::models::{DeviceRecord, UplinkRecord};
+use crate::models::{DeviceRecord, DeviceStyle, UplinkRecord};
 use crate::store::{DeviceStore, StoreError};
+use supervictor_common::models::{LineStyle, Marker};
 
 /// DynamoDB-backed implementation of [`DeviceStore`](super::DeviceStore).
 pub struct DynamoDeviceStore {
@@ -64,7 +65,32 @@ impl DynamoDeviceStore {
                 AttributeValue::N(t.to_string()),
             );
         }
+        for (key, value) in Self::style_attributes(&record.style) {
+            if let Some(value) = value {
+                item.insert(key.into(), value);
+            }
+        }
         item
+    }
+
+    /// The three style attributes as (name, value-or-absent), shared by
+    /// `put_device` and `set_device_style`.
+    fn style_attributes(style: &DeviceStyle) -> [(&'static str, Option<AttributeValue>); 3] {
+        [
+            ("color", style.color.clone().map(AttributeValue::S)),
+            (
+                "line_style",
+                style
+                    .line_style
+                    .map(|l| AttributeValue::S(l.label().to_string())),
+            ),
+            (
+                "marker",
+                style
+                    .marker
+                    .map(|m| AttributeValue::S(m.label().to_string())),
+            ),
+        ]
     }
 
     fn item_to_device(
@@ -107,6 +133,22 @@ impl DynamoDeviceStore {
                             ))
                         })?,
                 ),
+            },
+            // Unknown style tokens read as unset (a newer binary may have
+            // written them); the colour is validated where it is drawn.
+            style: DeviceStyle {
+                color: item
+                    .get("color")
+                    .and_then(|v| v.as_s().ok())
+                    .map(|s| s.to_string()),
+                line_style: item
+                    .get("line_style")
+                    .and_then(|v| v.as_s().ok())
+                    .and_then(|s| LineStyle::parse(s)),
+                marker: item
+                    .get("marker")
+                    .and_then(|v| v.as_s().ok())
+                    .and_then(|s| Marker::parse(s)),
             },
         })
     }
@@ -274,6 +316,70 @@ impl DeviceStore for DynamoDeviceStore {
         }
     }
 
+    fn set_device_style(
+        &self,
+        device_id: &str,
+        style: DeviceStyle,
+    ) -> Result<DeviceRecord, AppError> {
+        // One expression: SET the parts that are present, REMOVE the rest.
+        let mut sets = Vec::new();
+        let mut removes = Vec::new();
+        let mut request = self
+            .client
+            .update_item()
+            .table_name(&self.devices_table)
+            .key("device_id", AttributeValue::S(device_id.to_string()))
+            .condition_expression("attribute_exists(device_id)")
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew);
+        for (i, (name, value)) in Self::style_attributes(&style).into_iter().enumerate() {
+            let placeholder = format!("#s{i}");
+            request = request.expression_attribute_names(&placeholder, name);
+            match value {
+                Some(v) => {
+                    let value_key = format!(":s{i}");
+                    sets.push(format!("{placeholder} = {value_key}"));
+                    request = request.expression_attribute_values(value_key, v);
+                }
+                None => removes.push(placeholder),
+            }
+        }
+        let mut expression = String::new();
+        if !sets.is_empty() {
+            expression.push_str("SET ");
+            expression.push_str(&sets.join(", "));
+        }
+        if !removes.is_empty() {
+            if !expression.is_empty() {
+                expression.push(' ');
+            }
+            expression.push_str("REMOVE ");
+            expression.push_str(&removes.join(", "));
+        }
+        let request = request.update_expression(expression);
+
+        match block_on(request.send()) {
+            Ok(out) => {
+                let item = out.attributes().ok_or_else(|| {
+                    AppError::Store(StoreError::io("set_device_style", "no attributes returned"))
+                })?;
+                Self::item_to_device(item)
+            }
+            Err(e) => {
+                let service_err = e.into_service_error();
+                if service_err.is_conditional_check_failed_exception() {
+                    Err(AppError::DeviceNotFound {
+                        device_id: device_id.to_string(),
+                    })
+                } else {
+                    Err(AppError::Store(StoreError::io(
+                        "set_device_style",
+                        service_err,
+                    )))
+                }
+            }
+        }
+    }
+
     fn latest_uplinks(&self) -> Result<Vec<UplinkRecord>, AppError> {
         let devices = self.list_devices()?;
         let mut out = Vec::with_capacity(devices.len());
@@ -403,6 +509,7 @@ mod tests {
             status: "active".into(),
             created_at: "2025-01-01T00:00:00Z".into(),
             power_threshold_ma: None,
+            style: Default::default(),
         }
     }
 

@@ -3,7 +3,7 @@ use crate::time::now_rfc3339;
 use crate::error::AppError;
 use crate::middleware::{dn_matches, sanitize_for_log};
 use crate::models::{
-    DeviceRecord, DeviceResponse, HelloResponse, RegisterDeviceRequest, UplinkMessage,
+    DeviceRecord, DeviceResponse, DeviceStyle, HelloResponse, RegisterDeviceRequest, UplinkMessage,
     UplinkRecord, UplinkResponse,
 };
 use crate::store::DeviceStore;
@@ -192,6 +192,18 @@ pub fn handle_register_device(
         validate::check_text(fields::SUBJECT_DN, dn, validate::MAX_SUBJECT_DN_LEN)?;
     }
 
+    // Chart style: whatever the request carries, validated; a device
+    // registered without a colour is given the first palette slot the
+    // fleet is not wearing, and keeps it.
+    let mut style = crate::style::validate(DeviceStyle {
+        color: req.color,
+        line_style: req.line_style,
+        marker: req.marker,
+    })?;
+    if style.color.is_none() {
+        style.color = Some(crate::style::auto_color(&store.list_devices()?).token());
+    }
+
     let record = DeviceRecord {
         device_id: req.device_id,
         owner_id: req.owner_id,
@@ -199,6 +211,7 @@ pub fn handle_register_device(
         status: status::ACTIVE.into(),
         created_at: now_rfc3339(),
         power_threshold_ma: req.power_threshold_ma,
+        style,
     };
 
     let saved = store.put_device(record)?;
@@ -237,6 +250,39 @@ pub fn handle_set_device_threshold(
             }
         };
     let saved = store.set_device_threshold(device_id, req.power_threshold_ma)?;
+    Ok(DeviceResponse::from(saved))
+}
+
+/// Replace a device's chart style from a JSON body (`{"color": "s3",
+/// "line_style": "dashed", "marker": "circle"}`); `{}`, `null` or an empty
+/// body resets every part to its default. Same body discipline as the
+/// threshold: only an object or null is a request.
+pub fn handle_set_device_style(
+    device_id: &str,
+    raw_body: Option<&str>,
+    store: &dyn DeviceStore,
+) -> Result<DeviceResponse, AppError> {
+    validate::check_device_id(fields::DEVICE_ID, device_id)?;
+    let invalid = |detail: String| AppError::InvalidPayload {
+        detail,
+        structured: None,
+    };
+    let style: DeviceStyle = match raw_body.map(str::trim).filter(|b| !b.is_empty()) {
+        None => Default::default(),
+        Some(body) => {
+            let value: serde_json::Value =
+                serde_json::from_str(body).map_err(|e| invalid(e.to_string()))?;
+            match value {
+                serde_json::Value::Null => Default::default(),
+                serde_json::Value::Object(_) => {
+                    serde_json::from_value(value).map_err(|e| invalid(e.to_string()))?
+                }
+                _ => return Err(invalid("body must be a JSON object".into())),
+            }
+        }
+    };
+    let style = crate::style::validate(style)?;
+    let saved = store.set_device_style(device_id, style)?;
     Ok(DeviceResponse::from(saved))
 }
 

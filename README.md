@@ -56,12 +56,13 @@ Three crates: `supervictor/common` (wire contract, `no_std`), `supervictor/edge`
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
 | `POST` | `/` | Device uplink; identity bound to the client certificate |
-| `GET`/`POST` | `/devices` | List / register (`device_id`, `owner_id`, `subject_dn`, optional `power_threshold_ma`) |
+| `GET`/`POST` | `/devices` | List / register (`device_id`, `owner_id`, `subject_dn`, optional `power_threshold_ma`, `color`, `line_style`, `marker`) |
 | `GET` | `/devices/{id}`, `/devices/{id}/uplinks` | Device record, recent uplinks |
 | `PUT` | `/devices/{id}/threshold` | Set or clear the device's power threshold (admin) |
+| `PUT` | `/devices/{id}/style` | Replace how the dashboard draws the device: `color` (`s0`–`s7` or `#rrggbb`), `line_style`, `marker` (admin) |
 | `GET` | `/fleet`, `/fleet/summary` | Per-device health; aggregate counts for alerting (admin) |
 | `GET` | `/fleet/history?window=` | Bucketed telemetry plus status and power timelines, `1m`…`7d` (admin) |
-| `GET` | `/ui`, `/ui/history`, `/ui/devices/{id}` | Dashboard; `/ui/events` is the SSE stream (admin) |
+| `GET` | `/ui`, `/ui/history?device=…`, `/ui/devices/{id}` | Dashboard — history plots the devices you pick, each in its own colour / line / marker; `/ui/events` is the SSE stream (admin) |
 
 Handlers are pure functions with no framework types; `routes.rs` is the only axum-specific file.
 

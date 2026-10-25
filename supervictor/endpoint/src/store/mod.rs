@@ -141,6 +141,13 @@ pub trait DeviceStore: Send + Sync {
         device_id: &str,
         threshold_ma: Option<i64>,
     ) -> Result<DeviceRecord, AppError>;
+    /// Replace a device's chart style (every part; unset parts clear);
+    /// returns the updated record, `DeviceNotFound` for an unknown id.
+    fn set_device_style(
+        &self,
+        device_id: &str,
+        style: crate::models::DeviceStyle,
+    ) -> Result<DeviceRecord, AppError>;
     /// Most recent uplink per device (devices that never uplinked are
     /// absent). One query on SQLite; per-device on DynamoDB (see impl notes).
     fn latest_uplinks(&self) -> Result<Vec<UplinkRecord>, AppError>;

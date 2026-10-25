@@ -33,6 +33,7 @@ fn seed_device(store: &dyn DeviceStore, id: &str, status: &str) {
             status: status.into(),
             created_at: "2026-07-01T00:00:00+00:00".into(),
             power_threshold_ma: None,
+            style: Default::default(),
         })
         .unwrap();
 }
@@ -598,6 +599,8 @@ async fn history_page_renders_tiles_status_chart_and_a_chart_per_metric() {
         })
         .unwrap();
 
+    // Nothing selected: the fleet aggregates, the device chips, and a hint
+    // where the traces would be. No device is plotted until picked.
     let (name, value) = dn(ADMIN_DN);
     let resp = server.get("/ui/history").add_header(name, value).await;
     assert_eq!(resp.status_code(), 200);
@@ -613,8 +616,36 @@ async fn history_page_renders_tiles_status_chart_and_a_chart_per_metric() {
     // Headline tiles reflect the fleet right now.
     assert!(html.contains("active devices"));
     assert!(html.contains("3 registered, 1 inactive"));
-    // Current first (with the threshold line), then power, then status,
-    // then the other metrics; every chart has a table twin.
+    assert!(html.contains("<nav class=\"devices\""), "device chips");
+    for id in ["factory-01", "factory-02", "retired"] {
+        assert!(
+            html.contains(&format!("data-device=\"{id}\"")),
+            "chip for every registered device: {id}"
+        );
+    }
+    assert!(html.contains("no devices plotted"), "{html}");
+    assert_eq!(
+        html.matches("<figure class=\"chart status-chart\"").count(),
+        2,
+        "power and status stacks are fleet-wide"
+    );
+    assert_eq!(
+        html.matches("<figure class=\"chart\"").count(),
+        0,
+        "no line charts without a selection"
+    );
+    assert!(html.contains("data-refresh=\"60\""));
+
+    // Both reporting devices selected: current first (with the threshold
+    // line), then power, then status, then the other metrics; every chart
+    // has a table twin.
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server
+        .get("/ui/history?device=factory-01&device=factory-02")
+        .add_header(name, value)
+        .await;
+    assert_eq!(resp.status_code(), 200);
+    let html = resp.text();
     let pos = |needle: &str| {
         html.find(needle)
             .unwrap_or_else(|| panic!("missing {needle}"))
@@ -639,14 +670,300 @@ async fn history_page_renders_tiles_status_chart_and_a_chart_per_metric() {
         );
     }
     assert_eq!(html.matches("class=\"table-view\"").count(), 7);
-    // Both active devices appear as series (legend + end labels); the
-    // retired one is in the series list too (every registered device).
-    assert!(html.contains("factory-01"));
-    assert!(html.contains("factory-02"));
+    // Both selected devices appear as series (legend + end labels) and
+    // their chips are marked; the retired one is a chip only.
+    assert!(html.contains("class=\"legend\""));
+    assert!(html.contains("class=\"end-label\""));
+    assert_eq!(html.matches("class=\"chip on\"").count(), 2, "{html}");
+    assert!(html.contains("aria-pressed=\"true\" data-device=\"factory-01\""));
+    assert!(html.contains("aria-pressed=\"false\" data-device=\"retired\""));
     // The live value made it into the bucket table of the current chart.
     assert!(html.contains("1240"), "current value should be tabulated");
-    assert!(html.contains("data-refresh=\"60\""));
     assert!(!html.contains("NaN"), "no NaN may leak into the markup");
+}
+
+/// Chips are toggle links: each one's href is the current selection with
+/// that device added or removed, so the page works without script and a
+/// URL reproduces a view. Unknown or hostile ids in the query are ignored.
+#[tokio::test]
+async fn device_chips_toggle_the_selection_in_the_url() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "a-dev", "active");
+    seed_device(store.as_ref(), "b,dev", "active");
+    let get = |path: String| {
+        let (name, value) = dn(ADMIN_DN);
+        server.get(&path).add_header(name, value)
+    };
+
+    let html = get("/ui/history?window=5m".into()).await.text();
+    assert!(
+        html.contains("href=\"/ui/history?window=5m&amp;device=a-dev\""),
+        "unselected chip adds itself: {html}"
+    );
+    assert!(
+        html.contains("href=\"/ui/history?window=5m&amp;device=b%2Cdev\""),
+        "ids are percent-encoded: {html}"
+    );
+    assert!(html.contains("data-live=\"1\""), "live window stays live");
+
+    let html = get("/ui/history?window=5m&device=a-dev".into())
+        .await
+        .text();
+    assert!(
+        html.contains("href=\"/ui/history?window=5m&amp;device=\""),
+        "deselecting the only device leaves an explicit empty selection: {html}"
+    );
+    assert!(
+        html.contains("href=\"/ui/history?window=5m&amp;device=a-dev&amp;device=b%2Cdev\""),
+        "the other chip adds itself to the current selection: {html}"
+    );
+    assert_eq!(html.matches("class=\"chip on\"").count(), 1);
+    assert_eq!(html.matches("<figure class=\"chart\"").count(), 5);
+    assert_eq!(
+        html.matches("class=\"legend\"").count(),
+        2,
+        "one series: only the two stacks carry legends"
+    );
+
+    // Comma inside an id survives the round trip (repeated keys, not CSV).
+    let html = get("/ui/history?device=b%2Cdev&device=a-dev".into())
+        .await
+        .text();
+    assert_eq!(html.matches("class=\"chip on\"").count(), 2, "{html}");
+    assert_eq!(
+        html.matches("class=\"legend\"").count(),
+        7,
+        "two series: every line chart gets a legend too"
+    );
+
+    // Unknown and hostile ids: ignored, never reflected raw.
+    let hostile = "<script>alert(1)</script>";
+    let html = get(format!(
+        "/ui/history?device={}&device=ghost&device=&device=a-dev",
+        urlencoding(hostile)
+    ))
+    .await
+    .text();
+    assert!(!html.contains(hostile));
+    assert_eq!(html.matches("class=\"chip on\"").count(), 1);
+    assert!(html.contains("aria-pressed=\"true\" data-device=\"a-dev\""));
+}
+
+/// A stored style shows up wherever the device is drawn: the fleet table
+/// key, the history traces and the device page; a custom colour rides on
+/// `--c`, a palette slot on its class.
+#[tokio::test]
+async fn device_style_is_drawn_on_every_page() {
+    use supervictor_common::models::{LineStyle, Marker};
+    use supervictor_endpoint::models::DeviceStyle;
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "styled", "active");
+    seed_device(store.as_ref(), "plain", "active");
+    seed_device(store.as_ref(), "hexy", "active");
+    store
+        .set_device_style(
+            "styled",
+            DeviceStyle {
+                color: Some("s3".into()),
+                line_style: Some(LineStyle::Dashed),
+                marker: Some(Marker::Circle),
+            },
+        )
+        .unwrap();
+    store
+        .set_device_style(
+            "hexy",
+            DeviceStyle {
+                color: Some("#ff8800".into()),
+                line_style: None,
+                marker: Some(Marker::Diamond),
+            },
+        )
+        .unwrap();
+    let now = supervictor_endpoint::time::now_rfc3339();
+    for id in ["styled", "plain", "hexy"] {
+        seed_uplink(store.as_ref(), id, &now, 500);
+    }
+
+    let (name, value) = dn(ADMIN_DN);
+    let fleet = server.get("/ui").add_header(name, value).await.text();
+    assert_eq!(
+        fleet.matches("class=\"key-svg\"").count(),
+        3,
+        "a key per row"
+    );
+    assert!(fleet.contains("class=\"line s3 dashed\""), "{fleet}");
+    assert!(
+        fleet.contains("class=\"line custom solid\" style=\"--c:#ff8800\""),
+        "{fleet}"
+    );
+
+    let (name, value) = dn(ADMIN_DN);
+    let history = server
+        .get("/ui/history?device=styled&device=plain&device=hexy")
+        .add_header(name, value)
+        .await
+        .text();
+    assert!(
+        history.contains("<path class=\"line s3 dashed\""),
+        "{history}"
+    );
+    assert!(
+        history.contains("<circle class=\"mark s3\""),
+        "circle markers at the points"
+    );
+    assert!(
+        history.contains("<path class=\"mark custom\" style=\"--c:#ff8800\""),
+        "diamond markers in the custom colour"
+    );
+    assert!(history.contains("<path class=\"line custom solid\" style=\"--c:#ff8800\""));
+    assert!(
+        history.contains("style=\"--c:var(--s3)\""),
+        "chip wears the slot colour"
+    );
+    assert!(
+        history.contains("style=\"--c:#ff8800\" role=\"button\""),
+        "chip wears the hex"
+    );
+    // Legacy device (no stored colour) takes a palette slot positionally.
+    assert!(
+        history.contains("<path class=\"line s0 solid\""),
+        "{history}"
+    );
+    // The hover data carries the style for the tooltip key.
+    assert!(history.contains("&quot;dash&quot;:&quot;8 5&quot;"));
+    assert!(history.contains("&quot;marker&quot;:&quot;diamond&quot;"));
+    assert!(history.contains("&quot;color&quot;:&quot;#ff8800&quot;"));
+
+    let (name, value) = dn(ADMIN_DN);
+    let page = server
+        .get("/ui/devices/styled")
+        .add_header(name, value)
+        .await
+        .text();
+    assert!(page.contains("<path class=\"line s3 dashed\""), "{page}");
+    assert!(page.contains("chart style"), "the style form");
+    assert!(
+        page.contains("value=\"s3\" checked"),
+        "stored colour preselected: {page}"
+    );
+    assert!(page.contains("value=\"dashed\" selected"));
+    assert!(page.contains("value=\"circle\" selected"));
+}
+
+/// The style form writes through the same validation as the API: palette
+/// slot or custom hex, a known line style and marker; defaults clear.
+#[tokio::test]
+async fn style_form_sets_clears_and_validates() {
+    use supervictor_common::models::{LineStyle, Marker};
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+    let post = |fields: &'static [(&'static str, &'static str)]| {
+        let mut req = server.post("/ui/devices/factory-01/style");
+        for (name, value) in admin_with_cookie("tok") {
+            req = req.add_header(name, value);
+        }
+        req.form(fields)
+    };
+
+    let resp = post(&[
+        ("csrf", "tok"),
+        ("color", "s2"),
+        ("line_style", "dotted"),
+        ("marker", "square"),
+    ])
+    .await;
+    assert_eq!(resp.status_code(), 303, "{}", resp.text());
+    assert_eq!(
+        resp.headers().get("location").unwrap(),
+        "/ui/devices/factory-01"
+    );
+    let style = store.get_device("factory-01").unwrap().unwrap().style;
+    assert_eq!(style.color.as_deref(), Some("s2"));
+    assert_eq!(style.line_style, Some(LineStyle::Dotted));
+    assert_eq!(style.marker, Some(Marker::Square));
+
+    // Custom colour: the hex box counts only when "custom" is picked, and
+    // is normalised.
+    let resp = post(&[
+        ("csrf", "tok"),
+        ("color", "custom"),
+        ("custom_color", "#ABCDEF"),
+        ("line_style", "solid"),
+        ("marker", "none"),
+    ])
+    .await;
+    assert_eq!(resp.status_code(), 303, "{}", resp.text());
+    let style = store.get_device("factory-01").unwrap().unwrap().style;
+    assert_eq!(style.color.as_deref(), Some("#abcdef"));
+    assert_eq!(
+        style.line_style, None,
+        "solid is the default, stored as unset"
+    );
+    assert_eq!(style.marker, None);
+    let (name, value) = dn(ADMIN_DN);
+    let page = server
+        .get("/ui/devices/factory-01")
+        .add_header(name, value)
+        .await
+        .text();
+    assert!(page.contains("value=\"custom\" checked"), "{page}");
+    assert!(
+        page.contains("name=\"custom_color\" value=\"#abcdef\""),
+        "{page}"
+    );
+
+    // "auto" clears the stored colour.
+    let resp = post(&[("csrf", "tok"), ("color", ""), ("line_style", "dashdot")]).await;
+    assert_eq!(resp.status_code(), 303);
+    let style = store.get_device("factory-01").unwrap().unwrap().style;
+    assert_eq!(style.color, None);
+    assert_eq!(style.line_style, Some(LineStyle::DashDot));
+
+    // Rejections leave the stored style alone.
+    for bad in [
+        &[
+            ("csrf", "tok"),
+            ("color", "custom"),
+            ("custom_color", "red"),
+        ][..],
+        &[("csrf", "tok"), ("color", "s9")][..],
+        &[("csrf", "tok"), ("line_style", "wavy")][..],
+        &[("csrf", "tok"), ("marker", "star")][..],
+    ] {
+        let resp = post(bad).await;
+        assert_eq!(resp.status_code(), 422, "{bad:?}: {}", resp.text());
+    }
+    assert_eq!(
+        store
+            .get_device("factory-01")
+            .unwrap()
+            .unwrap()
+            .style
+            .line_style,
+        Some(LineStyle::DashDot)
+    );
+    // CSRF and admin gates.
+    let resp = post(&[("csrf", "wrong"), ("color", "s1")]).await;
+    assert_eq!(resp.status_code(), 403);
+    let (name, value) = dn(DEVICE_DN);
+    let resp = server
+        .post("/ui/devices/factory-01/style")
+        .add_header(name, value)
+        .form(&[("csrf", "tok"), ("color", "s1")])
+        .await;
+    assert_eq!(resp.status_code(), 403);
+    assert_eq!(
+        store.get_device("factory-01").unwrap().unwrap().style.color,
+        None
+    );
+    // Unknown device.
+    let mut req = server.post("/ui/devices/ghost/style");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req.form(&[("csrf", "tok"), ("color", "s1")]).await;
+    assert_eq!(resp.status_code(), 404);
 }
 
 #[tokio::test]
@@ -804,6 +1121,20 @@ async fn every_page_has_the_theme_toggle_and_light_tokens_exist() {
     assert!(css.contains("@media (prefers-color-scheme: light)"));
     assert!(css.contains(":root:not([data-theme=\"dark\"])"));
     assert!(css.contains("@media (max-width: 640px)"));
+    // Live re-renders no longer wash the whole page green; chips, dash
+    // patterns and custom colours have their rules.
+    assert!(!css.contains("main.tick"), "no page-wide flash");
+    assert!(
+        css.contains("tr.tick td"),
+        "row flash on the fleet table stays"
+    );
+    assert!(css.contains(".devices a.chip.on"));
+    assert!(
+        css.contains(".line.dashed")
+            && css.contains(".line.dotted")
+            && css.contains(".line.dashdot")
+    );
+    assert!(css.contains(".custom { stroke: var(--c)"));
 }
 
 // ── Live view ─────────────────────────────────────────────────────────

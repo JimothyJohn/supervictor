@@ -23,6 +23,8 @@ pub mod models;
 pub mod routes;
 /// Pluggable storage backends (SQLite, DynamoDB).
 pub mod store;
+/// Per-device chart style: colour, stroke pattern, point marker.
+pub mod style;
 /// Minimal UTC RFC 3339 timestamp formatting (chrono replacement).
 pub mod time;
 /// In-binary mTLS termination: TLS listener + verified peer identity (feature `tls`).

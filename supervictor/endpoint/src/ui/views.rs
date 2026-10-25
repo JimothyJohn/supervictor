@@ -3,6 +3,8 @@
 //! script constants below, which contain no user data (page data reaches
 //! them through escaped `data-*` attributes).
 
+use std::collections::HashMap;
+
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 use crate::fleet::FleetSummary;
@@ -10,6 +12,7 @@ pub use crate::fleet::{PowerState, Staleness};
 use crate::history::{DeviceSeries, History, Window, METRICS};
 use crate::live;
 use crate::models::{DeviceRecord, UplinkRecord};
+use crate::style::{Color, LineStyle, Marker, Resolved, SLOTS};
 use crate::ui::charts::{self, slot_class, Reference, Series};
 use supervictor_common::status;
 
@@ -28,6 +31,8 @@ pub struct FleetRow {
     /// Current (mA) this device is judged against (own override or fleet
     /// default); carried on the row so the live script can flip the badge.
     pub threshold_ma: i64,
+    /// How the charts draw this device (the key beside its name).
+    pub style: Resolved,
 }
 
 /// How a page keeps itself current.
@@ -70,6 +75,40 @@ pub const LIVE_SCRIPT: &str = r#"
   function setDot(text, cls) { if (dot) { dot.textContent = text; dot.className = cls; } }
   function emit(name, detail) { document.dispatchEvent(new CustomEvent(name, { detail: detail })); }
   function flash(el) { el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick'); }
+  // Device chips (history page): the selection lives in the URL
+  // (`device=` keys, so a link reproduces the view) and is remembered per
+  // viewer. A click toggles the chip, rewrites the URL in place and
+  // re-renders <main>; without script the chip is a plain link.
+  var chips = document.querySelector('nav.devices');
+  var SEL = 'sv-devices';
+  function selected() {
+    var out = [];
+    new URLSearchParams(location.search).getAll('device').forEach(function (id) { if (id) out.push(id); });
+    return out;
+  }
+  function remember(ids) { try { localStorage.setItem(SEL, JSON.stringify(ids)); } catch (_) {} }
+  if (chips) {
+    // First visit without a selection in the URL: restore the remembered one.
+    if (!new URLSearchParams(location.search).has('device')) {
+      var stored = null;
+      try { stored = JSON.parse(localStorage.getItem(SEL) || 'null'); } catch (_) { stored = null; }
+      if (Array.isArray(stored) && stored.length) {
+        var params = new URLSearchParams(location.search);
+        stored.forEach(function (id) { if (typeof id === 'string' && id) params.append('device', id); });
+        location.replace(location.pathname + '?' + params.toString());
+      }
+    }
+    chips.addEventListener('click', function (e) {
+      var chip = e.target.closest('a.chip');
+      if (!chip || !chips.contains(chip)) return;
+      e.preventDefault();
+      history.replaceState(null, '', chip.getAttribute('href'));
+      chip.classList.toggle('on');
+      chip.setAttribute('aria-pressed', chip.classList.contains('on') ? 'true' : 'false');
+      remember(selected());
+      schedule();
+    });
+  }
   // Fleet table: patch the device's row in place — last uplink, freshness,
   // current, and the power badge judged against the row's own threshold.
   function patchRow(ev) {
@@ -105,9 +144,12 @@ pub const LIVE_SCRIPT: &str = r#"
         if (!next || !cur) return;
         var active = document.activeElement;
         if (active && active.closest && active.closest('form') && cur.contains(active)) return;
+        // Carry open table twins across the swap; no wash over the page —
+        // the data moving is the signal.
+        var open = [].map.call(cur.querySelectorAll('details'), function (d) { return d.open; });
         cur.innerHTML = next.innerHTML;
+        [].forEach.call(cur.querySelectorAll('details'), function (d, i) { if (open[i]) d.open = true; });
         if (window.svBindCharts) window.svBindCharts(cur);
-        flash(cur);
       })
       .catch(function () {})
       .finally(function () { inflight = false; if (dirty) { dirty = false; schedule(); } });
@@ -299,6 +341,25 @@ pub const CHART_SCRIPT: &str = r#"
     return v.toFixed(2);
   }
   function when(t) { return new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' UTC'; }
+  // Line-series key for the tooltip: the same line sample + marker as the
+  // legend, built from the series' style fields (colour is a CSS value).
+  var NS = 'http://www.w3.org/2000/svg';
+  function keySvg(s) {
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'key-svg'); svg.setAttribute('viewBox', '0 0 28 10'); svg.setAttribute('aria-hidden', 'true');
+    var line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', '1'); line.setAttribute('y1', '5'); line.setAttribute('x2', '27'); line.setAttribute('y2', '5');
+    line.setAttribute('class', 'line'); line.style.stroke = s.color;
+    if (s.dash) line.setAttribute('stroke-dasharray', s.dash);
+    svg.appendChild(line);
+    var m = s.marker, g = null;
+    if (m === 'circle') { g = document.createElementNS(NS, 'circle'); g.setAttribute('cx', '14'); g.setAttribute('cy', '5'); g.setAttribute('r', '3'); }
+    else if (m === 'square') { g = document.createElementNS(NS, 'rect'); g.setAttribute('x', '11'); g.setAttribute('y', '2'); g.setAttribute('width', '6'); g.setAttribute('height', '6'); }
+    else if (m === 'diamond') { g = document.createElementNS(NS, 'path'); g.setAttribute('d', 'M14,2 L17,5 L14,8 L11,5 Z'); }
+    else if (m === 'triangle') { g = document.createElementNS(NS, 'path'); g.setAttribute('d', 'M14,2 L17,8 L11,8 Z'); }
+    if (g) { g.setAttribute('class', 'mark'); g.style.fill = s.color; g.style.stroke = s.color; svg.appendChild(g); }
+    return svg;
+  }
   // Bind once per figure; re-run on a live re-render (`window.svBindCharts`).
   function bind(root) {
   root.querySelectorAll('figure.chart[data-chart]').forEach(function (fig) {
@@ -323,7 +384,8 @@ pub const CHART_SCRIPT: &str = r#"
       var head = document.createElement('div'); head.className = 'tip-time'; head.textContent = when(data.t[i]); tip.appendChild(head);
       data.series.forEach(function (s) {
         var row = document.createElement('div'); row.className = 'tip-row';
-        var key = document.createElement('span'); key.className = 'key ' + (stack ? '' : 'line-key ') + s.slot;
+        var key = stack ? document.createElement('span') : keySvg(s);
+        if (stack) key.className = 'key ' + s.slot;
         var val = document.createElement('strong'); var v = s.values[i];
         val.textContent = fmt(v) + (v === null || v === undefined ? '' : ' ' + data.unit);
         var lab = document.createElement('span'); lab.className = 'tip-label'; lab.textContent = s.label;
@@ -450,15 +512,99 @@ fn window_filters(base: &str, current: Window) -> Markup {
     }
 }
 
-/// `GET /ui/history` — status timeline, headline counts, one chart per metric.
+/// What the history page plots beyond the fleet aggregates: every device's
+/// drawing style, and which devices the viewer has picked.
+pub struct Selection<'a> {
+    /// Resolved style per device id (`crate::style::resolve`).
+    pub styles: &'a HashMap<String, Resolved>,
+    /// Device ids to plot, in fleet order; empty plots nothing. The fleet
+    /// aggregates (power / status stacks) always cover every device.
+    pub selected: &'a [String],
+}
+
+/// Percent-encode a query value (RFC 3986 unreserved bytes pass through).
+pub fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// `/ui/history?window=…&device=…&device=…` for a selection; an empty
+/// selection carries one empty `device=` so the URL says "none" rather
+/// than "unspecified" (which would restore the viewer's remembered set).
+pub fn history_href<'a>(window: Window, devices: impl Iterator<Item = &'a str>) -> String {
+    let mut href = format!("/ui/history?window={}", window.label());
+    let mut any = false;
+    for id in devices {
+        any = true;
+        href.push_str("&device=");
+        href.push_str(&percent_encode(id));
+    }
+    if !any {
+        href.push_str("&device=");
+    }
+    href
+}
+
+/// One chip per registered device: its key, its name, and a link that
+/// toggles it in or out of the selection. Selected chips are highlighted in
+/// the device's own colour (`--c`).
+fn device_chips(history: &History, window: Window, selection: &Selection<'_>) -> Markup {
+    html! {
+        nav .devices aria-label="devices to plot" {
+            span .filters-label { "devices" }
+            @for d in &history.devices {
+                @let on = selection.selected.contains(&d.device_id);
+                @let style = selection.styles.get(&d.device_id).cloned().unwrap_or_else(|| Resolved::slot(SLOTS as usize));
+                @let toggled: Vec<&str> = if on {
+                    selection.selected.iter().map(String::as_str).filter(|id| *id != d.device_id).collect()
+                } else {
+                    selection.selected.iter().map(String::as_str).chain(std::iter::once(d.device_id.as_str())).collect()
+                };
+                a .chip.on[on] href=(history_href(window, toggled.into_iter())) style={ "--c:" (style.color.css()) }
+                    role="button" aria-pressed=(if on { "true" } else { "false" }) data-device=(d.device_id) {
+                    (charts::key(&style)) (d.device_id)
+                }
+            }
+            @if history.devices.is_empty() {
+                span .muted { "no registered devices" }
+            }
+        }
+    }
+}
+
+/// `GET /ui/history` — status timeline, headline counts, and one chart per
+/// metric for the selected devices.
 pub fn history_page(
     history: &History,
     summary: &FleetSummary,
     window: Window,
     subject: &str,
+    selection: &Selection<'_>,
 ) -> Markup {
     let times: Vec<u64> = history.timeline.iter().map(|p| p.t).collect();
     let uplinks: usize = history.devices.iter().map(|d| d.uplinks).sum();
+    // The plotted devices, in fleet order, each with its column index.
+    let plotted: Vec<(usize, &DeviceSeries)> = history
+        .devices
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| selection.selected.contains(&d.device_id))
+        .collect();
+    let style_of = |d: &DeviceSeries| {
+        selection
+            .styles
+            .get(&d.device_id)
+            .cloned()
+            .unwrap_or_else(|| Resolved::slot(SLOTS as usize))
+    };
     // One column per device per metric, built once.
     let columns: Vec<Vec<Vec<Option<f64>>>> = history
         .devices
@@ -475,6 +621,7 @@ pub fn history_page(
         PageMode::for_window(window),
         html! {
             (window_filters("/ui/history", window))
+            (device_chips(history, window, selection))
             @if history.truncated {
                 p .banner { "row cap reached: the most recent part of this window is not shown — pick a shorter window" }
             }
@@ -490,24 +637,30 @@ pub fn history_page(
             }
             section .charts {
                 @let threshold_label = format!("on ≥ {} mA", history.threshold_ma);
-                @for (m, metric) in METRICS.iter().enumerate().take(1) {
-                    @let series: Vec<Series<'_>> = history.devices.iter().enumerate().map(|(slot, d)| Series {
-                        label: &d.device_id,
-                        slot,
-                        values: &columns[slot][m],
-                    }).collect();
-                    div .wide { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window,
-                        Some(Reference { value: history.threshold_ma as f64, label: &threshold_label }))) }
+                @if plotted.is_empty() {
+                    p .hint .wide { "no devices plotted — click a device above to add its trace" }
+                } @else {
+                    @for (m, metric) in METRICS.iter().enumerate().take(1) {
+                        @let series: Vec<Series<'_>> = plotted.iter().map(|(col, d)| Series {
+                            label: &d.device_id,
+                            style: style_of(d),
+                            values: &columns[*col][m],
+                        }).collect();
+                        div .wide { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window,
+                            Some(Reference { value: history.threshold_ma as f64, label: &threshold_label }))) }
+                    }
                 }
                 div .wide { (charts::power_chart("power", &history.power, history.threshold_ma, window)) }
                 div .wide { (charts::status_chart("status", &history.timeline, window)) }
-                @for (m, metric) in METRICS.iter().enumerate().skip(1) {
-                    @let series: Vec<Series<'_>> = history.devices.iter().enumerate().map(|(slot, d)| Series {
-                        label: &d.device_id,
-                        slot,
-                        values: &columns[slot][m],
-                    }).collect();
-                    div { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window, None)) }
+                @if !plotted.is_empty() {
+                    @for (m, metric) in METRICS.iter().enumerate().skip(1) {
+                        @let series: Vec<Series<'_>> = plotted.iter().map(|(col, d)| Series {
+                            label: &d.device_id,
+                            style: style_of(d),
+                            values: &columns[*col][m],
+                        }).collect();
+                        div { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window, None)) }
+                    }
                 }
             }
         },
@@ -613,8 +766,8 @@ pub struct DeviceHistory<'a> {
     pub window: Window,
     /// Row cap hit.
     pub truncated: bool,
-    /// Categorical colour slot (fleet order).
-    pub slot: usize,
+    /// How the device is drawn (colour, dash, marker), resolved.
+    pub style: Resolved,
     /// Power state right now.
     pub power: PowerState,
     /// Last reported current in mA, if any.
@@ -649,7 +802,7 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
                 tbody {
                     @for row in rows {
                         tr data-device=(row.device.device_id) data-threshold=(row.threshold_ma) {
-                            td { a href={ "/ui/devices/" (row.device.device_id) } { (row.device.device_id) } }
+                            td { (charts::key(&row.style)) a href={ "/ui/devices/" (row.device.device_id) } { (row.device.device_id) } }
                             td { span .badge.(row.device.status) { (row.device.status) } }
                             td {
                                 span .badge.power.(row.power.label()) { (row.power.label()) }
@@ -714,6 +867,8 @@ pub fn device_page(
                 }
                 dt { "power threshold" }
                 dd { (threshold_form(device, history, csrf)) }
+                dt { "chart style" }
+                dd { (style_form(device, &history.style, csrf)) }
                 dt { "owner" }
                 dd { (device.owner_id) }
                 dt { "cert subject" }
@@ -733,7 +888,7 @@ pub fn device_page(
             section .charts {
                 @let threshold_label = format!("on ≥ {} mA", history.threshold_ma);
                 @for (m, metric) in METRICS.iter().enumerate() {
-                    @let series = [Series { label: &device.device_id, slot: history.slot, values: &columns[m] }];
+                    @let series = [Series { label: &device.device_id, style: history.style.clone(), values: &columns[m] }];
                     @let reference = (m == 0).then(|| Reference { value: history.threshold_ma as f64, label: &threshold_label });
                     div .wide[m == 0] { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, history.window, reference)) }
                 }
@@ -784,6 +939,54 @@ fn threshold_form(device: &DeviceRecord, history: &DeviceHistory<'_>, csrf: &str
     }
 }
 
+/// Pick how the device is drawn: one of the eight palette slots or a custom
+/// colour, a line pattern, a point marker. The current resolved style is
+/// preselected; "fleet order" clears the stored colour.
+fn style_form(device: &DeviceRecord, style: &Resolved, csrf: &str) -> Markup {
+    let stored = device.style.color.as_deref().and_then(Color::parse);
+    let custom = style.color.custom_hex();
+    html! {
+        form .inline.style-form method="post" action={ "/ui/devices/" (device.device_id) "/style" } {
+            input type="hidden" name="csrf" value=(csrf);
+            span .swatches role="radiogroup" aria-label="colour" {
+                @for n in 0..SLOTS {
+                    @let slot = Color::Slot(n);
+                    @let checked = stored == Some(slot.clone());
+                    label .swatch style={ "--c:" (slot.css()) } title={ "palette " (slot.token()) } {
+                        input type="radio" name="color" value=(slot.token()) checked[checked];
+                        span {}
+                    }
+                }
+                label .swatch.swatch-custom title="custom colour" {
+                    input type="radio" name="color" value="custom" checked[custom.is_some()];
+                    input type="color" name="custom_color" value=(custom.unwrap_or("#888888")) aria-label="custom colour";
+                }
+                label .swatch.swatch-auto title="no stored colour: palette slot by registration order" {
+                    input type="radio" name="color" value="" checked[stored.is_none() && custom.is_none()];
+                    span { "auto" }
+                }
+            }
+            " "
+            select name="line_style" aria-label="line style" {
+                @for line in LineStyle::ALL {
+                    option value=(line.label()) selected[line == style.line] { (line.label()) }
+                }
+            }
+            " "
+            select name="marker" aria-label="point marker" {
+                @for marker in Marker::ALL {
+                    option value=(marker.label()) selected[marker == style.marker] {
+                        @if marker == Marker::None { "no marker" } @else { (marker.label()) }
+                    }
+                }
+            }
+            " "
+            button type="submit" { "set" }
+            " " (charts::key(style))
+        }
+    }
+}
+
 fn status_form(device: &DeviceRecord, csrf: &str) -> Markup {
     let (next, verb) = if device.status == status::ACTIVE {
         (status::INACTIVE, "revoke")
@@ -796,5 +999,25 @@ fn status_form(device: &DeviceRecord, csrf: &str) -> Markup {
             input type="hidden" name="status" value=(next);
             button type="submit" { (verb) }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selection_hrefs_repeat_the_device_key_and_encode_ids() {
+        assert_eq!(
+            history_href(Window::M5, ["a", "b,c", "d e/ü"].into_iter()),
+            "/ui/history?window=5m&device=a&device=b%2Cc&device=d%20e%2F%C3%BC"
+        );
+        assert_eq!(
+            history_href(Window::H1, std::iter::empty()),
+            "/ui/history?window=1h&device=",
+            "an empty selection is explicit"
+        );
+        assert_eq!(percent_encode("A-z_0.9~"), "A-z_0.9~");
+        assert_eq!(percent_encode("<&>\"'"), "%3C%26%3E%22%27");
     }
 }

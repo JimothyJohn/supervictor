@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Re-exported wire types shared between endpoint and CLI.
-pub use supervictor_common::models::{DeviceResponse, RegisterDeviceRequest, UplinkMessage};
+pub use supervictor_common::models::{
+    DeviceResponse, DeviceStyle, RegisterDeviceRequest, UplinkMessage,
+};
 
 // --- Domain Records (storage layer) ---
 
@@ -23,6 +25,10 @@ pub struct DeviceRecord {
     /// `None` means use `POWER_THRESHOLD_MA`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_threshold_ma: Option<i64>,
+    /// How the device is drawn on the charts; unset parts fall back to
+    /// defaults (`crate::style::resolve`).
+    #[serde(default, skip_serializing_if = "DeviceStyle::is_default")]
+    pub style: DeviceStyle,
 }
 
 impl DeviceRecord {
@@ -89,6 +95,9 @@ impl From<DeviceRecord> for DeviceResponse {
             status: r.status,
             created_at: r.created_at,
             power_threshold_ma: r.power_threshold_ma,
+            color: r.style.color,
+            line_style: r.style.line_style,
+            marker: r.style.marker,
         }
     }
 }
