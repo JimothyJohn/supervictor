@@ -37,6 +37,9 @@ pub struct Config {
     pub sqlite_db_path: String,
     /// Staleness watchdog tick interval in seconds; 0 disables it.
     pub watchdog_interval_secs: u64,
+    /// Current (mA) at or above which a device counts as powered on
+    /// (`POWER_THRESHOLD_MA`, default 100).
+    pub power_threshold_ma: i64,
     /// Days before an uplink row expires (DynamoDB TTL); 0 keeps rows forever.
     pub uplink_ttl_days: u32,
     /// Reject uplinks from devices that are not registered, `active`, and
@@ -114,6 +117,13 @@ impl Config {
                 let raw = env::var("WATCHDOG_INTERVAL_SECS").unwrap_or_else(|_| "300".into());
                 raw.parse().map_err(|e| {
                     AppError::Config(format!("invalid WATCHDOG_INTERVAL_SECS '{raw}': {e}"))
+                })?
+            },
+            power_threshold_ma: {
+                let raw = env::var("POWER_THRESHOLD_MA")
+                    .unwrap_or_else(|_| crate::fleet::DEFAULT_POWER_THRESHOLD_MA.to_string());
+                raw.trim().parse().map_err(|e| {
+                    AppError::Config(format!("invalid POWER_THRESHOLD_MA '{raw}': {e}"))
                 })?
             },
             uplink_ttl_days: {

@@ -2,7 +2,7 @@
 
 ## Context
 
-Supervictor is a full-stack Rust IoT system (device firmware + cloud API + CLI tooling) that's currently a working but tightly-coupled project built around one specific use case (ESP32-C3 current sensor → AWS Lambda). The goal is to evolve it into a **portable, reusable framework** that others can adopt for their own device-to-cloud projects, with a **unified API** contract across all layers.
+Supervictor is a full-stack Rust IoT system (device firmware + cloud API + CLI tooling) that's currently a working but tightly-coupled project built around one specific use case (ESP32 current sensor → AWS Lambda). The goal is to evolve it into a **portable, reusable framework** that others can adopt for their own device-to-cloud projects, with a **unified API** contract across all layers.
 
 The architecture already has strong framework-like bones: pluggable storage (`DeviceStore` trait), framework-agnostic handlers, feature-gated backends, mTLS throughout, and a phase-based CLI orchestrator. But these patterns are implicit and interleaved with supervictor-specific logic.
 
@@ -108,7 +108,7 @@ The architecture already has strong framework-like bones: pluggable storage (`De
 
 ## Workstream 6: Portability
 
-**Problem**: Currently tied to ESP32-C3 + AWS Lambda. A "portable framework" should support other targets.
+**Problem**: Currently tied to ESP32 + AWS Lambda. A "portable framework" should support other targets.
 
 **Work**:
 - **Device targets**: Document how to add new boards (ESP32-S3, nRF, RP2040) — the feature-gate pattern (`embedded`/`desktop`) already supports this

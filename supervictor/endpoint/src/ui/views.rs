@@ -6,11 +6,11 @@
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 use crate::fleet::FleetSummary;
-pub use crate::fleet::Staleness;
+pub use crate::fleet::{PowerState, Staleness};
 use crate::history::{DeviceSeries, History, Window, METRICS};
 use crate::live;
 use crate::models::{DeviceRecord, UplinkRecord};
-use crate::ui::charts::{self, slot_class, Series};
+use crate::ui::charts::{self, slot_class, Reference, Series};
 use supervictor_common::status;
 
 /// One row of the fleet table.
@@ -21,6 +21,35 @@ pub struct FleetRow {
     pub last_uplink: Option<String>,
     /// Freshness classification of `last_uplink`.
     pub staleness: Staleness,
+    /// Last reported current in mA, if any.
+    pub current: Option<i64>,
+    /// Power state from `current` against `threshold_ma`.
+    pub power: PowerState,
+    /// Current (mA) this device is judged against (own override or fleet
+    /// default); carried on the row so the live script can flip the badge.
+    pub threshold_ma: i64,
+}
+
+/// How a page keeps itself current.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageMode {
+    /// No reload; the SSE script patches rows in place (fleet table).
+    Rows,
+    /// Reload the visible tab every N seconds (long windows).
+    Timed(u32),
+    /// Re-render `<main>` on every uplink event (short windows).
+    Live,
+}
+
+impl PageMode {
+    /// Live for the short windows, timed reload otherwise.
+    pub fn for_window(window: Window) -> PageMode {
+        if window.is_live() {
+            PageMode::Live
+        } else {
+            PageMode::Timed(HISTORY_REFRESH_S)
+        }
+    }
 }
 
 /// Static SSE hookup. One `EventSource` per page: it keeps the header dot
@@ -35,31 +64,71 @@ pub struct FleetRow {
 pub const LIVE_SCRIPT: &str = r#"
 (function () {
   var dot = document.getElementById('live-dot');
-  var live = document.getElementById('live');
-  var errors = 0, poll = null;
+  var live = document.body.getAttribute('data-live') === '1';
+  var strips = document.getElementById('live');
+  var errors = 0, pending = null, inflight = false, dirty = false, poll = null;
   function setDot(text, cls) { if (dot) { dot.textContent = text; dot.className = cls; } }
   function emit(name, detail) { document.dispatchEvent(new CustomEvent(name, { detail: detail })); }
+  function flash(el) { el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick'); }
+  // Fleet table: patch the device's row in place — last uplink, freshness,
+  // current, and the power badge judged against the row's own threshold.
+  function patchRow(ev) {
+    var row = document.querySelector('tr[data-device="' + CSS.escape(ev.device_id) + '"]');
+    if (!row) return;
+    var last = row.querySelector('.last-uplink');
+    if (last) last.textContent = ev.received_at;
+    var badge = row.querySelector('.staleness');
+    if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
+    if (typeof ev.current === 'number') {
+      var now = row.querySelector('.current-now');
+      if (now) now.textContent = ev.current + ' mA';
+      var threshold = parseInt(row.getAttribute('data-threshold'), 10);
+      var power = row.querySelector('.badge.power');
+      if (power && Number.isFinite(threshold)) {
+        var state = ev.current >= threshold ? 'on' : 'off';
+        power.textContent = state; power.className = 'badge power ' + state;
+      }
+    }
+    flash(row);
+  }
+  // Live pages (short windows): re-render <main> from the server on every
+  // uplink. Bursts coalesce into one fetch (150 ms), fetches never overlap,
+  // and a form the operator is typing in is never swapped out.
+  function rerender() {
+    if (inflight) { dirty = true; return; }
+    inflight = true;
+    fetch(location.href, { credentials: 'same-origin', cache: 'no-store', headers: { 'Accept': 'text/html' } })
+      .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var next = doc.querySelector('main'), cur = document.querySelector('main');
+        if (!next || !cur) return;
+        var active = document.activeElement;
+        if (active && active.closest && active.closest('form') && cur.contains(active)) return;
+        cur.innerHTML = next.innerHTML;
+        if (window.svBindCharts) window.svBindCharts(cur);
+        flash(cur);
+      })
+      .catch(function () {})
+      .finally(function () { inflight = false; if (dirty) { dirty = false; schedule(); } });
+  }
+  function schedule() { clearTimeout(pending); pending = setTimeout(rerender, 150); }
   var es = new EventSource('/ui/events');
-  es.onopen = function () { errors = 0; setDot('live', 'connected'); };
+  es.onopen = function () { errors = 0; setDot('live', live ? 'connected live' : 'connected'); };
   es.addEventListener('uplink', function (e) {
     var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
     if (!ev || typeof ev.device_id !== 'string') return;
-    var row = document.querySelector('tr[data-device="' + CSS.escape(ev.device_id) + '"]');
-    if (row) {
-      var last = row.querySelector('.last-uplink');
-      if (last) last.textContent = ev.received_at;
-      var badge = row.querySelector('.staleness');
-      if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
-    }
+    patchRow(ev);
     emit('sv:uplink', ev);
+    if (live && document.visibilityState === 'visible') schedule();
   });
   es.onerror = function () {
     errors += 1;
     setDot('offline', '');
     if (errors < 3) return;
     es.close();
-    var url = live && live.getAttribute('data-poll');
-    if (!url) { setTimeout(function () { location.reload(); }, 30000); return; }
+    var url = strips && strips.getAttribute('data-poll');
+    if (!url) { setTimeout(function () { location.reload(); }, live ? 5000 : 30000); return; }
     if (poll) return;
     setDot('polling', 'polling');
     poll = setInterval(function () {
@@ -70,6 +139,12 @@ pub const LIVE_SCRIPT: &str = r#"
         .catch(function () {});
     }, 2000);
   };
+  if (live) {
+    // The time axis keeps moving even while every machine is quiet, and a
+    // tab coming back to the foreground catches up at once.
+    setInterval(function () { if (document.visibilityState === 'visible') schedule(); }, 15000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') schedule(); });
+  }
 })();
 "#;
 
@@ -224,7 +299,11 @@ pub const CHART_SCRIPT: &str = r#"
     return v.toFixed(2);
   }
   function when(t) { return new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' UTC'; }
-  document.querySelectorAll('figure.chart[data-chart]').forEach(function (fig) {
+  // Bind once per figure; re-run on a live re-render (`window.svBindCharts`).
+  function bind(root) {
+  root.querySelectorAll('figure.chart[data-chart]').forEach(function (fig) {
+    if (fig.dataset.bound) return;
+    fig.dataset.bound = '1';
     var data; try { data = JSON.parse(fig.dataset.chart); } catch (_) { return; }
     var svg = fig.querySelector('svg'), tip = fig.querySelector('.tooltip'), hair = fig.querySelector('.crosshair');
     var n = data.t.length;
@@ -270,6 +349,9 @@ pub const CHART_SCRIPT: &str = r#"
       else if (e.key === 'Escape') { hide(); }
     });
   });
+  }
+  window.svBindCharts = bind;
+  bind(document);
   var refresh = parseInt(document.body.getAttribute('data-refresh') || '0', 10);
   if (refresh > 0) {
     setInterval(function () { if (document.visibilityState === 'visible') location.reload(); }, refresh * 1000);
@@ -309,7 +391,12 @@ pub const THEME_SCRIPT: &str = r#"
 /// Seconds between reloads of the history pages (visible tab only).
 const HISTORY_REFRESH_S: u32 = 60;
 
-fn layout(title: &str, subject: &str, refresh: Option<u32>, body: Markup) -> Markup {
+fn layout(title: &str, subject: &str, mode: PageMode, body: Markup) -> Markup {
+    let refresh = match mode {
+        PageMode::Timed(secs) => Some(secs),
+        PageMode::Rows | PageMode::Live => None,
+    };
+    let live = (mode == PageMode::Live).then_some("1");
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -323,7 +410,7 @@ fn layout(title: &str, subject: &str, refresh: Option<u32>, body: Markup) -> Mar
                 link rel="stylesheet" href="/ui/assets/style.css";
                 script { (PreEscaped(THEME_SCRIPT)) }
             }
-            body data-refresh=[refresh] {
+            body data-refresh=[refresh] data-live=[live] {
                 header {
                     h1 { a href="/ui" { "supervictor fleet" } }
                     nav {
@@ -385,7 +472,7 @@ pub fn history_page(
     layout(
         "history",
         subject,
-        Some(HISTORY_REFRESH_S),
+        PageMode::for_window(window),
         html! {
             (window_filters("/ui/history", window))
             @if history.truncated {
@@ -393,6 +480,8 @@ pub fn history_page(
             }
             section .tiles {
                 (charts::stat_tile("active devices", &summary.active.to_string(), &format!("{} registered, {} inactive", summary.total, summary.inactive), ""))
+                (charts::stat_tile("powered on", &summary.on.to_string(), &format!("current ≥ {} mA", history.threshold_ma), "on"))
+                (charts::stat_tile("powered off", &summary.off.to_string(), &format!("current < {} mA", history.threshold_ma), "off"))
                 (charts::stat_tile("fresh", &summary.fresh.to_string(), "heard from in the last 15 min", "fresh"))
                 (charts::stat_tile("stale", &summary.stale.to_string(), "quiet 15 min – 2 h", "stale"))
                 (charts::stat_tile("dark", &summary.dark.to_string(), "silent over 2 h", "dark"))
@@ -400,14 +489,25 @@ pub fn history_page(
                 (charts::stat_tile("uplinks", &uplinks.to_string(), &format!("in the last {}", window.label()), ""))
             }
             section .charts {
-                div .wide { (charts::status_chart("status", &history.timeline, window)) }
-                @for (m, metric) in METRICS.iter().enumerate() {
+                @let threshold_label = format!("on ≥ {} mA", history.threshold_ma);
+                @for (m, metric) in METRICS.iter().enumerate().take(1) {
                     @let series: Vec<Series<'_>> = history.devices.iter().enumerate().map(|(slot, d)| Series {
                         label: &d.device_id,
                         slot,
                         values: &columns[slot][m],
                     }).collect();
-                    div .wide[m == 0] { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window)) }
+                    div .wide { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window,
+                        Some(Reference { value: history.threshold_ma as f64, label: &threshold_label }))) }
+                }
+                div .wide { (charts::power_chart("power", &history.power, history.threshold_ma, window)) }
+                div .wide { (charts::status_chart("status", &history.timeline, window)) }
+                @for (m, metric) in METRICS.iter().enumerate().skip(1) {
+                    @let series: Vec<Series<'_>> = history.devices.iter().enumerate().map(|(slot, d)| Series {
+                        label: &d.device_id,
+                        slot,
+                        values: &columns[slot][m],
+                    }).collect();
+                    div { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window, None)) }
                 }
             }
         },
@@ -429,7 +529,7 @@ pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
     layout(
         "live",
         subject,
-        None,
+        PageMode::Rows,
         html! {
             div #live data-live=(data) data-poll="/ui/live.json" {
                 section .tiles {
@@ -515,6 +615,15 @@ pub struct DeviceHistory<'a> {
     pub truncated: bool,
     /// Categorical colour slot (fleet order).
     pub slot: usize,
+    /// Power state right now.
+    pub power: PowerState,
+    /// Last reported current in mA, if any.
+    pub current: Option<i64>,
+    /// Current (mA) at or above which the device counts as on: its own
+    /// override, else the fleet default.
+    pub threshold_ma: i64,
+    /// The fleet default, shown beside the override form.
+    pub fleet_threshold_ma: i64,
 }
 
 /// `GET /ui` — fleet table plus the register form.
@@ -522,7 +631,7 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
     layout(
         "fleet",
         subject,
-        None,
+        PageMode::Rows,
         html! {
             h2 { (rows.len()) " device(s) · " a href="/ui/history" { "status over time" } }
             table {
@@ -530,6 +639,7 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
                     tr {
                         th { "device" }
                         th { "status" }
+                        th { "power" }
                         th { "owner" }
                         th { "last uplink" }
                         th { "freshness" }
@@ -538,9 +648,14 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
                 }
                 tbody {
                     @for row in rows {
-                        tr data-device=(row.device.device_id) {
+                        tr data-device=(row.device.device_id) data-threshold=(row.threshold_ma) {
                             td { a href={ "/ui/devices/" (row.device.device_id) } { (row.device.device_id) } }
                             td { span .badge.(row.device.status) { (row.device.status) } }
+                            td {
+                                span .badge.power.(row.power.label()) { (row.power.label()) }
+                                " " span .current-inline.current-now { @if let Some(c) = row.current { (c) " mA" } }
+                                @if let Some(t) = row.device.power_threshold_ma { " " span .current-inline title="per-device power threshold" { "≥ " (t) } }
+                            }
                             td { (row.device.owner_id) }
                             td .last-uplink { (row.last_uplink.as_deref().unwrap_or("never")) }
                             td { span .badge.staleness.(row.staleness.label()) { (row.staleness.label()) } }
@@ -586,12 +701,19 @@ pub fn device_page(
     layout(
         &device.device_id,
         subject,
-        Some(HISTORY_REFRESH_S),
+        PageMode::for_window(history.window),
         html! {
             h2 { (device.device_id) }
             dl .meta {
                 dt { "status" }
                 dd { span .badge.(device.status) { (device.status) } " " (status_form(device, csrf)) }
+                dt { "power" }
+                dd {
+                    span .badge.power.(history.power.label()) { (history.power.label()) }
+                    @if let Some(c) = history.current { " " span .current-inline { (c) " mA, threshold " (history.threshold_ma) " mA" } }
+                }
+                dt { "power threshold" }
+                dd { (threshold_form(device, history, csrf)) }
                 dt { "owner" }
                 dd { (device.owner_id) }
                 dt { "cert subject" }
@@ -609,9 +731,11 @@ pub fn device_page(
                 (charts::stat_tile("firmware", &fw, "as last reported", ""))
             }
             section .charts {
+                @let threshold_label = format!("on ≥ {} mA", history.threshold_ma);
                 @for (m, metric) in METRICS.iter().enumerate() {
                     @let series = [Series { label: &device.device_id, slot: history.slot, values: &columns[m] }];
-                    div .wide[m == 0] { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, history.window)) }
+                    @let reference = (m == 0).then(|| Reference { value: history.threshold_ma as f64, label: &threshold_label });
+                    div .wide[m == 0] { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, history.window, reference)) }
                 }
             }
             h2 { "recent uplinks" }
@@ -635,6 +759,31 @@ pub fn device_page(
 }
 
 /// Revoke/reactivate toggle for a device (CSRF-protected form post).
+/// Set or clear the device's power threshold override. The number box is
+/// prefilled with the override (empty when the fleet default applies);
+/// submitting it empty clears the override.
+fn threshold_form(device: &DeviceRecord, history: &DeviceHistory<'_>, csrf: &str) -> Markup {
+    let own = device.power_threshold_ma.map(|t| t.to_string());
+    html! {
+        form .inline method="post" action={ "/ui/devices/" (device.device_id) "/threshold" } {
+            input type="hidden" name="csrf" value=(csrf);
+            label {
+                "on ≥ "
+                input type="number" name="threshold_ma" step="1" size="8"
+                    value=[own.as_deref()]
+                    placeholder=(history.fleet_threshold_ma);
+                " mA"
+            }
+            button type="submit" { "set" }
+            @if own.is_some() {
+                " " span .muted { "(fleet default " (history.fleet_threshold_ma) " mA; submit empty to clear)" }
+            } @else {
+                " " span .muted { "(fleet default)" }
+            }
+        }
+    }
+}
+
 fn status_form(device: &DeviceRecord, csrf: &str) -> Markup {
     let (next, verb) = if device.status == status::ACTIVE {
         (status::INACTIVE, "revoke")

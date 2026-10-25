@@ -133,6 +133,14 @@ pub trait DeviceStore: Send + Sync {
     /// Update a device's lifecycle status, returning the updated record.
     /// Errors with [`AppError::DeviceNotFound`] if the device does not exist.
     fn set_device_status(&self, device_id: &str, status: &str) -> Result<DeviceRecord, AppError>;
+
+    /// Set (`Some`) or clear (`None`) a device's power threshold override;
+    /// returns the updated record, `DeviceNotFound` for an unknown id.
+    fn set_device_threshold(
+        &self,
+        device_id: &str,
+        threshold_ma: Option<i64>,
+    ) -> Result<DeviceRecord, AppError>;
     /// Most recent uplink per device (devices that never uplinked are
     /// absent). One query on SQLite; per-device on DynamoDB (see impl notes).
     fn latest_uplinks(&self) -> Result<Vec<UplinkRecord>, AppError>;

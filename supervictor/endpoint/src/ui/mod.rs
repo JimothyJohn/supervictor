@@ -51,6 +51,10 @@ pub fn router(state: AppState) -> Router {
             "/ui/devices/{device_id}/status",
             axum::routing::post(set_status),
         )
+        .route(
+            "/ui/devices/{device_id}/threshold",
+            axum::routing::post(set_threshold),
+        )
         .route("/ui/events", get(sse::events))
         .route("/ui/assets/style.css", get(assets::stylesheet))
         .route_layer(middleware::from_fn(require_admin))
@@ -128,27 +132,34 @@ fn csrf_ok(headers: &HeaderMap, submitted: &str) -> bool {
 // ── Page handlers ─────────────────────────────────────────────────────
 
 /// Assemble fleet rows for the HTML table from a fleet snapshot.
-pub fn fleet_rows(store: &dyn DeviceStore) -> Result<Vec<FleetRow>, AppError> {
+pub fn fleet_rows(store: &dyn DeviceStore, threshold_ma: i64) -> Result<Vec<FleetRow>, AppError> {
     // Re-fetch devices for full records; snapshot carries the health fields.
     let devices = store.list_devices()?;
-    let health = fleet::snapshot_now(store)?;
-    let by_id: std::collections::HashMap<String, (Option<String>, fleet::Staleness)> = health
+    let health = fleet::snapshot_now(store, threshold_ma)?;
+    let by_id: std::collections::HashMap<String, fleet::FleetDevice> = health
         .into_iter()
-        .map(|d| (d.device_id, (d.last_uplink, d.staleness)))
+        .map(|d| (d.device_id.clone(), d))
         .collect();
 
     Ok(devices
         .into_iter()
-        .map(|device| {
-            let (last_uplink, staleness) = by_id
-                .get(&device.device_id)
-                .cloned()
-                .unwrap_or((None, fleet::Staleness::Unknown));
-            FleetRow {
+        .map(|device| match by_id.get(&device.device_id) {
+            Some(h) => FleetRow {
+                last_uplink: h.last_uplink.clone(),
+                staleness: h.staleness,
+                current: h.current,
+                power: h.power,
+                threshold_ma: h.threshold_ma,
                 device,
-                last_uplink,
-                staleness,
-            }
+            },
+            None => FleetRow {
+                threshold_ma: device.effective_threshold_ma(threshold_ma),
+                device,
+                last_uplink: None,
+                staleness: fleet::Staleness::Unknown,
+                current: None,
+                power: fleet::PowerState::Unknown,
+            },
         })
         .collect())
 }
@@ -158,7 +169,7 @@ fn subject_of(headers: &HeaderMap) -> String {
 }
 
 async fn fleet(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, AppError> {
-    let rows = fleet_rows(state.store.as_ref())?;
+    let rows = fleet_rows(state.store.as_ref(), state.power_threshold_ma)?;
     let (token, set_cookie) = ensure_csrf(&headers);
     let page = views::fleet_page(&rows, &token, &subject_of(&headers));
     Ok(match set_cookie {
@@ -180,8 +191,8 @@ async fn history_view(
     let window = Window::parse(query.window.as_deref())?;
     let store = state.store.as_ref();
     let now = now_unix();
-    let history = history::fleet_history(store, window, now)?;
-    let summary = fleet::summarize(&fleet::snapshot(store, now)?);
+    let history = history::fleet_history(store, window, now, state.power_threshold_ma)?;
+    let summary = fleet::summarize(&fleet::snapshot(store, now, state.power_threshold_ma)?);
     let page = views::history_page(&history, &summary, window, &subject_of(&headers));
     Ok(page.into_response())
 }
@@ -228,8 +239,15 @@ async fn device_detail(
         .collect();
     ids.sort();
     let slot = ids.iter().position(|id| *id == device_id).unwrap_or(0);
+    let now = now_unix();
     let (series, truncated) =
-        history::device_history(state.store.as_ref(), &device_id, window, now_unix())?;
+        history::device_history(state.store.as_ref(), &device_id, window, now)?;
+    let health = fleet::snapshot(state.store.as_ref(), now, state.power_threshold_ma)?
+        .into_iter()
+        .find(|d| d.device_id == device_id);
+    let (power, current) = health
+        .map(|h| (h.power, h.current))
+        .unwrap_or((fleet::PowerState::Unknown, None));
     let uplinks = state.store.get_uplinks(&device_id, 20)?;
     let (token, set_cookie) = ensure_csrf(&headers);
     let page = views::device_page(
@@ -239,6 +257,10 @@ async fn device_detail(
             window,
             truncated,
             slot,
+            power,
+            current,
+            threshold_ma: device.effective_threshold_ma(state.power_threshold_ma),
+            fleet_threshold_ma: state.power_threshold_ma,
         },
         &uplinks,
         &token,
@@ -324,4 +346,43 @@ async fn set_status(
         "fleet action"
     );
     Ok(Redirect::to("/ui").into_response())
+}
+
+#[derive(Deserialize)]
+struct ThresholdForm {
+    csrf: String,
+    /// Threshold in mA; empty clears the override (back to the fleet default).
+    #[serde(default)]
+    threshold_ma: String,
+}
+
+async fn set_threshold(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    headers: HeaderMap,
+    Form(form): Form<ThresholdForm>,
+) -> Result<Response, AppError> {
+    if !csrf_ok(&headers, &form.csrf) {
+        return Ok(forbidden("invalid CSRF token"));
+    }
+    let raw = form.threshold_ma.trim();
+    let threshold = if raw.is_empty() {
+        None
+    } else {
+        Some(raw.parse::<i64>().map_err(|_| AppError::InvalidPayload {
+            detail: "threshold_ma must be a whole number of milliamps, or empty to clear".into(),
+            structured: None,
+        })?)
+    };
+    // Same validation and store path as the JSON API.
+    let body = serde_json::json!({ "power_threshold_ma": threshold }).to_string();
+    crate::handlers::handle_set_device_threshold(&device_id, Some(&body), state.store.as_ref())?;
+    tracing::info!(
+        admin = %sanitize_for_log(&subject_of(&headers)),
+        device_id = %sanitize_for_log(&device_id),
+        action = "threshold",
+        threshold_ma = ?threshold,
+        "fleet action"
+    );
+    Ok(Redirect::to(&format!("/ui/devices/{device_id}")).into_response())
 }

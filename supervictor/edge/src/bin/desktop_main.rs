@@ -7,12 +7,19 @@
 //!
 //! Environment variables (all runtime):
 //!   HOST        - Target host for HTTP requests (e.g. supervictor.advin.io)
+//!   API_PATH    - Request path: "/" (custom domain, default) or "/<stage>"
+//!                 against a raw execute-api URL
 //!   DEVICE_ID   - Device id to post as (default "1234567890"); should match
 //!                 the client cert's CN once the device is registered
 //!   INTERVAL_S  - Seconds between uplinks (default 5; jittered ±20 %)
 //!   BURST       - Samples per uplink, sent as an 8-bit `levels` burst
 //!                 (default 10 → one sample every 500 ms; 1 disables)
 //!   SIM_SEED    - u64 seed salt for reproducible telemetry (default: clock)
+//!   SIM_PROFILE - Machine to impersonate: generic (default), extruder,
+//!                 press-brake, cnc, saw, oven, compressor, conveyor, molder,
+//!                 welder, pump (see models::profile)
+//!   SIM_SPEED   - Simulated seconds per real second for the machine model
+//!                 (default 1; e.g. 60 compresses a working day into minutes)
 //!   CA_PEM      - Path to CA certificate PEM for server verification
 //!   CLIENT_CERT - Path to client certificate PEM for mTLS
 //!   CLIENT_KEY  - Path to client private key PEM for mTLS
@@ -32,6 +39,7 @@ use tokio::{
 use rustls::pki_types::ServerName;
 use rustls_pemfile::{certs, private_key};
 use supervictor::{
+    models::profile::Profile,
     models::sim::{seed_from, Hardware, Simulator},
     network::http::{parse_response, post_request},
 };
@@ -61,6 +69,10 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
     // SNI server name must match the server's certificate
     let server_name = ServerName::try_from(base_host.as_str())?.to_owned();
 
+    // API_PATH: "/" against a custom domain (base-path mapping supplies the
+    // stage), "/<stage>" against a raw execute-api URL. Runtime here; the
+    // embedded build bakes it in at compile time.
+    let api_path = env_or("API_PATH", "/");
     let device_id: HString<64> = env_or("DEVICE_ID", "1234567890")
         .as_str()
         .try_into()
@@ -84,7 +96,25 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(1),
     };
-    let mut sim = Simulator::new(seed_from(device_id.as_str(), salt));
+    let profile_name = env_or("SIM_PROFILE", "generic");
+    let profile = Profile::parse(&profile_name)
+        .ok_or_else(|| format!("SIM_PROFILE '{profile_name}' is not a known machine profile"))?;
+    let speed: u32 = env_or("SIM_SPEED", "1")
+        .parse()
+        .map_err(|_| "SIM_SPEED must be a positive integer")?;
+    if speed == 0 {
+        return Err("SIM_SPEED must be at least 1".into());
+    }
+    let mut sim = Simulator::with_profile(seed_from(device_id.as_str(), salt), profile);
+    sim.set_time_scale(speed);
+    println!(
+        "{} posting to {} every {}s as a {} (x{} time)",
+        device_id,
+        base_host,
+        interval_s,
+        profile.name(),
+        speed
+    );
     let booted = Instant::now();
 
     loop {
@@ -103,7 +133,7 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
         match TcpStream::connect(socket_addr).await {
             Ok(socket) => match connector.connect(server_name.clone(), socket).await {
                 Ok(mut tls_stream) => {
-                    let request = match post_request(&base_host, &message, None) {
+                    let request = match post_request(&base_host, &message, Some(&api_path)) {
                         Ok(r) => r,
                         Err(e) => {
                             println!("Error building request: {}", e);

@@ -78,6 +78,21 @@ pub struct RegisterDeviceRequest {
     /// Optional X.509 subject DN from the client certificate.
     #[serde(default)]
     pub subject_dn: Option<String>,
+    /// Optional per-device power threshold (mA): `current` at or above it is
+    /// "on". Absent means the fleet default (`POWER_THRESHOLD_MA`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_threshold_ma: Option<i64>,
+}
+
+/// Per-device power threshold update (`PUT /devices/{id}/threshold`, admin).
+/// `null` or an absent field clears the override back to the fleet default.
+/// Unknown fields are rejected so a misspelt key cannot silently clear it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceThresholdRequest {
+    /// Current (mA) at or above which this device counts as powered on.
+    #[serde(default)]
+    pub power_threshold_ma: Option<i64>,
 }
 
 /// Device info returned by the API (endpoint → CLI).
@@ -94,4 +109,7 @@ pub struct DeviceResponse {
     pub status: String,
     /// ISO-8601 timestamp of when the device was registered.
     pub created_at: String,
+    /// Per-device power threshold (mA), if one overrides the fleet default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_threshold_ma: Option<i64>,
 }

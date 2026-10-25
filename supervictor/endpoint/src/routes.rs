@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, put};
 use axum::{Json, Router};
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
@@ -22,18 +22,32 @@ pub struct AppState {
     pub store: Arc<dyn DeviceStore>,
     /// Uplink admission policy (see [`RouterOptions`]).
     pub require_registration: bool,
+    /// Current (mA) at or above which a device counts as powered on.
+    pub power_threshold_ma: i64,
     /// Publisher for dashboard live updates; sends never block.
     #[cfg(feature = "ui")]
     pub events: crate::ui::sse::EventSender,
 }
 
 /// Runtime policy knobs the router needs beyond the store.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct RouterOptions {
     /// Reject uplinks from devices that are not registered, `active` and
     /// cert-bound (`REQUIRE_REGISTRATION`). Binding of bound devices is
     /// always enforced.
     pub require_registration: bool,
+    /// Current (mA) at or above which a device counts as powered on
+    /// (`POWER_THRESHOLD_MA`).
+    pub power_threshold_ma: i64,
+}
+
+impl Default for RouterOptions {
+    fn default() -> Self {
+        Self {
+            require_registration: false,
+            power_threshold_ma: crate::fleet::DEFAULT_POWER_THRESHOLD_MA,
+        }
+    }
 }
 
 /// Build the axum [`Router`] with default options (open ingest: unknown
@@ -47,6 +61,7 @@ pub fn router_with(store: Arc<dyn DeviceStore>, options: RouterOptions) -> Route
     let state = AppState {
         store,
         require_registration: options.require_registration,
+        power_threshold_ma: options.power_threshold_ma,
         #[cfg(feature = "ui")]
         events: crate::ui::sse::channel(),
     };
@@ -56,6 +71,9 @@ pub fn router_with(store: Arc<dyn DeviceStore>, options: RouterOptions) -> Route
         .route(wire::FLEET, get(fleet_status))
         .route(wire::FLEET_SUMMARY, get(fleet_summary))
         .route(wire::FLEET_HISTORY, get(fleet_history))
+        // Per-device power threshold: an operator judgement about a machine,
+        // so admin-only like the rest of fleet management.
+        .route(wire::DEVICE_THRESHOLD_PATTERN, put(set_device_threshold))
         .route_layer(axum::middleware::from_fn(crate::middleware::require_admin))
         .with_state(state.clone());
 
@@ -83,13 +101,16 @@ async fn health() -> (StatusCode, Json<serde_json::Value>) {
 async fn fleet_status(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<crate::fleet::FleetDevice>>, crate::error::AppError> {
-    Ok(Json(crate::fleet::snapshot_now(state.store.as_ref())?))
+    Ok(Json(crate::fleet::snapshot_now(
+        state.store.as_ref(),
+        state.power_threshold_ma,
+    )?))
 }
 
 async fn fleet_summary(
     State(state): State<AppState>,
 ) -> Result<Json<crate::fleet::FleetSummary>, crate::error::AppError> {
-    let devices = crate::fleet::snapshot_now(state.store.as_ref())?;
+    let devices = crate::fleet::snapshot_now(state.store.as_ref(), state.power_threshold_ma)?;
     Ok(Json(crate::fleet::summarize(&devices)))
 }
 
@@ -111,7 +132,27 @@ async fn fleet_history(
         state.store.as_ref(),
         window,
         now,
+        state.power_threshold_ma,
     )?))
+}
+
+async fn set_device_threshold(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    body: String,
+) -> Result<Json<DeviceResponse>, crate::error::AppError> {
+    let body_opt = if body.is_empty() {
+        None
+    } else {
+        Some(body.as_str())
+    };
+    let resp = handlers::handle_set_device_threshold(&device_id, body_opt, state.store.as_ref())?;
+    tracing::info!(
+        device_id = %crate::middleware::sanitize_for_log(&device_id),
+        threshold_ma = ?resp.power_threshold_ma,
+        "device threshold set"
+    );
+    Ok(Json(resp))
 }
 
 async fn hello(ClientSubject(subject): ClientSubject) -> Json<HelloResponse> {

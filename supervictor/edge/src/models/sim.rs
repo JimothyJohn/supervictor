@@ -9,12 +9,25 @@
 //! the same sequence, on the ESP32 and on the host, which is what makes it
 //! testable. Hardware readings (real heap, real uptime) override the
 //! simulated ones when the caller has them.
+//!
+//! With a [`Profile`] other than `Generic`, current and temperature come from
+//! a [`Machine`] model instead (see [`super::profile`]): the device then
+//! behaves like an extruder, a press brake, a compressor, ... including the
+//! shutdowns that flip the dashboard's power state.
 
 use heapless::String as HString;
 use heapless::Vec as HVec;
 use supervictor_common::levels;
 
+use super::profile::{Machine, Profile};
 use super::uplink::{UplinkMessage, LEVELS_CAP, LEVELS_SAMPLES_MAX};
+
+/// Simulated seconds per [`Simulator::sample`] call; `uplink` uses the real
+/// interval instead.
+pub const DEFAULT_TICK_S: u32 = 5;
+/// Longest stretch a single sample may integrate over (one simulated day),
+/// bounding the per-sample work when a large time scale is set.
+pub const MAX_TICK_S: u32 = 86_400;
 
 /// Baseline current range a device settles around (mA).
 const CURRENT_BASE_MIN: i32 = 200;
@@ -149,16 +162,32 @@ pub struct Simulator {
     humidity_deci: i32,
     rssi_base: i32,
     heap: u32,
+    /// Machine model behind current/temperature; `None` for `Generic`.
+    machine: Option<Machine>,
+    /// Simulated seconds per real second.
+    time_scale: u32,
+    /// The machine's current over its last simulated second (mA), repeated
+    /// by a sub-second burst sample.
+    machine_ma: i32,
 }
 
 impl Simulator {
-    /// Build from a seed (see [`seed_from`]).
+    /// Build a `Generic` (bench) simulator from a seed (see [`seed_from`]).
     pub fn new(seed: u64) -> Self {
+        Self::with_profile(seed, Profile::Generic)
+    }
+
+    /// Build a simulator that behaves like `profile`.
+    pub fn with_profile(seed: u64, profile: Profile) -> Self {
         let mut rng = Xorshift64::new(seed);
         let current_base = rng.range(CURRENT_BASE_MIN, CURRENT_BASE_MAX);
         let temp_milli = rng.range(TEMP_TARGET_MIN, TEMP_TARGET_MAX);
         let humidity_deci = rng.range(HUMIDITY_TARGET_MIN, HUMIDITY_TARGET_MAX);
         let rssi_base = rng.range(RSSI_BASE_MIN, RSSI_BASE_MAX);
+        let machine = match profile {
+            Profile::Generic => None,
+            other => Some(Machine::new(other, &mut rng)),
+        };
         Self {
             rng,
             seq: 0,
@@ -168,47 +197,90 @@ impl Simulator {
             humidity_deci,
             rssi_base,
             heap: HEAP_START,
+            machine,
+            time_scale: 1,
+            machine_ma: 0,
         }
     }
 
-    /// Advance one tick, count it as an uplink and produce readings. Real
-    /// `hardware` values win over simulated ones.
+    /// The profile this simulator impersonates.
+    pub fn profile(&self) -> Profile {
+        self.machine
+            .as_ref()
+            .map_or(Profile::Generic, |m| m.profile())
+    }
+
+    /// Run the machine model `scale` simulated seconds per real second, so a
+    /// working day fits a demo. `0` is treated as `1`. No effect on `Generic`.
+    pub fn set_time_scale(&mut self, scale: u32) {
+        self.time_scale = scale.max(1);
+    }
+
+    /// The machine model, if this simulator has one.
+    pub fn machine(&self) -> Option<&Machine> {
+        self.machine.as_ref()
+    }
+
+    /// Advance one default tick ([`DEFAULT_TICK_S`] simulated seconds), count
+    /// it as an uplink and produce readings. Real `hardware` values win over
+    /// simulated ones.
     pub fn sample(&mut self, hardware: Hardware) -> Sample {
-        self.seq = self.seq.wrapping_add(1);
-        self.tick(hardware)
+        self.sample_dt(hardware, DEFAULT_TICK_S)
     }
 
-    /// Advance one tick without counting an uplink — a sub-interval sample
-    /// inside a `levels` burst. Same walks, same rare events.
-    pub fn tick(&mut self, hardware: Hardware) -> Sample {
-        // Current: drift is a mean-reverting walk capped at ±25 % of base,
-        // plus ±3 % noise, plus rare spikes (+50..150 %) and dropouts.
-        let drift_cap = self.current_base / 4;
-        let step = self.current_base / 50;
-        self.current_drift = (self.current_drift + self.rng.range(-step, step)
-            - self.current_drift / 8)
-            .clamp(-drift_cap, drift_cap);
-        let noise_span = self.current_base * 3 / 100;
-        let mut current =
-            self.current_base + self.current_drift + self.rng.range(-noise_span, noise_span);
-        if self.rng.below(DROPOUT_ONE_IN) == 0 {
-            current = 0;
-        } else if self.rng.below(SPIKE_ONE_IN) == 0 {
-            let pct = self.rng.range(50, 150);
-            current = current.saturating_add(current / 100 * pct);
-        }
-        let current = current.clamp(CURRENT_MIN, CURRENT_MAX);
+    /// Advance `dt_s` simulated seconds (times the time scale, capped at
+    /// [`MAX_TICK_S`]) and produce readings. With a machine profile the
+    /// current is the mean over that window; `Generic` ignores `dt_s`.
+    pub fn sample_dt(&mut self, hardware: Hardware, dt_s: u32) -> Sample {
+        self.seq = self.seq.wrapping_add(1);
+        let secs = dt_s.max(1).saturating_mul(self.time_scale).min(MAX_TICK_S);
+        self.advance(hardware, secs)
+    }
 
-        // Temperature / humidity: random walk pulled back toward the band.
-        self.temp_milli = walk(
-            &mut self.rng,
-            self.temp_milli,
-            150,
-            TEMP_TARGET_MIN,
-            TEMP_TARGET_MAX,
-            TEMP_MILLI_MIN,
-            TEMP_MILLI_MAX,
-        );
+    /// Advance one default tick *without* counting an uplink — a
+    /// sub-interval sample inside a `levels` burst. Same walks, same rare
+    /// events.
+    pub fn tick(&mut self, hardware: Hardware) -> Sample {
+        let secs = DEFAULT_TICK_S
+            .saturating_mul(self.time_scale)
+            .min(MAX_TICK_S);
+        self.advance(hardware, secs)
+    }
+
+    /// One reading set after `secs` simulated seconds (already scaled, ≤
+    /// [`MAX_TICK_S`]). With a machine profile the current is the mean over
+    /// those seconds — or, for `secs == 0` (a burst splitting an interval
+    /// finer than a second), the machine's last second again. `Generic`
+    /// walks once whatever `secs` is.
+    fn advance(&mut self, hardware: Hardware, secs: u32) -> Sample {
+        let (current, machine_temp_milli) = match self.machine.as_mut() {
+            Some(machine) => {
+                if secs > 0 {
+                    let mut sum: i64 = 0;
+                    for _ in 0..secs {
+                        sum += i64::from(machine.tick(&mut self.rng));
+                    }
+                    self.machine_ma = (sum / i64::from(secs)) as i32;
+                }
+                (self.machine_ma, Some(machine.temp_milli()))
+            }
+            None => (self.generic_current(), None),
+        };
+
+        // Temperature: the machine's probe, or the ambient walk.
+        self.temp_milli = match machine_temp_milli {
+            Some(t) => t + self.rng.range(-100, 100),
+            None => walk(
+                &mut self.rng,
+                self.temp_milli,
+                150,
+                TEMP_TARGET_MIN,
+                TEMP_TARGET_MAX,
+                TEMP_MILLI_MIN,
+                TEMP_MILLI_MAX,
+            ),
+        };
+        // Humidity: random walk pulled back toward the band.
         self.humidity_deci = walk(
             &mut self.rng,
             self.humidity_deci,
@@ -248,6 +320,27 @@ impl Simulator {
         }
     }
 
+    /// The `Generic` bench trace: drift is a mean-reverting walk capped at
+    /// ±25 % of base, plus ±3 % noise, plus rare spikes (+50..150 %) and
+    /// dropouts.
+    fn generic_current(&mut self) -> i32 {
+        let drift_cap = self.current_base / 4;
+        let step = self.current_base / 50;
+        self.current_drift = (self.current_drift + self.rng.range(-step, step)
+            - self.current_drift / 8)
+            .clamp(-drift_cap, drift_cap);
+        let noise_span = self.current_base * 3 / 100;
+        let mut current =
+            self.current_base + self.current_drift + self.rng.range(-noise_span, noise_span);
+        if self.rng.below(DROPOUT_ONE_IN) == 0 {
+            current = 0;
+        } else if self.rng.below(SPIKE_ONE_IN) == 0 {
+            let pct = self.rng.range(50, 150);
+            current = current.saturating_add(current / 100 * pct);
+        }
+        current.clamp(CURRENT_MIN, CURRENT_MAX)
+    }
+
     /// Jittered delay for the next uplink: `base_ms ± 20 %`, so a fleet
     /// flashed at the same moment doesn't phase-lock on the endpoint.
     pub fn next_delay_ms(&mut self, base_ms: u32) -> u32 {
@@ -271,12 +364,21 @@ impl Simulator {
     ) -> UplinkMessage {
         let burst = burst.clamp(1, LEVELS_SAMPLES_MAX);
         let mut flat: HVec<u8, LEVELS_CAP> = HVec::new();
-        for _ in 1..burst {
-            let s = self.tick(hardware);
+        // The interval's simulated seconds are shared out across the
+        // samples; a sub-second share is 0 (the machine model repeats its
+        // last second, the generic walk still moves).
+        let total = u64::from(interval_s.max(1)) * u64::from(self.time_scale);
+        let share = |k: usize| (total * k as u64 / burst as u64).min(u64::from(MAX_TICK_S)) as u32;
+        let mut elapsed = 0;
+        for k in 1..burst {
+            let until = share(k);
+            let s = self.advance(hardware, until.saturating_sub(elapsed));
+            elapsed = until;
             // Capacity is LEVELS_SAMPLES_MAX samples; burst is clamped to it.
             let _ = flat.extend_from_slice(&s.levels());
         }
-        let s = self.sample(hardware);
+        self.seq = self.seq.wrapping_add(1);
+        let s = self.advance(hardware, share(burst).saturating_sub(elapsed));
         let mut msg = UplinkMessage::new(id, s.current);
         msg.seq = Some(s.seq);
         msg.uptime_s = Some(uptime_s);
@@ -439,6 +541,111 @@ mod tests {
             spikes > expect_spike / 3 && spikes < expect_spike * 2,
             "spikes {spikes}, expected ~{expect_spike}"
         );
+    }
+
+    #[test]
+    fn new_is_generic_and_profiles_are_reported() {
+        assert_eq!(Simulator::new(1).profile(), Profile::Generic);
+        assert!(Simulator::new(1).machine().is_none());
+        for p in Profile::ALL {
+            let sim = Simulator::with_profile(1, p);
+            assert_eq!(sim.profile(), p);
+            assert_eq!(sim.machine().is_some(), p != Profile::Generic);
+        }
+    }
+
+    #[test]
+    fn profiled_simulator_is_deterministic_and_in_bounds() {
+        for p in Profile::ALL {
+            let mut a = Simulator::with_profile(seed_from("line-3", 2), p);
+            let mut b = Simulator::with_profile(seed_from("line-3", 2), p);
+            for _ in 0..600 {
+                let sa = a.sample(Hardware::default());
+                let sb = b.sample(Hardware::default());
+                assert_eq!(sa, sb, "{p:?}");
+                assert!((0..=p.max_ma()).contains(&sa.current), "{p:?} {sa:?}");
+                assert!(
+                    (0.0..=super::super::profile::TEMP_MILLI_MAX as f32 / 1000.0 + 0.2)
+                        .contains(&sa.temp_c),
+                    "{p:?} {sa:?}"
+                );
+                assert!((10.0..=90.0).contains(&sa.humidity_pct), "{p:?} {sa:?}");
+            }
+        }
+    }
+
+    /// A profiled sample integrates over the uplink interval: one 10 s sample
+    /// equals the mean of the ten 1 s ticks a twin machine produces.
+    #[test]
+    fn sample_dt_is_the_window_mean() {
+        let seed = seed_from("press-1", 0);
+        let mut sim = Simulator::with_profile(seed, Profile::PressBrake);
+        // A twin machine built the way `with_profile` builds its own: the
+        // four personality draws, then the machine.
+        let mut rng = Xorshift64::new(seed);
+        for _ in 0..4 {
+            rng.range(0, 1);
+        }
+        let mut twin = Machine::new(Profile::PressBrake, &mut rng);
+        let mut sum = 0i64;
+        for _ in 0..10 {
+            sum += i64::from(twin.tick(&mut rng));
+        }
+        let s = sim.sample_dt(Hardware::default(), 10);
+        assert_eq!(i64::from(s.current), sum / 10);
+        // Probe noise is ±100 milli-°C on top of the machine's temperature.
+        let diff = (s.temp_c * 1000.0) as i32 - twin.temp_milli();
+        assert!(
+            diff.abs() <= 101,
+            "temp {} vs machine {}",
+            s.temp_c,
+            twin.temp_milli()
+        );
+    }
+
+    /// Time scale: the machine model moves `scale` times further per sample,
+    /// so a scaled simulator reaches its first shutdown in far fewer samples.
+    #[test]
+    fn time_scale_compresses_the_working_day() {
+        fn samples_until_off(scale: u32) -> u32 {
+            let mut sim = Simulator::with_profile(seed_from("pump-9", 1), Profile::Pump);
+            sim.set_time_scale(scale);
+            for n in 1..200_000 {
+                if sim.sample(Hardware::default()).current == 0 {
+                    return n;
+                }
+            }
+            panic!("never shut down");
+        }
+        let plain = samples_until_off(1);
+        let fast = samples_until_off(60);
+        assert!(
+            fast * 10 < plain,
+            "scale 60 took {fast}, scale 1 took {plain}"
+        );
+        // Generic has no machine, so the scale is harmless there.
+        let mut g = Simulator::new(4);
+        g.set_time_scale(0);
+        let _ = g.sample(Hardware::default());
+    }
+
+    /// The machine's shutdowns reach the wire as a zero current, which is
+    /// what flips the dashboard's power state.
+    #[test]
+    fn profiled_uplink_goes_dark_on_shutdown() {
+        let mut sim = Simulator::with_profile(seed_from("cnc-2", 3), Profile::Cnc);
+        sim.set_time_scale(60);
+        let mut saw_on = false;
+        let mut saw_off = false;
+        for _ in 0..2_000 {
+            let msg = sim.uplink("cnc-2".try_into().unwrap(), 0, 5, 1, Hardware::default());
+            saw_on |= msg.current >= 100;
+            saw_off |= msg.current == 0;
+            if saw_on && saw_off {
+                return;
+            }
+        }
+        panic!("on {saw_on}, off {saw_off}");
     }
 
     #[test]

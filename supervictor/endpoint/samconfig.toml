@@ -28,6 +28,10 @@ warm_containers = "EAGER"
 # `aws cloudformation describe-stacks` on 2026-10-24); the Quickstart reads
 # stack_name from here to find the deployed endpoint.
 [dev]
+[dev.global.parameters]
+stack_name = "supervictor-dev"
+region = "us-east-1"
+
 [dev.deploy.parameters]
 stack_name = "supervictor-dev"
 parameter_overrides = "Environment=dev StackName=supervictor-dev AppName=supervictor TruststoreUri=s3://supervictor/truststore-dev.pem DomainName=dev.supervictor.advin.io"
@@ -38,6 +42,10 @@ resolve_s3 = true
 resolve_image_repos = true
 
 [prod]
+[prod.global.parameters]
+stack_name = "supervictor-prod"
+region = "us-east-1"
+
 [prod.deploy.parameters]
 stack_name = "supervictor-prod"
 parameter_overrides = "Environment=prod StackName=supervictor-prod AppName=supervictor TruststoreUri=s3://supervictor/truststore.pem DomainName=supervictor.advin.io"

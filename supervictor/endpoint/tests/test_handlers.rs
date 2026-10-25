@@ -16,6 +16,101 @@ fn hello_with_subject() {
     assert_eq!(resp.client_subject.as_deref(), Some("CN=device1"));
 }
 
+// ── Per-device power threshold ────────────────────────────────────────
+
+fn registered(store: &dyn supervictor_endpoint::store::DeviceStore, id: &str) {
+    let body = format!(r#"{{"device_id":"{id}","owner_id":"owner-1"}}"#);
+    handlers::handle_register_device(Some(&body), store).unwrap();
+}
+
+#[test]
+fn set_threshold_parses_every_body_shape() {
+    let store = common::test_store();
+    registered(store.as_ref(), "dev-1");
+
+    let resp = handlers::handle_set_device_threshold(
+        "dev-1",
+        Some(r#"{"power_threshold_ma": 12000}"#),
+        store.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(resp.power_threshold_ma, Some(12_000));
+    assert_eq!(resp.device_id, "dev-1");
+
+    for clear in [None, Some(""), Some("  \n"), Some("null"), Some("{}")] {
+        handlers::handle_set_device_threshold(
+            "dev-1",
+            Some(r#"{"power_threshold_ma": 1}"#),
+            store.as_ref(),
+        )
+        .unwrap();
+        let resp = handlers::handle_set_device_threshold("dev-1", clear, store.as_ref())
+            .unwrap_or_else(|e| panic!("{clear:?}: {e}"));
+        assert_eq!(resp.power_threshold_ma, None, "{clear:?}");
+    }
+}
+
+#[test]
+fn set_threshold_rejects_bad_bodies_and_ids_without_writing() {
+    use supervictor_endpoint::error::AppError;
+    let store = common::test_store();
+    registered(store.as_ref(), "dev-1");
+    handlers::handle_set_device_threshold(
+        "dev-1",
+        Some(r#"{"power_threshold_ma": 42}"#),
+        store.as_ref(),
+    )
+    .unwrap();
+
+    for bad in [
+        r#"{"power_threshold_ma": "42"}"#,
+        r#"{"power_threshold_ma": 4.2}"#,
+        r#"{"power_threshold_ma": 99999999999999999999}"#,
+        r#"{"power_threshold_ma": [1]}"#,
+        r#"{"threshold_ma": 1}"#,
+        "not json",
+        "[]",
+        "true",
+    ] {
+        let err = handlers::handle_set_device_threshold("dev-1", Some(bad), store.as_ref())
+            .expect_err(bad);
+        assert!(
+            matches!(err, AppError::InvalidPayload { .. }),
+            "{bad}: {err:?}"
+        );
+    }
+    assert_eq!(
+        store
+            .get_device("dev-1")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(42),
+        "rejected bodies must not write"
+    );
+
+    // Identifier validation runs before the store is touched.
+    for bad_id in ["", "dev\n1", &"x".repeat(65)] {
+        let err = handlers::handle_set_device_threshold(
+            bad_id,
+            Some(r#"{"power_threshold_ma": 1}"#),
+            store.as_ref(),
+        )
+        .expect_err(bad_id);
+        assert!(
+            matches!(err, AppError::InvalidPayload { .. }),
+            "{bad_id:?}: {err:?}"
+        );
+    }
+    let err = handlers::handle_set_device_threshold(
+        "ghost",
+        Some(r#"{"power_threshold_ma": 1}"#),
+        store.as_ref(),
+    )
+    .unwrap_err();
+    assert!(matches!(err, AppError::DeviceNotFound { .. }), "{err:?}");
+}
+
 #[test]
 fn uplink_valid_payload() {
     let store = common::test_store();

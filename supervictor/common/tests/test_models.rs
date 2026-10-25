@@ -213,6 +213,7 @@ fn register_roundtrip() {
         device_id: "dev-1".into(),
         owner_id: "owner-1".into(),
         subject_dn: Some("CN=dev-1".into()),
+        power_threshold_ma: None,
     };
     let json = serde_json::to_string(&req).unwrap();
     let back: RegisterDeviceRequest = serde_json::from_str(&json).unwrap();
@@ -225,6 +226,7 @@ fn register_field_names() {
         device_id: "d".into(),
         owner_id: "o".into(),
         subject_dn: None,
+        power_threshold_ma: None,
     };
     let val: serde_json::Value = serde_json::to_value(&req).unwrap();
     assert!(val.get("device_id").is_some());
@@ -268,6 +270,7 @@ fn device_response_roundtrip() {
         subject_dn: Some("CN=dev-1".into()),
         status: "active".into(),
         created_at: "2025-01-01T00:00:00Z".into(),
+        power_threshold_ma: None,
     };
     let json = serde_json::to_string(&resp).unwrap();
     let back: DeviceResponse = serde_json::from_str(&json).unwrap();
@@ -282,6 +285,7 @@ fn device_response_omits_none_subject_dn() {
         subject_dn: None,
         status: "active".into(),
         created_at: "t".into(),
+        power_threshold_ma: None,
     };
     let json = serde_json::to_string(&resp).unwrap();
     let val: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -299,6 +303,7 @@ fn device_response_includes_some_subject_dn() {
         subject_dn: Some("CN=x".into()),
         status: "active".into(),
         created_at: "t".into(),
+        power_threshold_ma: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     assert_eq!(val["subject_dn"], "CN=x");
@@ -312,6 +317,7 @@ fn device_response_field_names() {
         subject_dn: Some("s".into()),
         status: "active".into(),
         created_at: "t".into(),
+        power_threshold_ma: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     let obj = val.as_object().unwrap();
@@ -354,6 +360,7 @@ fn cli_register_json_compatible_with_endpoint() {
         device_id: "dev-1".into(),
         owner_id: "owner-1".into(),
         subject_dn: Some("CN=dev-1,O=supervictor".into()),
+        power_threshold_ma: None,
     };
     let json = serde_json::to_string(&req).unwrap();
 

@@ -50,7 +50,7 @@ fn get_host_header_present() {
 #[test]
 fn get_user_agent_present() {
     let req = get_request("h", None).unwrap();
-    assert!(req.contains("User-Agent: Uplink/0.1.0 (Platform; ESP32-C3)\r\n"));
+    assert!(req.contains("User-Agent: Uplink/0.1.0 (Platform; ESP32)\r\n"));
 }
 
 #[test]

@@ -93,6 +93,32 @@ Resources:
                                 - !Sub arn:aws:s3:::${BundleBucket}/${CaCertKey}
                                 - !Sub arn:aws:s3:::${BundleBucket}/${ServerCertKey}
                                 - !Sub arn:aws:s3:::${BundleBucket}/${ServerKeyKey}
+                # Let's Encrypt DNS-01 from the box (certbot-dns-route53): the
+                # plugin lists zones, writes the _acme-challenge TXT, polls the
+                # change. Scoped to this zone, that one record name, TXT only.
+                - PolicyName: AcmeDns01Route53
+                  PolicyDocument:
+                      Version: "2012-10-17"
+                      Statement:
+                          - Sid: AcmeListZones
+                            Effect: Allow
+                            Action: route53:ListHostedZones
+                            # List actions take no resource ARN.
+                            Resource: "*"
+                          - Sid: AcmeChallengeTxtOnly
+                            Effect: Allow
+                            Action: route53:ChangeResourceRecordSets
+                            Resource: !Sub arn:aws:route53:::hostedzone/${HostedZoneId}
+                            Condition:
+                                ForAllValues:StringEquals:
+                                    route53:ChangeResourceRecordSetsRecordTypes:
+                                        - TXT
+                                    route53:ChangeResourceRecordSetsNormalizedRecordNames:
+                                        - !Sub _acme-challenge.${Hostname}
+                          - Sid: AcmePollChange
+                            Effect: Allow
+                            Action: route53:GetChange
+                            Resource: arn:aws:route53:::change/*
 
     InstanceProfile:
         Type: AWS::IAM::InstanceProfile

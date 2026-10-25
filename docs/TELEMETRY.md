@@ -52,6 +52,20 @@ Design rules:
 > `humidity_pct` on every ping. Until real sensors land the environmental
 > values (and RSSI) come from `supervictor/edge/src/models/sim.rs`, a
 > seeded simulator; `heap_free` and `uptime_s` are real on the ESP32.
+>
+> With a **machine profile** (`SIM_PROFILE`; `supervictor/edge/src/models/profile.rs`)
+> the simulator impersonates plant equipment instead of the bench trace:
+> `extruder`, `press-brake`, `cnc`, `saw`, `oven`, `compressor`, `conveyor`,
+> `molder`, `welder`, `pump`. `current` is then the one-leg supply current
+> in mA averaged over the uplink interval (tens of amps; motor inrush up to
+> 6× rated for one second), following that machine's duty cycle on top of a
+> working day of runs, breaks and shutdowns (shutdown = 0 mA, so the power
+> state flips). `temp_c` becomes the machine's probe: barrel/oven
+> temperature for the heated profiles (up to 400 °C), motor housing
+> otherwise. Firmware takes `SIM_PROFILE` / `SIM_SPEED` at build time (an
+> unknown name fails the build); the desktop client at runtime.
+> `supervictor/edge/docker-compose.sim.yml` runs one container per profile
+> (`./scripts/sim-fleet.sh up staging`).
 
 ### Device health (optional; firmware fills these every ping)
 
@@ -137,10 +151,10 @@ a future rollup layer, not the raw ping table — this is the guardrail the
 
 ## Payload budget
 
-Worst case (64-char id, every field at its widest printing, a full
-12-sample `levels` burst of three-digit bytes) is ~535 bytes. The
-firmware's buffers are sized for it: 640-byte JSON buffer and 768-byte
-request buffer in `supervictor/edge/src/network/http.rs`, guarded by
+Worst case (64-char id, every field at its widest printing, the nine IMU
+floats, a full 12-sample `levels` burst of three-digit bytes) is 660
+bytes. The firmware's buffers are sized for it: 768-byte JSON buffer and
+1024-byte request buffer in `supervictor/edge/src/network/http.rs`, guarded by
 `uplink_tests::full_uplink_with_max_id_fits_the_request_buffers`. Adding a
 field (or growing `LEVELS_SAMPLES_MAX`) means re-checking that test, not
 hoping.

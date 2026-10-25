@@ -1,0 +1,35 @@
+# Simulated device: the desktop mTLS client with the telemetry simulator,
+# one container per pretend machine (see docker-compose.sim.yml).
+#
+# Build context is the repo root: the edge crate is a workspace member, and
+# building from the root sidesteps edge/.cargo/config.toml (ESP32 target,
+# build-std) and edge/rust-toolchain.toml (nightly), neither of which the
+# desktop binary needs.
+#
+#   docker build -f supervictor/edge/Dockerfile.desktop -t supervictor-device .
+
+# --- Build stage ---
+FROM rust:1.97-bookworm AS build
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY supervictor ./supervictor
+
+RUN cargo build --release --locked -p supervictor-edge --features desktop --bin supervictor-desktop
+
+# --- Runtime stage ---
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --no-create-home device
+
+COPY --from=build /app/target/release/supervictor-desktop /usr/local/bin/supervictor-desktop
+
+# Certificates are mounted here by the compose file (read-only).
+ENV CA_PEM=/certs/ca.pem \
+    CLIENT_CERT=/certs/client.pem \
+    CLIENT_KEY=/certs/client.key
+
+USER device
+CMD ["supervictor-desktop"]

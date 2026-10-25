@@ -37,6 +37,7 @@ fn seed(store: &dyn DeviceStore, id: &str, status: &str) {
             subject_dn: None,
             status: status.into(),
             created_at: "2026-07-01T00:00:00+00:00".into(),
+            power_threshold_ma: None,
         })
         .unwrap();
 }
@@ -46,6 +47,110 @@ fn now_unix() -> u64 {
 }
 
 // ── Auth + input ──────────────────────────────────────────────────────
+
+/// The power timeline judges each device against its own threshold: two
+/// devices reporting the same 9 A, one on the fleet default (on) and one a
+/// press brake with a 12 A bar (off), count as one on + one off in every
+/// bucket after their readings.
+#[tokio::test]
+async fn power_timeline_uses_per_device_thresholds() {
+    let (server, store) = server_with_store();
+    seed(store.as_ref(), "bench-01", "active");
+    store
+        .put_device(DeviceRecord {
+            device_id: "press-01".into(),
+            owner_id: "owner-1".into(),
+            subject_dn: None,
+            status: "active".into(),
+            created_at: "2026-07-01T00:00:00+00:00".into(),
+            power_threshold_ma: Some(12_000),
+        })
+        .unwrap();
+    let now = now_unix();
+    for id in ["bench-01", "press-01"] {
+        store
+            .put_uplink(UplinkRecord {
+                device_id: id.into(),
+                received_at: format_rfc3339(now - 30 * 60, 0),
+                payload: serde_json::json!({ "current": 9_000 }),
+            })
+            .unwrap();
+    }
+
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server
+        .get("/fleet/history?window=1h")
+        .add_header(name, value)
+        .await;
+    assert_eq!(resp.status_code(), 200);
+    let body: serde_json::Value = resp.json();
+    assert_eq!(body["threshold_ma"], 100, "fleet default still reported");
+    let last = body["power"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["on"], 1, "{last}");
+    assert_eq!(last["off"], 1, "{last}");
+    assert_eq!(last["unknown"], 0, "{last}");
+}
+
+/// The live presets bucket at the 5 s uplink period (5m → 60 buckets, 1m →
+/// 12) and say so (`live`, `buckets`); the standard presets keep 90.
+#[tokio::test]
+async fn live_windows_use_uplink_period_buckets() {
+    let (server, store) = server_with_store();
+    seed(store.as_ref(), "bench-01", "active");
+    let now = now_unix();
+    for back in [3u64, 8, 13, 290] {
+        store
+            .put_uplink(UplinkRecord {
+                device_id: "bench-01".into(),
+                received_at: format_rfc3339(now - back, 0),
+                payload: serde_json::json!({ "current": 500 }),
+            })
+            .unwrap();
+    }
+
+    for (w, buckets, step) in [("5m", 60usize, 5u64), ("1m", 12, 5), ("15m", BUCKETS, 10)] {
+        let (name, value) = dn(ADMIN_DN);
+        let resp = server
+            .get(&format!("/fleet/history?window={w}"))
+            .add_header(name, value)
+            .await;
+        assert_eq!(resp.status_code(), 200, "{w}");
+        let h: serde_json::Value = resp.json();
+        assert_eq!(h["window"], w);
+        assert_eq!(h["live"], w != "15m", "{w}");
+        assert_eq!(h["buckets"], buckets, "{w}");
+        assert_eq!(h["step_s"], step, "{w}");
+        assert_eq!(h["timeline"].as_array().unwrap().len(), buckets, "{w}");
+        assert_eq!(h["power"].as_array().unwrap().len(), buckets, "{w}");
+        let points = h["devices"][0]["points"].as_array().unwrap();
+        assert_eq!(points.len(), buckets, "{w}");
+        let since = parse_rfc3339_unix(h["since"].as_str().unwrap()).unwrap();
+        let until = parse_rfc3339_unix(h["until"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            until - since,
+            step * buckets as u64,
+            "{w} spans exactly its length"
+        );
+        // Every reading inside the window lands in its own 5 s bucket for
+        // the live presets (no two of ours share one).
+        let occupied: Vec<usize> = points
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p["count"].as_u64().unwrap_or(0) > 0)
+            .map(|(i, _)| i)
+            .collect();
+        let expected_in_window = if w == "1m" { 3 } else { 4 };
+        assert_eq!(h["devices"][0]["uplinks"], expected_in_window, "{w}");
+        if w != "15m" {
+            assert_eq!(occupied.len(), expected_in_window, "{w}: {occupied:?}");
+            assert_eq!(
+                *occupied.last().unwrap(),
+                buckets - 1,
+                "{w}: newest reading in the last bucket"
+            );
+        }
+    }
+}
 
 #[tokio::test]
 async fn history_requires_admin_certificate() {
@@ -171,6 +276,15 @@ async fn history_defaults_to_one_hour_and_buckets_every_device() {
     let silent = &devices[1];
     assert_eq!(silent["uplinks"], 0);
     assert!(silent["points"][0]["current"].is_null());
+
+    assert_eq!(h["threshold_ma"], 100);
+    let power = h["power"].as_array().unwrap();
+    assert_eq!(power.len(), BUCKETS);
+    let p = &power[BUCKETS - 1];
+    assert_eq!(p["on"], 1, "a-dev mean 200 mA >= 100: {p}");
+    assert_eq!(p["off"], 0, "{p}");
+    assert_eq!(p["unknown"], 1, "b-dev never reported: {p}");
+    assert_eq!(power[0]["unknown"], 2, "nobody had reported an hour ago");
 
     let timeline = h["timeline"].as_array().unwrap();
     assert_eq!(timeline.len(), BUCKETS);

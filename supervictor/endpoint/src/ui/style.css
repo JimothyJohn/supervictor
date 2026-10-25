@@ -104,6 +104,13 @@ a { color: var(--accent); }
 .badge.stale { color: var(--accent); }
 .badge.dark { color: var(--red); }
 .badge.unknown { color: var(--muted); }
+.badge.power.on { color: var(--green); border-color: var(--green); }
+.badge.power.off { color: var(--red); border-color: var(--red); }
+.current-inline { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
+.muted { color: var(--muted); font-size: 0.75rem; }
+form.inline input[type="number"] { width: 6.5rem; }
+.tile.on .tile-value { color: var(--green); }
+.tile.off .tile-value { color: var(--red); }
 form.inline { display: inline; }
 button {
   background: var(--surface);
@@ -144,6 +151,23 @@ input[type="text"] {
   font-size: 0.75rem;
 }
 #live-dot.connected { color: var(--green); }
+/* Live windows: a breathing dot, and a brief wash over whatever just changed. */
+#live-dot.live::before {
+  content: ''; display: inline-block; width: 0.5em; height: 0.5em; border-radius: 50%;
+  background: var(--green); margin-right: 0.35em; vertical-align: middle;
+  animation: sv-pulse 1.2s ease-in-out infinite;
+}
+@keyframes sv-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
+main.tick { animation: sv-tick 0.45s ease-out; }
+tr.tick td { animation: sv-tick 0.6s ease-out; }
+@keyframes sv-tick {
+  from { background-color: color-mix(in srgb, var(--green) 18%, transparent); }
+  to { background-color: transparent; }
+}
+.badge.power, .badge.staleness { transition: color 0.25s, border-color 0.25s; }
+@media (prefers-reduced-motion: reduce) {
+  #live-dot.live::before, main.tick, tr.tick td { animation: none; }
+}
 
 /* ── history views ─────────────────────────────────────────────────── */
 header nav a { margin-right: 1rem; font-size: 0.85rem; text-decoration: none; }
@@ -197,6 +221,9 @@ figure.chart svg:focus-visible { outline: 1px solid var(--accent); outline-offse
 .dot { stroke: var(--surface); stroke-width: 2; }
 .seg.fresh { fill: var(--green); } .seg.stale { fill: var(--accent); }
 .seg.dark { fill: var(--red); } .seg.never { fill: var(--muted); }
+.seg.on { fill: var(--green); } .seg.off { fill: var(--red); } .seg.unknown { fill: var(--muted); }
+.threshold { stroke: var(--accent); stroke-width: 1; }
+.threshold-label { fill: var(--muted); font-size: 10px; }
 .crosshair { stroke: var(--muted); stroke-width: 1; visibility: hidden; pointer-events: none; }
 .crosshair.on { visibility: visible; }
 .legend {
@@ -210,6 +237,7 @@ figure.chart svg:focus-visible { outline: 1px solid var(--accent); outline-offse
 .key.s6 { background: var(--s6); } .key.s7 { background: var(--s7); } .key.s-other { background: var(--s-other); }
 .key.fresh { background: var(--green); } .key.stale { background: var(--accent); }
 .key.dark { background: var(--red); } .key.never { background: var(--muted); }
+.key.on { background: var(--green); } .key.off { background: var(--red); } .key.unknown { background: var(--muted); }
 .tooltip {
   position: absolute; z-index: 2; pointer-events: none; min-width: 11rem;
   background: var(--bg); border: 1px solid var(--border); border-radius: 4px;

@@ -16,6 +16,7 @@ fn env_var_parsing() {
         "MESSAGES_TABLE",
         "SQLITE_DB_PATH",
         "REQUIRE_REGISTRATION",
+        "POWER_THRESHOLD_MA",
         "TLS_CERT",
         "TLS_KEY",
         "TLS_CLIENT_CA",
@@ -36,6 +37,26 @@ fn env_var_parsing() {
     assert_eq!(cfg.messages_table, "messages");
     assert_eq!(cfg.sqlite_db_path, ":memory:");
     assert!(!cfg.require_registration, "open ingest by default");
+    assert_eq!(cfg.power_threshold_ma, 100, "default power threshold");
+
+    // --- POWER_THRESHOLD_MA: any integer, whitespace tolerated, junk fails boot ---
+    for (raw, expected) in [("250", 250), (" 0 ", 0), ("-5", -5)] {
+        std::env::set_var("POWER_THRESHOLD_MA", raw);
+        assert_eq!(
+            Config::from_env().unwrap().power_threshold_ma,
+            expected,
+            "POWER_THRESHOLD_MA={raw:?}"
+        );
+    }
+    for bad in ["lots", "1.5", "100mA", ""] {
+        std::env::set_var("POWER_THRESHOLD_MA", bad);
+        let err = Config::from_env().unwrap_err();
+        assert!(
+            format!("{err}").contains("POWER_THRESHOLD_MA"),
+            "POWER_THRESHOLD_MA={bad:?}: {err}"
+        );
+    }
+    std::env::remove_var("POWER_THRESHOLD_MA");
 
     // --- REQUIRE_REGISTRATION: accepted spellings ---
     for (raw, expected) in [

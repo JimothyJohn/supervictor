@@ -48,7 +48,34 @@ impl SqliteDeviceStore {
                 ON uplinks(received_at);",
         )
         .map_err(|e| AppError::Store(StoreError::io("migration", e)))?;
+
+        // Additive column migrations: a database created before the column
+        // existed gets it on open; a fresh one already has it. Old binaries
+        // keep working against the new schema (they never select it).
+        let has_threshold = conn
+            .prepare("SELECT 1 FROM pragma_table_info('devices') WHERE name = 'power_threshold_ma'")
+            .and_then(|mut stmt| stmt.exists([]))
+            .map_err(|e| AppError::Store(StoreError::io("migration inspect", e)))?;
+        if !has_threshold {
+            conn.execute_batch("ALTER TABLE devices ADD COLUMN power_threshold_ma INTEGER")
+                .map_err(|e| AppError::Store(StoreError::io("migration add column", e)))?;
+        }
         Ok(())
+    }
+
+    /// Column list shared by every device SELECT, in `row_to_device` order.
+    const DEVICE_COLUMNS: &'static str =
+        "device_id, owner_id, subject_dn, status, created_at, power_threshold_ma";
+
+    fn row_to_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRecord> {
+        Ok(DeviceRecord {
+            device_id: row.get(0)?,
+            owner_id: row.get(1)?,
+            subject_dn: row.get(2)?,
+            status: row.get(3)?,
+            created_at: row.get(4)?,
+            power_threshold_ma: row.get(5)?,
+        })
     }
 }
 
@@ -59,8 +86,8 @@ impl DeviceStore for SqliteDeviceStore {
             .lock()
             .map_err(|_| AppError::Store(StoreError::Poisoned))?;
         conn.execute(
-            "INSERT INTO devices (device_id, owner_id, subject_dn, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![record.device_id, record.owner_id, record.subject_dn, record.status, record.created_at],
+            "INSERT INTO devices (device_id, owner_id, subject_dn, status, created_at, power_threshold_ma) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![record.device_id, record.owner_id, record.subject_dn, record.status, record.created_at, record.power_threshold_ma],
         )
         .map_err(|e| match e {
             rusqlite::Error::SqliteFailure(err, _)
@@ -81,19 +108,14 @@ impl DeviceStore for SqliteDeviceStore {
             .lock()
             .map_err(|_| AppError::Store(StoreError::Poisoned))?;
         let mut stmt = conn
-            .prepare("SELECT device_id, owner_id, subject_dn, status, created_at FROM devices WHERE device_id = ?1")
+            .prepare(&format!(
+                "SELECT {} FROM devices WHERE device_id = ?1",
+                Self::DEVICE_COLUMNS
+            ))
             .map_err(|e| AppError::Store(StoreError::io("get_device prepare", e)))?;
 
         let mut rows = stmt
-            .query_map(params![device_id], |row| {
-                Ok(DeviceRecord {
-                    device_id: row.get(0)?,
-                    owner_id: row.get(1)?,
-                    subject_dn: row.get(2)?,
-                    status: row.get(3)?,
-                    created_at: row.get(4)?,
-                })
-            })
+            .query_map(params![device_id], Self::row_to_device)
             .map_err(|e| AppError::Store(StoreError::io("get_device query", e)))?;
 
         match rows.next() {
@@ -109,19 +131,11 @@ impl DeviceStore for SqliteDeviceStore {
             .lock()
             .map_err(|_| AppError::Store(StoreError::Poisoned))?;
         let mut stmt = conn
-            .prepare("SELECT device_id, owner_id, subject_dn, status, created_at FROM devices")
+            .prepare(&format!("SELECT {} FROM devices", Self::DEVICE_COLUMNS))
             .map_err(|e| AppError::Store(StoreError::io("list_devices prepare", e)))?;
 
         let rows = stmt
-            .query_map([], |row| {
-                Ok(DeviceRecord {
-                    device_id: row.get(0)?,
-                    owner_id: row.get(1)?,
-                    subject_dn: row.get(2)?,
-                    status: row.get(3)?,
-                    created_at: row.get(4)?,
-                })
-            })
+            .query_map([], Self::row_to_device)
             .map_err(|e| AppError::Store(StoreError::io("list_devices query", e)))?;
 
         rows.collect::<Result<Vec<_>, _>>()
@@ -155,6 +169,33 @@ impl DeviceStore for SqliteDeviceStore {
                     params![device_id, status],
                 )
                 .map_err(|e| AppError::Store(StoreError::io("set_device_status", e)))?;
+            if updated == 0 {
+                return Err(AppError::DeviceNotFound {
+                    device_id: device_id.to_string(),
+                });
+            }
+        }
+        self.get_device(device_id)?.ok_or(AppError::DeviceNotFound {
+            device_id: device_id.to_string(),
+        })
+    }
+
+    fn set_device_threshold(
+        &self,
+        device_id: &str,
+        threshold_ma: Option<i64>,
+    ) -> Result<DeviceRecord, AppError> {
+        {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|_| AppError::Store(StoreError::Poisoned))?;
+            let updated = conn
+                .execute(
+                    "UPDATE devices SET power_threshold_ma = ?2 WHERE device_id = ?1",
+                    params![device_id, threshold_ma],
+                )
+                .map_err(|e| AppError::Store(StoreError::io("set_device_threshold", e)))?;
             if updated == 0 {
                 return Err(AppError::DeviceNotFound {
                     device_id: device_id.to_string(),

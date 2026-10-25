@@ -32,6 +32,7 @@ fn seed_device(store: &dyn DeviceStore, id: &str, status: &str) {
             subject_dn: Some(format!("CN={id},OU=devices")),
             status: status.into(),
             created_at: "2026-07-01T00:00:00+00:00".into(),
+            power_threshold_ma: None,
         })
         .unwrap();
 }
@@ -140,6 +141,28 @@ async fn fleet_page_lists_devices_with_status() {
     assert!(html.contains("register device"));
     // factory-02 never uplinked
     assert!(html.contains("never"));
+    // Power column: factory-01's last current (42 mA, 2026) is too old to
+    // trust -> unknown; factory-02 has no reading -> unknown.
+    assert!(html.contains("<th>power</th>"));
+    assert_eq!(html.matches("badge power unknown").count(), 2, "{html}");
+    assert!(
+        html.contains("42 mA"),
+        "last current shown beside the badge"
+    );
+}
+
+#[tokio::test]
+async fn fleet_page_shows_on_and_off_from_fresh_readings() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "pump", "active");
+    seed_device(store.as_ref(), "idle", "active");
+    let now = supervictor_endpoint::time::now_rfc3339();
+    seed_uplink(store.as_ref(), "pump", &now, 1500);
+    seed_uplink(store.as_ref(), "idle", &now, 0);
+    let (name, value) = dn(ADMIN_DN);
+    let html = server.get("/ui").add_header(name, value).await.text();
+    assert_eq!(html.matches("badge power on").count(), 1, "{html}");
+    assert_eq!(html.matches("badge power off").count(), 1, "{html}");
 }
 
 #[tokio::test]
@@ -311,6 +334,204 @@ async fn status_toggle_revokes_and_reactivates() {
     );
 }
 
+// ── Per-device power threshold ────────────────────────────────────────
+
+#[tokio::test]
+async fn threshold_form_sets_and_clears_the_override() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+
+    let mut req = server.post("/ui/devices/factory-01/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req
+        .form(&[("csrf", "tok"), ("threshold_ma", " 12000 ")])
+        .await;
+    assert_eq!(resp.status_code(), 303, "{}", resp.text());
+    assert_eq!(
+        resp.headers().get("location").unwrap(),
+        "/ui/devices/factory-01",
+        "back to the device page, not the fleet table"
+    );
+    assert_eq!(
+        store
+            .get_device("factory-01")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(12_000)
+    );
+
+    // The device page shows the override and the fleet default side by side;
+    // the fleet table marks the row.
+    let (name, value) = dn(ADMIN_DN);
+    let html = server
+        .get("/ui/devices/factory-01")
+        .add_header(name, value)
+        .await
+        .text();
+    assert!(html.contains("power threshold"), "{html}");
+    assert!(html.contains(r#"value="12000""#), "{html}");
+    assert!(html.contains("fleet default 100 mA"), "{html}");
+    assert!(html.contains(r#"placeholder="100""#), "{html}");
+    let (name, value) = dn(ADMIN_DN);
+    let fleet_html = server.get("/ui").add_header(name, value).await.text();
+    assert!(fleet_html.contains("≥ 12000"), "{fleet_html}");
+
+    // Empty submission clears.
+    let mut req = server.post("/ui/devices/factory-01/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req.form(&[("csrf", "tok"), ("threshold_ma", "")]).await;
+    assert_eq!(resp.status_code(), 303);
+    assert_eq!(
+        store
+            .get_device("factory-01")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        None
+    );
+    let (name, value) = dn(ADMIN_DN);
+    let html = server
+        .get("/ui/devices/factory-01")
+        .add_header(name, value)
+        .await
+        .text();
+    assert!(html.contains("(fleet default)"), "{html}");
+    assert!(!html.contains(r#"value="12000""#), "{html}");
+}
+
+#[tokio::test]
+async fn threshold_form_rejects_non_numbers_and_needs_csrf_and_admin() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+    store
+        .set_device_threshold("factory-01", Some(5_000))
+        .unwrap();
+
+    for bad in ["abc", "1.5", "12 000", "1e3", "٣"] {
+        let mut req = server.post("/ui/devices/factory-01/threshold");
+        for (name, value) in admin_with_cookie("tok") {
+            req = req.add_header(name, value);
+        }
+        let resp = req.form(&[("csrf", "tok"), ("threshold_ma", bad)]).await;
+        assert_eq!(resp.status_code(), 422, "{bad:?}: {}", resp.text());
+    }
+
+    // Wrong CSRF token.
+    let mut req = server.post("/ui/devices/factory-01/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req.form(&[("csrf", "other"), ("threshold_ma", "1")]).await;
+    assert_eq!(resp.status_code(), 403);
+
+    // Device certificate.
+    let (name, value) = dn(DEVICE_DN);
+    let resp = server
+        .post("/ui/devices/factory-01/threshold")
+        .add_header(name, value)
+        .form(&[("csrf", "tok"), ("threshold_ma", "1")])
+        .await;
+    assert_eq!(resp.status_code(), 403);
+
+    // Unknown device.
+    let mut req = server.post("/ui/devices/ghost/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req.form(&[("csrf", "tok"), ("threshold_ma", "1")]).await;
+    assert_eq!(resp.status_code(), 404);
+
+    assert_eq!(
+        store
+            .get_device("factory-01")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(5_000),
+        "nothing above may have written"
+    );
+}
+
+// ── Live windows ──────────────────────────────────────────────────────
+
+/// Short windows (≤ 5 min) mark the page live — the script re-renders on
+/// every uplink event and the timed reload is off; longer windows keep the
+/// 60 s reload and are not live. Both history and device pages.
+#[tokio::test]
+async fn short_windows_are_live_long_windows_reload() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+
+    for (path, live) in [
+        ("/ui/history?window=1m", true),
+        ("/ui/history?window=5m", true),
+        ("/ui/history?window=15m", false),
+        ("/ui/history", false),
+        ("/ui/devices/factory-01?window=5m", true),
+        ("/ui/devices/factory-01?window=1h", false),
+    ] {
+        let (name, value) = dn(ADMIN_DN);
+        let resp = server.get(path).add_header(name, value).await;
+        assert_eq!(resp.status_code(), 200, "{path}");
+        let html = resp.text();
+        assert_eq!(html.contains(r#"data-live="1""#), live, "{path}: live flag");
+        assert_eq!(
+            html.contains("data-refresh="),
+            !live,
+            "{path}: timed reload"
+        );
+        // The filter row offers every preset, live ones included.
+        for w in ["1m", "5m", "15m", "1h", "6h", "24h", "7d"] {
+            assert!(html.contains(&format!("?window={w}\"")), "{path} lacks {w}");
+        }
+    }
+
+    // The fleet table is neither: rows are patched in place by the stream.
+    let (name, value) = dn(ADMIN_DN);
+    let html = server.get("/ui").add_header(name, value).await.text();
+    assert!(!html.contains(r#"data-live="1""#));
+    assert!(!html.contains("data-refresh="));
+    // The scripts that make it work ship on every page.
+    assert!(
+        html.contains("svBindCharts"),
+        "chart binding is re-runnable"
+    );
+    assert!(html.contains("data-live"), "live script reads the flag");
+    assert!(
+        html.contains("DOMParser"),
+        "live script swaps <main> from a fresh render"
+    );
+}
+
+/// Fleet rows carry the threshold the live script judges `current` against,
+/// so a pushed reading flips the badge without a round trip.
+#[tokio::test]
+async fn fleet_rows_carry_their_power_threshold() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "bench-01", "active");
+    seed_device(store.as_ref(), "press-01", "active");
+    store
+        .set_device_threshold("press-01", Some(12_000))
+        .unwrap();
+
+    let (name, value) = dn(ADMIN_DN);
+    let html = server.get("/ui").add_header(name, value).await.text();
+    assert!(
+        html.contains(r#"data-device="bench-01" data-threshold="100""#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"data-device="press-01" data-threshold="12000""#),
+        "{html}"
+    );
+    assert!(html.contains("current-now"), "a slot for the live current");
+}
+
 #[tokio::test]
 async fn status_rejects_values_outside_whitelist() {
     let (server, store) = server_with_store();
@@ -392,18 +613,32 @@ async fn history_page_renders_tiles_status_chart_and_a_chart_per_metric() {
     // Headline tiles reflect the fleet right now.
     assert!(html.contains("active devices"));
     assert!(html.contains("3 registered, 1 inactive"));
-    // One status chart plus one chart per metric, each with a table twin.
+    // Current first (with the threshold line), then power, then status,
+    // then the other metrics; every chart has a table twin.
+    let pos = |needle: &str| {
+        html.find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}"))
+    };
+    assert!(pos("id=\"current\"") < pos("id=\"power\""));
+    assert!(pos("id=\"power\"") < pos("id=\"status\""));
+    assert!(pos("id=\"status\"") < pos("id=\"temp_c\""));
     assert_eq!(
         html.matches("<figure class=\"chart status-chart\"").count(),
-        1
+        2
     );
+    assert!(
+        html.contains("class=\"threshold\""),
+        "threshold line on the current chart"
+    );
+    assert!(html.contains("on ≥ 100 mA"));
+    assert!(html.contains("powered on") && html.contains("powered off"));
     for key in ["current", "temp_c", "humidity_pct", "rssi_dbm", "heap_free"] {
         assert!(
             html.contains(&format!("<figure class=\"chart\" id=\"{key}\"")),
             "no chart for {key}"
         );
     }
-    assert_eq!(html.matches("class=\"table-view\"").count(), 6);
+    assert_eq!(html.matches("class=\"table-view\"").count(), 7);
     // Both active devices appear as series (legend + end labels); the
     // retired one is in the series list too (every registered device).
     assert!(html.contains("factory-01"));
@@ -507,6 +742,16 @@ async fn device_page_has_window_filters_and_metric_charts() {
     let html = resp.text();
     assert!(html.contains("class=\"active\" href=\"/ui/devices/factory-01?window=6h\""));
     assert_eq!(html.matches("<figure class=\"chart\"").count(), 5);
+    assert!(
+        html.contains("badge power off"),
+        "55 mA fresh reading is off: {html}"
+    );
+    assert!(html.contains("55 mA, threshold 100 mA"));
+    assert_eq!(
+        html.matches("class=\"threshold\"").count(),
+        1,
+        "only the current chart"
+    );
     assert!(
         !html.contains("class=\"legend\""),
         "a single series needs no legend"

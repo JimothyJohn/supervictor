@@ -58,6 +58,12 @@ impl DynamoDeviceStore {
             "created_at".into(),
             AttributeValue::S(record.created_at.clone()),
         );
+        if let Some(t) = record.power_threshold_ma {
+            item.insert(
+                "power_threshold_ma".into(),
+                AttributeValue::N(t.to_string()),
+            );
+        }
         item
     }
 
@@ -85,6 +91,23 @@ impl DynamoDeviceStore {
                 .map(|s| s.to_string()),
             status: get_s("status")?,
             created_at: get_s("created_at")?,
+            // A stored but unparseable number is a corrupt row, not "no
+            // override": surface it rather than silently judging against
+            // the fleet default.
+            power_threshold_ma: match item.get("power_threshold_ma") {
+                None => None,
+                Some(v) => Some(
+                    v.as_n()
+                        .ok()
+                        .and_then(|n| n.parse::<i64>().ok())
+                        .ok_or_else(|| {
+                            AppError::Store(StoreError::io(
+                                "item_to_device",
+                                "power_threshold_ma is not an integer",
+                            ))
+                        })?,
+                ),
+            },
         })
     }
 }
@@ -205,6 +228,52 @@ impl DeviceStore for DynamoDeviceStore {
     /// One query per device (`limit 1`, newest first). Fine at current fleet
     /// sizes; at 100+ devices pre-aggregate a latest-uplink item instead
     /// (TODO.md / FRONTEND plan open question).
+    fn set_device_threshold(
+        &self,
+        device_id: &str,
+        threshold_ma: Option<i64>,
+    ) -> Result<DeviceRecord, AppError> {
+        let base = self
+            .client
+            .update_item()
+            .table_name(&self.devices_table)
+            .key("device_id", AttributeValue::S(device_id.to_string()))
+            .expression_attribute_names("#t", "power_threshold_ma")
+            .condition_expression("attribute_exists(device_id)")
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew);
+        let request = match threshold_ma {
+            Some(t) => base
+                .update_expression("SET #t = :t")
+                .expression_attribute_values(":t", AttributeValue::N(t.to_string())),
+            None => base.update_expression("REMOVE #t"),
+        };
+
+        match block_on(request.send()) {
+            Ok(out) => {
+                let item = out.attributes().ok_or_else(|| {
+                    AppError::Store(StoreError::io(
+                        "set_device_threshold",
+                        "no attributes returned",
+                    ))
+                })?;
+                Self::item_to_device(item)
+            }
+            Err(e) => {
+                let service_err = e.into_service_error();
+                if service_err.is_conditional_check_failed_exception() {
+                    Err(AppError::DeviceNotFound {
+                        device_id: device_id.to_string(),
+                    })
+                } else {
+                    Err(AppError::Store(StoreError::io(
+                        "set_device_threshold",
+                        service_err,
+                    )))
+                }
+            }
+        }
+    }
+
     fn latest_uplinks(&self) -> Result<Vec<UplinkRecord>, AppError> {
         let devices = self.list_devices()?;
         let mut out = Vec::with_capacity(devices.len());
@@ -333,6 +402,7 @@ mod tests {
             subject_dn: None,
             status: "active".into(),
             created_at: "2025-01-01T00:00:00Z".into(),
+            power_threshold_ma: None,
         }
     }
 

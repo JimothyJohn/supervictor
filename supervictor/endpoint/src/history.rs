@@ -14,7 +14,7 @@ use serde::ser::SerializeMap;
 use serde::Serialize;
 
 use crate::error::AppError;
-use crate::fleet::{staleness_of, Staleness, DARK_SECS};
+use crate::fleet::{payload_current, power_state, staleness_of, PowerState, Staleness, DARK_SECS};
 use crate::live;
 use crate::models::{DeviceRecord, UplinkRecord};
 use crate::store::DeviceStore;
@@ -22,10 +22,18 @@ use crate::time::{format_rfc3339, parse_rfc3339_unix, parse_rfc3339_unix_ms};
 use supervictor_common::levels;
 use supervictor_common::status;
 
-/// Buckets per window: every chart has the same x resolution, whatever
-/// the window (15 m → 10 s buckets, 7 d → 1 h 52 m). 90 divides every
-/// preset exactly, so `step * BUCKETS == seconds`.
+/// Buckets per window for the standard presets: every chart has the same x
+/// resolution, whatever the window (15 m → 10 s buckets, 7 d → 1 h 52 m).
+/// 90 divides every standard preset exactly, so `step * BUCKETS == seconds`.
+/// The live presets (`1m`, `5m`) use 5 s buckets instead — the uplink
+/// period — so each bucket holds one reading rather than a gap
+/// ([`Window::buckets`]).
 pub const BUCKETS: usize = 90;
+/// Bucket width of the live presets (seconds): the device uplink period.
+pub const LIVE_STEP_S: u64 = 5;
+/// Windows at or under this length are "live": the dashboard re-renders on
+/// every uplink instead of reloading on a timer.
+pub const LIVE_MAX_SECS: u64 = 5 * 60;
 /// Most uplink rows one history request will read. Beyond it the window is
 /// truncated at the recent end and `truncated` is set — a bounded read,
 /// not a bounded dashboard; 50k is ~3 days of a 6-device fleet at 5 s.
@@ -34,6 +42,10 @@ pub const MAX_ROWS: usize = 50_000;
 /// Window presets. Parsed from `?window=` by exact match only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Window {
+    /// Last minute (live).
+    M1,
+    /// Last 5 minutes (live).
+    M5,
     /// Last 15 minutes.
     M15,
     /// Last hour.
@@ -48,13 +60,23 @@ pub enum Window {
 
 impl Window {
     /// Every preset, in menu order.
-    pub const ALL: [Window; 5] = [Window::M15, Window::H1, Window::H6, Window::H24, Window::D7];
+    pub const ALL: [Window; 7] = [
+        Window::M1,
+        Window::M5,
+        Window::M15,
+        Window::H1,
+        Window::H6,
+        Window::H24,
+        Window::D7,
+    ];
     /// Default when the query carries no window.
     pub const DEFAULT: Window = Window::H1;
 
     /// Query-string token for the preset.
     pub fn label(self) -> &'static str {
         match self {
+            Window::M1 => "1m",
+            Window::M5 => "5m",
             Window::M15 => "15m",
             Window::H1 => "1h",
             Window::H6 => "6h",
@@ -66,6 +88,8 @@ impl Window {
     /// Window length in seconds.
     pub fn seconds(self) -> u64 {
         match self {
+            Window::M1 => 60,
+            Window::M5 => 5 * 60,
             Window::M15 => 15 * 60,
             Window::H1 => 60 * 60,
             Window::H6 => 6 * 60 * 60,
@@ -74,9 +98,35 @@ impl Window {
         }
     }
 
-    /// Bucket width in seconds.
+    /// Live presets re-render on every uplink; the rest reload on a timer.
+    pub fn is_live(self) -> bool {
+        self.seconds() <= LIVE_MAX_SECS
+    }
+
+    /// Buckets across the window: one per uplink period for the live
+    /// presets, [`BUCKETS`] otherwise.
+    pub fn buckets(self) -> usize {
+        if self.is_live() {
+            (self.seconds() / LIVE_STEP_S).max(1) as usize
+        } else {
+            BUCKETS
+        }
+    }
+
+    /// Bucket width in seconds; `step * buckets == seconds` for every preset.
     pub fn step(self) -> u64 {
-        (self.seconds() / BUCKETS as u64).max(1)
+        (self.seconds() / self.buckets() as u64).max(1)
+    }
+
+    /// The bucket grid for this window ending at `now_unix`.
+    pub fn grid(self, now_unix: u64) -> Grid {
+        let step = self.step();
+        let buckets = self.buckets();
+        Grid {
+            since: now_unix.saturating_sub(step * buckets as u64),
+            step,
+            buckets,
+        }
     }
 
     /// Whitelist parse: `None` or the empty token is the default, anything
@@ -90,7 +140,7 @@ impl Window {
                 .into_iter()
                 .find(|w| w.label() == t)
                 .ok_or_else(|| AppError::InvalidPayload {
-                    detail: "window must be one of 15m, 1h, 6h, 24h, 7d".into(),
+                    detail: "window must be one of 1m, 5m, 15m, 1h, 6h, 24h, 7d".into(),
                     structured: Some(serde_json::json!({
                         "field": "window",
                         "allowed": Window::ALL.iter().map(|w| w.label()).collect::<Vec<_>>(),
@@ -162,11 +212,37 @@ impl TimelinePoint {
     }
 }
 
+/// Active-device power counts as of the end of one bucket.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct PowerPoint {
+    /// Bucket start, Unix seconds (counts are evaluated at `t + step`).
+    pub t: u64,
+    /// Last current at or above the threshold.
+    pub on: usize,
+    /// Last current below the threshold.
+    pub off: usize,
+    /// No reading, or the last one older than `DARK_SECS`.
+    pub unknown: usize,
+}
+
+impl PowerPoint {
+    /// Active devices represented at this point.
+    pub fn total(&self) -> usize {
+        self.on + self.off + self.unknown
+    }
+}
+
 /// The `/fleet/history` response.
 #[derive(Debug, Clone, Serialize)]
 pub struct History {
     /// Preset label (`"1h"`).
     pub window: &'static str,
+    /// Live preset: the dashboard re-renders on every uplink.
+    pub live: bool,
+    /// Buckets in every series of this response.
+    pub buckets: usize,
+    /// Current (mA) at or above which a device counts as on.
+    pub threshold_ma: i64,
     /// Window start, RFC 3339.
     pub since: String,
     /// Window end (`now`), RFC 3339.
@@ -175,6 +251,8 @@ pub struct History {
     pub step_s: u64,
     /// Active-device staleness per bucket.
     pub timeline: Vec<TimelinePoint>,
+    /// Active-device power state per bucket.
+    pub power: Vec<PowerPoint>,
     /// Per-device bucketed telemetry, sorted by device id, every
     /// registered device present (empty series for silent ones).
     pub devices: Vec<DeviceSeries>,
@@ -182,34 +260,61 @@ pub struct History {
     pub truncated: bool,
 }
 
-/// Bucket index of `t` inside the closed window `[since, until]`, where
-/// `until = since + BUCKETS * step` is "now". The end is inclusive because
-/// `now` is whole seconds while `received_at` carries a fraction: an uplink
-/// that landed this very second belongs in the last bucket, not nowhere.
-fn bucket_of(t: u64, since: u64, step: u64) -> Option<usize> {
-    let until = since + BUCKETS as u64 * step;
-    if t < since || t > until {
-        return None;
+/// The bucket grid of one window: `buckets` buckets of `step` seconds from
+/// `since` up to `until() == since + buckets * step`, which is "now".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Grid {
+    /// Window start, Unix seconds.
+    pub since: u64,
+    /// Bucket width, seconds (≥ 1).
+    pub step: u64,
+    /// Number of buckets (≥ 1).
+    pub buckets: usize,
+}
+
+impl Grid {
+    /// The standard 90-bucket grid starting at `since` (tests, demos).
+    pub fn standard(since: u64, step: u64) -> Grid {
+        Grid {
+            since,
+            step,
+            buckets: BUCKETS,
+        }
     }
-    Some((((t - since) / step) as usize).min(BUCKETS - 1))
+
+    /// Window end ("now").
+    pub fn until(&self) -> u64 {
+        self.since + self.buckets as u64 * self.step
+    }
+
+    /// Start of bucket `i`.
+    pub fn t_of(&self, i: usize) -> u64 {
+        self.since + i as u64 * self.step
+    }
+
+    /// Bucket index of `t` inside the closed window `[since, until]`. The
+    /// end is inclusive because `now` is whole seconds while `received_at`
+    /// carries a fraction: an uplink that landed this very second belongs in
+    /// the last bucket, not nowhere.
+    pub fn bucket_of(&self, t: u64) -> Option<usize> {
+        if t < self.since || t > self.until() {
+            return None;
+        }
+        Some((((t - self.since) / self.step.max(1)) as usize).min(self.buckets.saturating_sub(1)))
+    }
 }
 
 /// Bucket a device's rows (any order, any device mix — rows for other
-/// devices are ignored) into `BUCKETS` mean points.
+/// devices are ignored) into `grid.buckets` mean points.
 ///
 /// A row that carries a `levels` burst contributes every sample in it:
 /// the earlier samples dequantised and placed `levels_ms` apart before the
 /// receive time, the last one as the row's full-precision scalar fields.
 /// `count` and `uplinks` still count rows, not samples.
-pub fn bucket_series(
-    device_id: &str,
-    rows: &[UplinkRecord],
-    since: u64,
-    step: u64,
-) -> DeviceSeries {
-    let mut sums = vec![[0.0f64; METRICS.len()]; BUCKETS];
-    let mut counts = vec![[0usize; METRICS.len()]; BUCKETS];
-    let mut hits = vec![0usize; BUCKETS];
+pub fn bucket_series(device_id: &str, rows: &[UplinkRecord], grid: Grid) -> DeviceSeries {
+    let mut sums = vec![[0.0f64; METRICS.len()]; grid.buckets];
+    let mut counts = vec![[0usize; METRICS.len()]; grid.buckets];
+    let mut hits = vec![0usize; grid.buckets];
     let mut uplinks = 0;
     for row in rows.iter().filter(|r| r.device_id == device_id) {
         let Some(t) = parse_rfc3339_unix(&row.received_at) else {
@@ -218,7 +323,7 @@ pub fn bucket_series(
         if let Some(burst) = live::burst_of(&row.payload) {
             let received_ms = parse_rfc3339_unix_ms(&row.received_at).unwrap_or(t * 1_000);
             for k in 0..burst.len().saturating_sub(1) {
-                let Some(i) = bucket_of(burst.time_of(k, received_ms) / 1_000, since, step) else {
+                let Some(i) = grid.bucket_of(burst.time_of(k, received_ms) / 1_000) else {
                     continue;
                 };
                 let Some(sample) = burst.sample(k) else {
@@ -232,7 +337,7 @@ pub fn bucket_series(
                 }
             }
         }
-        let Some(i) = bucket_of(t, since, step) else {
+        let Some(i) = grid.bucket_of(t) else {
             continue;
         };
         uplinks += 1;
@@ -244,7 +349,7 @@ pub fn bucket_series(
             }
         }
     }
-    let points = (0..BUCKETS)
+    let points = (0..grid.buckets)
         .map(|i| {
             let mut values = [None; METRICS.len()];
             for m in 0..METRICS.len() {
@@ -253,7 +358,7 @@ pub fn bucket_series(
                 }
             }
             Point {
-                t: since + i as u64 * step,
+                t: grid.t_of(i),
                 count: hits[i],
                 values,
             }
@@ -282,9 +387,9 @@ pub fn status_timeline(
     devices: &[DeviceRecord],
     latest: &HashMap<String, u64>,
     rows: &[UplinkRecord],
-    since: u64,
-    step: u64,
+    grid: Grid,
 ) -> Vec<TimelinePoint> {
+    let Grid { since, step, .. } = grid;
     // Per active device, ascending uplink times inside the rows.
     let mut times: HashMap<&str, Vec<u64>> = devices
         .iter()
@@ -304,7 +409,7 @@ pub fn status_timeline(
     }
     let mut cursors: HashMap<&str, usize> = times.keys().map(|k| (*k, 0)).collect();
 
-    (0..BUCKETS)
+    (0..grid.buckets)
         .map(|i| {
             let t0 = since + i as u64 * step;
             let at = t0 + step;
@@ -346,14 +451,83 @@ fn staleness_of_unix(last: u64, now: u64) -> Staleness {
     staleness_of(Some(&format_rfc3339(last, 0)), now)
 }
 
+/// Power state of the active devices at the end of every bucket: the
+/// last `current` at or before the bucket end, judged against the device's
+/// own threshold (else `threshold_ma`), and `unknown` once that reading is
+/// `DARK_SECS` old (or never existed). Same row contract as
+/// [`status_timeline`].
+pub fn power_timeline(
+    devices: &[DeviceRecord],
+    rows: &[UplinkRecord],
+    grid: Grid,
+    threshold_ma: i64,
+) -> Vec<PowerPoint> {
+    let Grid { since, step, .. } = grid;
+    let thresholds: HashMap<&str, i64> = devices
+        .iter()
+        .map(|d| (d.device_id.as_str(), d.effective_threshold_ma(threshold_ma)))
+        .collect();
+    let mut readings: HashMap<&str, Vec<(u64, Option<i64>)>> = devices
+        .iter()
+        .filter(|d| d.status == status::ACTIVE)
+        .map(|d| (d.device_id.as_str(), Vec::new()))
+        .collect();
+    for row in rows {
+        if let (Some(list), Some(t)) = (
+            readings.get_mut(row.device_id.as_str()),
+            parse_rfc3339_unix(&row.received_at),
+        ) {
+            list.push((t, payload_current(&row.payload)));
+        }
+    }
+    for list in readings.values_mut() {
+        list.sort_unstable_by_key(|(t, _)| *t);
+    }
+    let mut cursors: HashMap<&str, usize> = readings.keys().map(|k| (*k, 0)).collect();
+
+    (0..grid.buckets)
+        .map(|i| {
+            let t0 = since + i as u64 * step;
+            let at = t0 + step;
+            let mut point = PowerPoint {
+                t: t0,
+                on: 0,
+                off: 0,
+                unknown: 0,
+            };
+            for (id, list) in &readings {
+                let cursor = cursors.get_mut(id).expect("cursor per device");
+                while *cursor < list.len() && list[*cursor].0 <= at {
+                    *cursor += 1;
+                }
+                let state = match cursor.checked_sub(1).map(|c| list[c]) {
+                    Some((last, current)) => power_state(
+                        current,
+                        staleness_of_unix(last, at),
+                        thresholds.get(id).copied().unwrap_or(threshold_ma),
+                    ),
+                    None => PowerState::Unknown,
+                };
+                match state {
+                    PowerState::On => point.on += 1,
+                    PowerState::Off => point.off += 1,
+                    PowerState::Unknown => point.unknown += 1,
+                }
+            }
+            point
+        })
+        .collect()
+}
+
 /// Assemble the fleet history for `window` ending at `now_unix`.
 pub fn fleet_history(
     store: &dyn DeviceStore,
     window: Window,
     now_unix: u64,
+    threshold_ma: i64,
 ) -> Result<History, AppError> {
-    let step = window.step();
-    let since = now_unix.saturating_sub(step * BUCKETS as u64);
+    let grid = window.grid(now_unix);
+    let Grid { since, step, .. } = grid;
     let lookback = since.saturating_sub(DARK_SECS);
 
     let mut devices = store.list_devices()?;
@@ -368,18 +542,23 @@ pub fn fleet_history(
     let truncated = rows.len() > MAX_ROWS;
     rows.truncate(MAX_ROWS);
 
-    let timeline = status_timeline(&devices, &latest, &rows, since, step);
+    let timeline = status_timeline(&devices, &latest, &rows, grid);
+    let power = power_timeline(&devices, &rows, grid, threshold_ma);
     let series = devices
         .iter()
-        .map(|d| bucket_series(&d.device_id, &rows, since, step))
+        .map(|d| bucket_series(&d.device_id, &rows, grid))
         .collect();
 
     Ok(History {
         window: window.label(),
+        live: window.is_live(),
+        buckets: grid.buckets,
+        threshold_ma,
         since: format_rfc3339(since, 0),
         until: format_rfc3339(now_unix, 0),
         step_s: step,
         timeline,
+        power,
         devices: series,
         truncated,
     })
@@ -393,13 +572,12 @@ pub fn device_history(
     window: Window,
     now_unix: u64,
 ) -> Result<(DeviceSeries, bool), AppError> {
-    let step = window.step();
-    let since = now_unix.saturating_sub(step * BUCKETS as u64);
+    let grid = window.grid(now_unix);
     let mut rows =
-        store.device_uplinks_since(device_id, &format_rfc3339(since, 0), MAX_ROWS + 1)?;
+        store.device_uplinks_since(device_id, &format_rfc3339(grid.since, 0), MAX_ROWS + 1)?;
     let truncated = rows.len() > MAX_ROWS;
     rows.truncate(MAX_ROWS);
-    Ok((bucket_series(device_id, &rows, since, step), truncated))
+    Ok((bucket_series(device_id, &rows, grid), truncated))
 }
 
 #[cfg(test)]
@@ -416,6 +594,7 @@ mod tests {
             subject_dn: None,
             status: status.into(),
             created_at: "2026-01-01T00:00:00+00:00".into(),
+            power_threshold_ma: None,
         }
     }
 
@@ -458,8 +637,60 @@ mod tests {
     #[test]
     fn window_steps_cover_the_window_exactly() {
         for w in Window::ALL {
-            assert_eq!(w.step() * BUCKETS as u64, w.seconds(), "{w:?}");
+            assert_eq!(w.step() * w.buckets() as u64, w.seconds(), "{w:?}");
+            let g = w.grid(NOW);
+            assert_eq!(g.until(), NOW, "{w:?}");
+            assert_eq!(g.buckets, w.buckets());
+            assert_eq!(
+                g.bucket_of(NOW),
+                Some(w.buckets() - 1),
+                "now lands in the last bucket"
+            );
+            assert_eq!(g.bucket_of(g.since), Some(0));
+            assert_eq!(g.bucket_of(g.since - 1), None);
+            assert_eq!(g.bucket_of(NOW + 1), None);
         }
+    }
+
+    /// Short windows are live and bucketed at the uplink period; the
+    /// standard presets keep 90 buckets and a timed reload.
+    #[test]
+    fn live_windows_bucket_at_the_uplink_period() {
+        assert!(Window::M1.is_live());
+        assert!(Window::M5.is_live());
+        assert_eq!(Window::M1.buckets(), 12);
+        assert_eq!(Window::M5.buckets(), 60);
+        assert_eq!(Window::M1.step(), LIVE_STEP_S);
+        assert_eq!(Window::M5.step(), LIVE_STEP_S);
+        for w in [Window::M15, Window::H1, Window::H6, Window::H24, Window::D7] {
+            assert!(!w.is_live(), "{w:?}");
+            assert_eq!(w.buckets(), BUCKETS, "{w:?}");
+        }
+        assert_eq!(Window::parse(Some("1m")).unwrap(), Window::M1);
+        assert_eq!(Window::parse(Some("5m")).unwrap(), Window::M5);
+        assert!(Window::parse(Some("2m")).is_err());
+        // A live grid produces live-sized series and timelines.
+        let g = Window::M5.grid(NOW);
+        let rows = vec![UplinkRecord {
+            device_id: "a".into(),
+            received_at: format_rfc3339(NOW - 7, 0),
+            payload: serde_json::json!({ "current": 4000 }),
+        }];
+        let s = bucket_series("a", &rows, g);
+        assert_eq!(s.points.len(), 60);
+        assert_eq!(s.uplinks, 1);
+        assert_eq!(
+            s.points[58].count, 1,
+            "NOW-7 is in the second-to-last 5 s bucket"
+        );
+        assert_eq!(
+            power_timeline(&[device("a", "active")], &rows, g, 100).len(),
+            60
+        );
+        assert_eq!(
+            status_timeline(&[device("a", "active")], &HashMap::new(), &rows, g).len(),
+            60
+        );
     }
 
     #[test]
@@ -483,7 +714,7 @@ mod tests {
             row("a", since + 901, serde_json::json!({"current": 999})),
             row("a", since + 900, serde_json::json!({"current": 50})),
         ];
-        let s = bucket_series("a", &rows, since, step);
+        let s = bucket_series("a", &rows, Grid::standard(since, step));
         assert_eq!(s.points.len(), BUCKETS);
         assert_eq!(
             s.uplinks, 4,
@@ -524,7 +755,7 @@ mod tests {
             since + 100,
             serde_json::json!({ "current": 3000, "levels": flat, "levels_ms": 10_000 }),
         )];
-        let s = bucket_series("a", &rows, since, step);
+        let s = bucket_series("a", &rows, Grid::standard(since, step));
         assert_eq!(s.uplinks, 1, "rows, not samples");
         assert_eq!(s.points[8].count, 0, "count stays per row");
         let v = s.points[8].values[0].unwrap();
@@ -557,7 +788,7 @@ mod tests {
             since + 5,
             serde_json::json!({ "current": 1, "levels": flat, "levels_ms": 10_000 }),
         )];
-        let s = bucket_series("a", &rows, since, step);
+        let s = bucket_series("a", &rows, Grid::standard(since, step));
         assert_eq!(s.uplinks, 1);
         assert_eq!(s.points[0].values[0], Some(1.0));
     }
@@ -578,7 +809,7 @@ mod tests {
                 payload: serde_json::json!({"current": 1}),
             },
         ];
-        let s = bucket_series("a", &rows, since, 10);
+        let s = bucket_series("a", &rows, Grid::standard(since, 10));
         // 1e308 + -1e308 + 4 over three numeric values: finite, no NaN.
         let v = s.points[0].values[0].unwrap();
         assert!(v.is_finite(), "{v}");
@@ -630,7 +861,7 @@ mod tests {
         latest.insert("newcomer".to_string(), NOW - 600);
         latest.insert("revoked".to_string(), NOW - 1);
 
-        let tl = status_timeline(&devices, &latest, &rows, since, step);
+        let tl = status_timeline(&devices, &latest, &rows, Grid::standard(since, step));
         assert_eq!(tl.len(), BUCKETS);
         for p in &tl {
             assert_eq!(p.total(), 4, "only active devices: {p:?}");
@@ -664,15 +895,57 @@ mod tests {
         // Uplink exactly FRESH_SECS before the end of the last bucket → stale.
         let rows = vec![row("a", NOW - FRESH_SECS, serde_json::json!({}))];
         let latest = HashMap::from([("a".to_string(), NOW - FRESH_SECS)]);
-        let tl = status_timeline(&devices, &latest, &rows, since, step);
+        let tl = status_timeline(&devices, &latest, &rows, Grid::standard(since, step));
         assert_eq!(tl[BUCKETS - 1].stale, 1, "{:?}", tl[BUCKETS - 1]);
         // One second later it was still fresh.
         assert_eq!(tl[BUCKETS - 2].fresh, 1, "{:?}", tl[BUCKETS - 2]);
     }
 
     #[test]
+    fn power_timeline_follows_the_last_reading_and_forgets_dark_devices() {
+        let step = 10;
+        let since = NOW - step * BUCKETS as u64;
+        let devices = vec![
+            device("pump", "active"),
+            device("silent", "active"),
+            device("revoked", "inactive"),
+        ];
+        let rows = vec![
+            // on at the start of the window, drops out in the middle, back on at the end
+            row("pump", since + 5, serde_json::json!({"current": 1500})),
+            row("pump", since + 405, serde_json::json!({"current": 0})),
+            row("pump", since + 805, serde_json::json!({"current": 100})),
+            row("revoked", NOW, serde_json::json!({"current": 9000})),
+        ];
+        let tl = power_timeline(&devices, &rows, Grid::standard(since, step), 100);
+        assert_eq!(tl.len(), BUCKETS);
+        assert!(tl.iter().all(|p| p.total() == 2), "active devices only");
+        assert_eq!(
+            tl[0],
+            PowerPoint {
+                t: since,
+                on: 1,
+                off: 0,
+                unknown: 1
+            }
+        );
+        assert_eq!(tl[40].on, 0, "{:?}", tl[40]);
+        assert_eq!(tl[40].off, 1, "dropout to 0 reads as off: {:?}", tl[40]);
+        assert_eq!(tl[80].on, 1, "100 mA == threshold is on: {:?}", tl[80]);
+        assert_eq!(tl[BUCKETS - 1].on, 1);
+
+        // A reading older than DARK_SECS no longer counts as a power state.
+        let long = Window::D7.step();
+        let since = NOW - long * BUCKETS as u64;
+        let rows = vec![row("pump", since + 1, serde_json::json!({"current": 1500}))];
+        let tl = power_timeline(&devices[..1], &rows, Grid::standard(since, long), 100);
+        assert_eq!(tl[0].on, 1, "{:?}", tl[0]);
+        assert_eq!(tl[BUCKETS - 1].unknown, 1, "{:?}", tl[BUCKETS - 1]);
+    }
+
+    #[test]
     fn timeline_with_no_devices_is_all_zero_but_full_length() {
-        let tl = status_timeline(&[], &HashMap::new(), &[], 0, 1);
+        let tl = status_timeline(&[], &HashMap::new(), &[], Grid::standard(0, 1));
         assert_eq!(tl.len(), BUCKETS);
         assert!(tl.iter().all(|p| p.total() == 0));
     }

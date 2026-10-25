@@ -29,13 +29,40 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   (`WATCHDOG_INTERVAL_SECS`, 0 disables).
 - Fleet history: `GET /fleet/history?window=` (JSON) and `/ui/history`,
   `/ui/devices/{id}?window=` (charts) in `src/history.rs` + `src/ui/charts.rs`.
-  `window` is an exact whitelist (15m, 1h, 6h, 24h, 7d; default 1h; else
-  422), always 90 buckets, row cap `MAX_ROWS` (response says `truncated`).
+  `window` is an exact whitelist (1m, 5m, 15m, 1h, 6h, 24h, 7d; default 1h;
+  else 422), row cap `MAX_ROWS` (response says `truncated`). Standard presets
+  are 90 buckets; the **live** presets (≤ 5 min: 1m, 5m) bucket at the 5 s
+  uplink period (12 / 60 buckets; `Window::buckets`, `Window::grid`) and the
+  response says `live: true` + `buckets`. Live pages set `data-live="1"` and
+  no `data-refresh`: the SSE script re-renders `<main>` from a fresh GET on
+  every uplink (150 ms coalescing, no overlapping fetches, never while a
+  form has focus, plus a 15 s tick so the axis moves) and re-binds the chart
+  hover via `window.svBindCharts`. Longer windows keep the 60 s visible-tab
+  reload. The fleet table is patched in place from the event (`current-now`,
+  power badge against the row's `data-threshold`).
   Store support: `uplinks_since` / `device_uplinks_since` (SQLite range on
   `received_at`, DynamoDB sort-key range). Charts are server-rendered SVG
   (no JS chart lib); the inline script only adds hover/keyboard tooltips
   and a visible-tab reload. Colours by fleet slot (`.s0`–`.s7`), validated
   against the dark surface — don't hand-pick new ones.
+- Power state: `fleet::power_state` — last `current` ≥ the device's
+  threshold is `on`, below is `off`, no reading or a dark / never device is
+  `unknown`. The threshold is the device's own `power_threshold_ma`
+  (`DeviceRecord::effective_threshold_ma`) when set, else the fleet default
+  `POWER_THRESHOLD_MA` (100, any i64). Surfaces on `/fleet` (`current`,
+  `power`, `threshold_ma`, `threshold_overridden`), `/fleet/summary` (`on`,
+  `off`), `/fleet/history` (`power` timeline per device threshold;
+  `threshold_ma` there is the fleet default), the fleet table (`≥ N` beside
+  an overridden row) and the charts (current chart first, the device's
+  threshold drawn).
+- Per-device threshold: `PUT /devices/{id}/threshold` (admin mTLS) with
+  `{"power_threshold_ma": 12000}`; `{}`, `null` or an empty body clears it
+  (`deny_unknown_fields`, so a misspelt key is 422, never a clear).
+  `POST /devices` accepts an optional `power_threshold_ma`. The device page
+  has the form (`POST /ui/devices/{id}/threshold`, CSRF). SQLite adds the
+  column on open (`ALTER TABLE` guarded by `pragma_table_info`); DynamoDB
+  stores it as an `N` attribute, `REMOVE`d on clear. `scripts/sim-fleet.sh`
+  sets per-profile values for the simulated machines.
 - Live view: `/ui/live` (+ `/ui/live.json` for the polling fallback) shows
   the last 120 s at *sample* resolution as 8-bit register levels
   (`supervictor_common::levels`: 1..=255 spans a fixed range per register,
@@ -44,7 +71,10 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   scalar fields into one; the SSE event carries `t_ms`, `levels`,
   `levels_ms`. The page is canvas (10 fps, same `--sN` tokens); the register
   bank's meters are the accessible readout. `validate::check_levels` gates
-  ingest; `history::METRICS` is the register table.
+  ingest; `history::METRICS` is the register table, and `bucket_series`
+  folds a burst's earlier samples into their own buckets. Distinct from the
+  history page's live *windows* (`1m`/`5m`, `PageMode::Live`), which
+  re-render the bucketed charts on every uplink.
 - Uplink identity: a device registered with a `subject_dn` is bound to that
   certificate — `POST /` for it must carry a matching mTLS subject or it is
   403'd (`handlers::authorize_uplink`). `REQUIRE_REGISTRATION=true` further

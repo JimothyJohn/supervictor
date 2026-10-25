@@ -21,6 +21,8 @@ pub const LEVELS_CAP: usize = LEVELS_SAMPLES_MAX * levels::COUNT;
 /// constants in `supervictor/common/src/fields.rs`. Everything past
 /// `id`/`current` is optional and left off the wire when `None`, so old
 /// firmware and new endpoints (and vice versa) stay compatible.
+/// Worst-case serialized size must fit the JSON buffer in
+/// `network/http.rs::post_request` — see `uplink_tests::uplink_worst_case_fits_json_buffer`.
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct UplinkMessage {
     /// Unique identifier for this device or message.
@@ -56,6 +58,15 @@ pub struct UplinkMessage {
     /// Relative humidity in %RH.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub humidity_pct: Option<f32>,
+    /// 9-axis IMU: acceleration [x, y, z] in g.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accel_g: Option<[f32; 3]>,
+    /// 9-axis IMU: angular rate [x, y, z] in deg/s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gyro_dps: Option<[f32; 3]>,
+    /// 9-axis IMU: magnetic field [x, y, z] in µT.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mag_ut: Option<[f32; 3]>,
 
     // --- Sub-interval burst (8-bit levels, `supervictor_common::levels`) ---
     /// Flat register levels, `levels::COUNT` per sample, oldest first; the
@@ -82,6 +93,9 @@ impl UplinkMessage {
             rssi_dbm: None,
             temp_c: None,
             humidity_pct: None,
+            accel_g: None,
+            gyro_dps: None,
+            mag_ut: None,
             levels: HVec::new(),
             levels_ms: None,
         }

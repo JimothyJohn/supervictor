@@ -27,19 +27,25 @@ pub fn get_request(host: &str, path: Option<&str>) -> Result<HString<192>, HttpE
     push(&mut request, "\r\n")?;
     push(
         &mut request,
-        "User-Agent: Uplink/0.1.0 (Platform; ESP32-C3)\r\n",
+        "User-Agent: Uplink/0.1.0 (Platform; ESP32)\r\n",
     )?;
     push(&mut request, "Connection: close\r\n")?;
     push(&mut request, "Accept: */*\r\n\r\n")?;
     Ok(request)
 }
 
-/// Create an HTTP POST request with JSON body
-pub fn post_request<T>(host: &str, data: &T, path: Option<&str>) -> Result<HString<768>, HttpError>
+/// Create an HTTP POST request with JSON body.
+///
+/// Capacities (mirrored in `config.rs` — that module is embedded-gated, this
+/// one is host-testable): 768 bytes of JSON body fits a worst-case
+/// full-telemetry UplinkMessage (64-char id, 9 IMU floats, env + health
+/// fields and a full 12-sample `levels` burst — pinned in `uplink_tests`);
+/// 1024 total leaves ~150 bytes of headers plus slack.
+pub fn post_request<T>(host: &str, data: &T, path: Option<&str>) -> Result<HString<1024>, HttpError>
 where
     T: Serialize,
 {
-    let mut request = HString::<768>::new();
+    let mut request = HString::<1024>::new();
     let endpoint = path.unwrap_or("/");
 
     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/POST
@@ -56,10 +62,7 @@ where
 
     // A payload that doesn't fit the buffer is an error, not an empty POST —
     // silently sending Content-Length: 0 would register a bogus uplink.
-    // 640: full telemetry with a 64-byte id, extreme values and a full
-    // 12-sample levels burst is ~535 bytes (models/uplink_tests.rs pins
-    // it); headers take ~120 of the 768.
-    let json = serde_json_core::to_string::<T, 640>(data).map_err(|_| HttpError::Serialization)?;
+    let json = serde_json_core::to_string::<T, 768>(data).map_err(|_| HttpError::Serialization)?;
 
     push(&mut request, "Content-Length: ")?;
     push_usize(&mut request, json.len())?;
@@ -275,8 +278,13 @@ mod tests {
         struct Oversized {
             data: &'static str,
         }
-        // 650 chars > the 640-byte serde-json-core buffer in post_request
+        // 780 chars > the 768-byte serde-json-core buffer in post_request
         const LONG: &str = concat!(
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
             "abcdefghijklmnopqrstuvwxyz",
             "abcdefghijklmnopqrstuvwxyz",
             "abcdefghijklmnopqrstuvwxyz",
