@@ -29,8 +29,17 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   (`WATCHDOG_INTERVAL_SECS`, 0 disables).
 - Fleet history: `GET /fleet/history?window=` (JSON) and `/ui/history`,
   `/ui/devices/{id}?window=` (charts) in `src/history.rs` + `src/ui/charts.rs`.
-  `window` is an exact whitelist (15m, 1h, 6h, 24h, 7d; default 1h; else
-  422), always 90 buckets, row cap `MAX_ROWS` (response says `truncated`).
+  `window` is an exact whitelist (1m, 5m, 15m, 1h, 6h, 24h, 7d; default 1h;
+  else 422), row cap `MAX_ROWS` (response says `truncated`). Standard presets
+  are 90 buckets; the **live** presets (≤ 5 min: 1m, 5m) bucket at the 5 s
+  uplink period (12 / 60 buckets; `Window::buckets`, `Window::grid`) and the
+  response says `live: true` + `buckets`. Live pages set `data-live="1"` and
+  no `data-refresh`: the SSE script re-renders `<main>` from a fresh GET on
+  every uplink (150 ms coalescing, no overlapping fetches, never while a
+  form has focus, plus a 15 s tick so the axis moves) and re-binds the chart
+  hover via `window.svBindCharts`. Longer windows keep the 60 s visible-tab
+  reload. The fleet table is patched in place from the event (`current-now`,
+  power badge against the row's `data-threshold`).
   Store support: `uplinks_since` / `device_uplinks_since` (SQLite range on
   `received_at`, DynamoDB sort-key range). Charts are server-rendered SVG
   (no JS chart lib); the inline script only adds hover/keyboard tooltips

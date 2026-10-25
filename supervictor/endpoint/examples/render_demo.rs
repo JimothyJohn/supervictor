@@ -10,7 +10,7 @@ use std::path::Path;
 
 use supervictor_endpoint::fleet::{FleetSummary, DEFAULT_POWER_THRESHOLD_MA};
 use supervictor_endpoint::history::{
-    bucket_series, power_timeline, status_timeline, History, Window, BUCKETS, METRICS,
+    bucket_series, power_timeline, status_timeline, Grid, History, Window, BUCKETS, METRICS,
 };
 use supervictor_endpoint::models::{DeviceRecord, UplinkRecord};
 use supervictor_endpoint::time::format_rfc3339;
@@ -214,6 +214,7 @@ fn main() {
             staleness: Staleness::Fresh,
             current: Some(1_124),
             power: PowerState::On,
+            threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
         },
         FleetRow {
             device: devices[1].clone(),
@@ -221,6 +222,7 @@ fn main() {
             staleness: Staleness::Stale,
             current: Some(12),
             power: PowerState::Off,
+            threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
         },
         FleetRow {
             device: devices[2].clone(),
@@ -228,6 +230,7 @@ fn main() {
             staleness: Staleness::Dark,
             current: Some(640),
             power: PowerState::Unknown,
+            threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
         },
         FleetRow {
             device: devices[3].clone(),
@@ -235,6 +238,7 @@ fn main() {
             staleness: Staleness::Unknown,
             current: None,
             power: PowerState::Unknown,
+            threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
         },
     ];
 
@@ -252,14 +256,21 @@ fn main() {
             m.insert(r.device_id.clone(), DEMO_NOW);
             m
         });
-    let timeline = status_timeline(&devices, &latest, &rows, since, step);
-    let power = power_timeline(&devices, &rows, since, step, DEFAULT_POWER_THRESHOLD_MA);
+    let timeline = status_timeline(&devices, &latest, &rows, Grid::standard(since, step));
+    let power = power_timeline(
+        &devices,
+        &rows,
+        Grid::standard(since, step),
+        DEFAULT_POWER_THRESHOLD_MA,
+    );
     let series: Vec<_> = devices
         .iter()
-        .map(|d| bucket_series(&d.device_id, &rows, since, step))
+        .map(|d| bucket_series(&d.device_id, &rows, Grid::standard(since, step)))
         .collect();
     let fleet_history = History {
         window: DEMO_WINDOW.label(),
+        live: DEMO_WINDOW.is_live(),
+        buckets: BUCKETS,
         threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
         since: format_rfc3339(since, 0),
         until: format_rfc3339(DEMO_NOW, 0),

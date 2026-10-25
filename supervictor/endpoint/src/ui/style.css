@@ -151,6 +151,23 @@ input[type="text"] {
   font-size: 0.75rem;
 }
 #live-dot.connected { color: var(--green); }
+/* Live windows: a breathing dot, and a brief wash over whatever just changed. */
+#live-dot.live::before {
+  content: ''; display: inline-block; width: 0.5em; height: 0.5em; border-radius: 50%;
+  background: var(--green); margin-right: 0.35em; vertical-align: middle;
+  animation: sv-pulse 1.2s ease-in-out infinite;
+}
+@keyframes sv-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
+main.tick { animation: sv-tick 0.45s ease-out; }
+tr.tick td { animation: sv-tick 0.6s ease-out; }
+@keyframes sv-tick {
+  from { background-color: color-mix(in srgb, var(--green) 18%, transparent); }
+  to { background-color: transparent; }
+}
+.badge.power, .badge.staleness { transition: color 0.25s, border-color 0.25s; }
+@media (prefers-reduced-motion: reduce) {
+  #live-dot.live::before, main.tick, tr.tick td { animation: none; }
+}
 
 /* ── history views ─────────────────────────────────────────────────── */
 header nav a { margin-right: 1rem; font-size: 0.85rem; text-decoration: none; }

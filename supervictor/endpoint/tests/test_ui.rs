@@ -455,6 +455,81 @@ async fn threshold_form_rejects_non_numbers_and_needs_csrf_and_admin() {
     );
 }
 
+// ── Live windows ──────────────────────────────────────────────────────
+
+/// Short windows (≤ 5 min) mark the page live — the script re-renders on
+/// every uplink event and the timed reload is off; longer windows keep the
+/// 60 s reload and are not live. Both history and device pages.
+#[tokio::test]
+async fn short_windows_are_live_long_windows_reload() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+
+    for (path, live) in [
+        ("/ui/history?window=1m", true),
+        ("/ui/history?window=5m", true),
+        ("/ui/history?window=15m", false),
+        ("/ui/history", false),
+        ("/ui/devices/factory-01?window=5m", true),
+        ("/ui/devices/factory-01?window=1h", false),
+    ] {
+        let (name, value) = dn(ADMIN_DN);
+        let resp = server.get(path).add_header(name, value).await;
+        assert_eq!(resp.status_code(), 200, "{path}");
+        let html = resp.text();
+        assert_eq!(html.contains(r#"data-live="1""#), live, "{path}: live flag");
+        assert_eq!(
+            html.contains("data-refresh="),
+            !live,
+            "{path}: timed reload"
+        );
+        // The filter row offers every preset, live ones included.
+        for w in ["1m", "5m", "15m", "1h", "6h", "24h", "7d"] {
+            assert!(html.contains(&format!("?window={w}\"")), "{path} lacks {w}");
+        }
+    }
+
+    // The fleet table is neither: rows are patched in place by the stream.
+    let (name, value) = dn(ADMIN_DN);
+    let html = server.get("/ui").add_header(name, value).await.text();
+    assert!(!html.contains(r#"data-live="1""#));
+    assert!(!html.contains("data-refresh="));
+    // The scripts that make it work ship on every page.
+    assert!(
+        html.contains("svBindCharts"),
+        "chart binding is re-runnable"
+    );
+    assert!(html.contains("data-live"), "live script reads the flag");
+    assert!(
+        html.contains("DOMParser"),
+        "live script swaps <main> from a fresh render"
+    );
+}
+
+/// Fleet rows carry the threshold the live script judges `current` against,
+/// so a pushed reading flips the badge without a round trip.
+#[tokio::test]
+async fn fleet_rows_carry_their_power_threshold() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "bench-01", "active");
+    seed_device(store.as_ref(), "press-01", "active");
+    store
+        .set_device_threshold("press-01", Some(12_000))
+        .unwrap();
+
+    let (name, value) = dn(ADMIN_DN);
+    let html = server.get("/ui").add_header(name, value).await.text();
+    assert!(
+        html.contains(r#"data-device="bench-01" data-threshold="100""#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"data-device="press-01" data-threshold="12000""#),
+        "{html}"
+    );
+    assert!(html.contains("current-now"), "a slot for the live current");
+}
+
 #[tokio::test]
 async fn status_rejects_values_outside_whitelist() {
     let (server, store) = server_with_store();
