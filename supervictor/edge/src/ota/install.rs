@@ -122,7 +122,7 @@ impl<'a, S: Slot> Installer<'a, S> {
         offset: u32,
     ) -> Result<Self, InstallError<S::Error>> {
         let mut me = Self::new(slot, buf, manifest)?;
-        if offset as usize % SECTOR != 0 || offset > manifest.size {
+        if !(offset as usize).is_multiple_of(SECTOR) || offset > manifest.size {
             return Err(InstallError::BadResume);
         }
         let mut pos = 0u32;

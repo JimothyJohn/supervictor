@@ -96,7 +96,10 @@ pub fn load(words: &[u32; WORDS]) -> State {
         KIND_RESUME => {
             let offset = words[2];
             let size = words[3];
-            if offset > size || !supervictor_common::firmware::fits_slot(size) || offset % 4096 != 0 {
+            if offset > size
+                || !supervictor_common::firmware::fits_slot(size)
+                || !offset.is_multiple_of(4096)
+            {
                 return State::Idle;
             }
             let mut sha_prefix = [0u8; 8];
@@ -134,8 +137,10 @@ pub fn store(words: &mut [u32; WORDS], state: State) {
             words[1] = KIND_RESUME;
             words[2] = offset;
             words[3] = size;
-            words[4] = u32::from_le_bytes([sha_prefix[0], sha_prefix[1], sha_prefix[2], sha_prefix[3]]);
-            words[5] = u32::from_le_bytes([sha_prefix[4], sha_prefix[5], sha_prefix[6], sha_prefix[7]]);
+            words[4] =
+                u32::from_le_bytes([sha_prefix[0], sha_prefix[1], sha_prefix[2], sha_prefix[3]]);
+            words[5] =
+                u32::from_le_bytes([sha_prefix[4], sha_prefix[5], sha_prefix[6], sha_prefix[7]]);
         }
     }
     words[WORDS - 1] = checksum(words);

@@ -6,23 +6,41 @@ use std::format;
 
 #[test]
 fn manifest_request_shape() {
-    let r = manifest_request("staging.supervictor.advin.io", "/", "poe-iso-rack-02", "0.2.0").unwrap();
-    assert!(r.starts_with("GET /devices/poe-iso-rack-02/firmware/0.2.0/manifest HTTP/1.1\r\n"), "{r}");
+    let r = manifest_request(
+        "staging.supervictor.advin.io",
+        "/",
+        "poe-iso-rack-02",
+        "0.2.0",
+    )
+    .unwrap();
+    assert!(
+        r.starts_with("GET /devices/poe-iso-rack-02/firmware/0.2.0/manifest HTTP/1.1\r\n"),
+        "{r}"
+    );
     assert!(r.contains("Host: staging.supervictor.advin.io\r\n"));
     assert!(r.contains("Connection: close\r\n"));
     assert!(r.ends_with("\r\n\r\n"));
     // A stage prefix (raw execute-api) is folded in without a double slash.
     let r = manifest_request("h", "/staging/", "d", "1.0.0").unwrap();
-    assert!(r.starts_with("GET /staging/devices/d/firmware/1.0.0/manifest "), "{r}");
+    assert!(
+        r.starts_with("GET /staging/devices/d/firmware/1.0.0/manifest "),
+        "{r}"
+    );
     let r = manifest_request("h", "/staging", "d", "1.0.0").unwrap();
-    assert!(r.starts_with("GET /staging/devices/d/firmware/1.0.0/manifest "), "{r}");
+    assert!(
+        r.starts_with("GET /staging/devices/d/firmware/1.0.0/manifest "),
+        "{r}"
+    );
 }
 
 #[test]
 fn image_request_carries_range_and_if_match() {
     let sha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     let r = image_request("h", "/", "d", "0.2.0", 0, sha).unwrap();
-    assert!(r.starts_with("GET /devices/d/firmware/0.2.0 HTTP/1.1\r\n"), "{r}");
+    assert!(
+        r.starts_with("GET /devices/d/firmware/0.2.0 HTTP/1.1\r\n"),
+        "{r}"
+    );
     assert!(r.contains("Range: bytes=0-\r\n"), "{r}");
     assert!(r.contains(&format!("If-Match: \"{sha}\"\r\n")), "{r}");
     let r = image_request("h", "/", "d", "0.2.0", 1_048_576, sha).unwrap();
@@ -62,7 +80,11 @@ fn incomplete_heads_ask_for_more() {
         if HEAD_206[..cut].windows(4).any(|w| w == b"\r\n\r\n") {
             break;
         }
-        assert_eq!(parse_head(&HEAD_206[..cut]), Err(HeadError::Incomplete), "cut {cut}");
+        assert_eq!(
+            parse_head(&HEAD_206[..cut]),
+            Err(HeadError::Incomplete),
+            "cut {cut}"
+        );
     }
 }
 
@@ -84,7 +106,9 @@ fn rejects_what_must_not_reach_flash() {
         Err(HeadError::Unsupported)
     );
     // Agreeing duplicates are tolerated.
-    assert!(parse_head(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nContent-Length: 10\r\n\r\n").is_ok());
+    assert!(
+        parse_head(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nContent-Length: 10\r\n\r\n").is_ok()
+    );
     // Chunked: not implemented, refused loudly.
     assert_eq!(
         parse_head(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"),
@@ -120,7 +144,12 @@ fn rejects_what_must_not_reach_flash() {
         b"HTTP/1.1 206 OK\r\nContent-Range: bytes 0-9\r\n\r\n",
         b"HTTP/1.1 200 OK\r\nContent-Length: 10\xff\r\n\r\n",
     ] {
-        assert_eq!(parse_head(bad), Err(HeadError::Malformed), "{:?}", core::str::from_utf8(bad));
+        assert_eq!(
+            parse_head(bad),
+            Err(HeadError::Malformed),
+            "{:?}",
+            core::str::from_utf8(bad)
+        );
     }
 }
 

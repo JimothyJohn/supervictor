@@ -15,21 +15,21 @@
 //! HTTP framing is bytes in / facts out, and the boot policy is a pure
 //! function over an eight-word record. The stress tests live beside them.
 
-/// Image manifest (`GET …/firmware/{version}/manifest`) parsing.
-pub mod manifest;
+/// Flash + bootloader glue and the update task (embedded builds only).
+#[cfg(feature = "embedded")]
+pub mod device;
 /// Request builders and response-head parsing for the two OTA GETs.
 pub mod http;
 /// Sector-buffered slot writer with digest verification and resume.
 pub mod install;
+/// Image manifest (`GET …/firmware/{version}/manifest`) parsing.
+pub mod manifest;
 /// Boot-count rollback and download-resume records (RTC persistent RAM).
 pub mod policy;
-/// Flash + bootloader glue and the update task (embedded builds only).
-#[cfg(feature = "embedded")]
-pub mod device;
 
 #[cfg(test)]
-mod install_tests;
-#[cfg(test)]
 mod http_tests;
+#[cfg(test)]
+mod install_tests;
 #[cfg(test)]
 mod policy_tests;

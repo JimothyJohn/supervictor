@@ -55,6 +55,7 @@ embedded = [
   "mbedtls-rs",
   "esp-bootloader-esp-idf",
   "esp-storage",
+  "embedded-storage",
   "static_cell",
 ]
 wifi = ["embedded", "esp-radio", "esp-rtos/esp-radio"]
@@ -153,6 +154,9 @@ esp-bootloader-esp-idf = { version = "0.5", optional = true }
 # that esp-bootloader-esp-idf's FlashRegion/OtaUpdater need. 0.8.x is the
 # line that pairs with esp-hal 1.0 (0.9 wants 1.1, 0.10 wants 1.2).
 esp-storage = { version = "0.8.1", optional = true }
+# The Storage/ReadStorage traits FlashRegion speaks (in the lock via both
+# crates above).
+embedded-storage = { version = "0.3.1", optional = true }
 # OTA image digests, software: mbedtls-rs-sys owns the SHA peripheral on
 # the chips where it is used, and the download must hash while TLS runs.
 # Already in the lock through esp-hal and mbedtls-rs-sys; no new crate.

@@ -8,11 +8,11 @@ extern crate std;
 
 use super::install::*;
 use super::manifest::Manifest;
-use std::vec;
-use std::vec::Vec;
 use heapless::String as HString;
 use proptest::prelude::*;
 use sha2::{Digest, Sha256};
+use std::vec;
+use std::vec::Vec;
 use supervictor_common::firmware::{ChipId, HEADER_LEN, MAGIC};
 
 /// In-memory slot. Writes land immediately unless a fault says otherwise.
@@ -98,7 +98,10 @@ fn manifest_for(img: &[u8], chip: ChipId) -> Manifest {
 
 const CAP: usize = 64 * 1024;
 
-fn install_in_chunks(img: &[u8], chunks: &[usize]) -> Result<(Verified, MemSlot), InstallError<Fault>> {
+fn install_in_chunks(
+    img: &[u8],
+    chunks: &[usize],
+) -> Result<(Verified, MemSlot), InstallError<Fault>> {
     let m = manifest_for(img, ChipId::Esp32);
     let mut buf = [0u8; SECTOR];
     let mut inst = Installer::new(MemSlot::new(CAP), &mut buf, &m)?;
@@ -121,7 +124,8 @@ fn happy_path_any_chunking() {
     for size in [HEADER_LEN, 100, 4095, 4096, 4097, 8192, 20_000, CAP] {
         let img = image(ChipId::Esp32, size, 1);
         for chunks in [&[1usize][..], &[7, 13], &[4096], &[1500], &[10_000]] {
-            let (v, _) = install_in_chunks(&img, chunks).unwrap_or_else(|e| panic!("size {size} chunks {chunks:?}: {e:?}"));
+            let (v, _) = install_in_chunks(&img, chunks)
+                .unwrap_or_else(|e| panic!("size {size} chunks {chunks:?}: {e:?}"));
             assert_eq!(v.size as usize, size);
         }
     }
@@ -162,14 +166,20 @@ fn wrong_chip_and_bad_magic_fail_at_the_header_not_at_the_end() {
     let mut inst = Installer::new(MemSlot::new(CAP), &mut buf, &m).unwrap();
     // Feed one byte short of a header: no verdict yet.
     assert!(inst.feed(&img[..HEADER_LEN - 1]).is_ok());
-    assert_eq!(inst.feed(&img[HEADER_LEN - 1..HEADER_LEN]), Err(InstallError::ChipMismatch));
+    assert_eq!(
+        inst.feed(&img[HEADER_LEN - 1..HEADER_LEN]),
+        Err(InstallError::ChipMismatch)
+    );
 
     let mut bad = image(ChipId::Esp32, 10_000, 4);
     bad[0] = 0x00;
     let m = manifest_for(&bad, ChipId::Esp32);
     let mut buf = [0u8; SECTOR];
     let mut inst = Installer::new(MemSlot::new(CAP), &mut buf, &m).unwrap();
-    assert!(matches!(inst.feed(&bad[..100]), Err(InstallError::BadImage(_))));
+    assert!(matches!(
+        inst.feed(&bad[..100]),
+        Err(InstallError::BadImage(_))
+    ));
 }
 
 #[test]
@@ -181,7 +191,10 @@ fn truncated_download_is_reported_with_the_counts() {
     inst.feed(&img[..6000]).unwrap();
     assert_eq!(
         inst.finish().unwrap_err(),
-        InstallError::Truncated { got: 6000, want: 10_000 }
+        InstallError::Truncated {
+            got: 6000,
+            want: 10_000
+        }
     );
 }
 
@@ -210,7 +223,11 @@ fn corrupted_stream_fails_the_digest_never_verifies() {
         let mut buf = [0u8; SECTOR];
         let mut inst = Installer::new(MemSlot::new(CAP), &mut buf, &m).unwrap();
         inst.feed(&bad).unwrap();
-        assert_eq!(inst.finish().unwrap_err(), InstallError::DigestMismatch, "flip {flip}");
+        assert_eq!(
+            inst.finish().unwrap_err(),
+            InstallError::DigestMismatch,
+            "flip {flip}"
+        );
     }
 }
 

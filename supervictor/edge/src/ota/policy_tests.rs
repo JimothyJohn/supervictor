@@ -33,7 +33,13 @@ fn zeroed_and_random_memory_read_idle() {
     assert_eq!(load(&[0; WORDS]), State::Idle);
     assert_eq!(load(&[0xffff_ffff; WORDS]), State::Idle);
     let mut w = [0u32; WORDS];
-    store(&mut w, State::Pending { boots: 1, previous_slot: 0 });
+    store(
+        &mut w,
+        State::Pending {
+            boots: 1,
+            previous_slot: 0,
+        },
+    );
     // Any single-word corruption invalidates the record.
     for i in 0..WORDS {
         let mut c = w;
@@ -76,7 +82,14 @@ fn resume_offset_only_for_the_same_image() {
     assert_eq!(resume_offset(r, 50_000, &other), 0, "digest differs");
     assert_eq!(resume_offset(State::Idle, 50_000, &sha), 0);
     assert_eq!(
-        resume_offset(State::Pending { boots: 1, previous_slot: 0 }, 50_000, &sha),
+        resume_offset(
+            State::Pending {
+                boots: 1,
+                previous_slot: 0
+            },
+            50_000,
+            &sha
+        ),
         0
     );
 }
@@ -92,10 +105,22 @@ fn implausible_records_with_a_valid_checksum_read_idle() {
     store(&mut w, resume_state(4000, 100_000, &[0; 32]));
     assert_eq!(load(&w), State::Idle, "unaligned offset");
     let mut w = [0u32; WORDS];
-    store(&mut w, State::Pending { boots: 0, previous_slot: 16 });
+    store(
+        &mut w,
+        State::Pending {
+            boots: 0,
+            previous_slot: 16,
+        },
+    );
     assert_eq!(load(&w), State::Idle, "slot out of range");
     let mut w = [0u32; WORDS];
-    store(&mut w, State::Pending { boots: 99, previous_slot: 0 });
+    store(
+        &mut w,
+        State::Pending {
+            boots: 99,
+            previous_slot: 0,
+        },
+    );
     assert_eq!(load(&w), State::Idle, "boots out of range");
 }
 

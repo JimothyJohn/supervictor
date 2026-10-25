@@ -54,7 +54,8 @@ impl Manifest {
         if body.len() > MAX_LEN {
             return Err(ManifestError::Json);
         }
-        let (wire, _) = serde_json_core::from_slice::<Wire>(body).map_err(|_| ManifestError::Json)?;
+        let (wire, _) =
+            serde_json_core::from_slice::<Wire>(body).map_err(|_| ManifestError::Json)?;
         if Version::parse(wire.version.as_str()).is_none() {
             return Err(ManifestError::Version);
         }
@@ -151,20 +152,53 @@ mod tests {
     #[test]
     fn rejects_each_bad_field() {
         let cases = [
-            (r#"{"version":"0.2","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#, ManifestError::Version),
-            (r#"{"version":"../0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#, ManifestError::Version),
-            (r#"{"version":"0.2.0","size":0,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#, ManifestError::Size),
-            (r#"{"version":"0.2.0","size":2031617,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#, ManifestError::Size),
-            (r#"{"version":"0.2.0","size":100,"sha256":"ba7816","chip":"esp32"}"#, ManifestError::Digest),
-            (r#"{"version":"0.2.0","size":100,"sha256":"zz7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#, ManifestError::Digest),
-            (r#"{"version":"0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32s3"}"#, ManifestError::Chip),
-            (r#"{"version":"0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}"#, ManifestError::Json),
-            (r#"{"version":"0.2.0","size":"100","sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#, ManifestError::Json),
-            (r#"{"version":"0.2.0","size":-5,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#, ManifestError::Json),
+            (
+                r#"{"version":"0.2","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#,
+                ManifestError::Version,
+            ),
+            (
+                r#"{"version":"../0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#,
+                ManifestError::Version,
+            ),
+            (
+                r#"{"version":"0.2.0","size":0,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#,
+                ManifestError::Size,
+            ),
+            (
+                r#"{"version":"0.2.0","size":2031617,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#,
+                ManifestError::Size,
+            ),
+            (
+                r#"{"version":"0.2.0","size":100,"sha256":"ba7816","chip":"esp32"}"#,
+                ManifestError::Digest,
+            ),
+            (
+                r#"{"version":"0.2.0","size":100,"sha256":"zz7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#,
+                ManifestError::Digest,
+            ),
+            (
+                r#"{"version":"0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32s3"}"#,
+                ManifestError::Chip,
+            ),
+            (
+                r#"{"version":"0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}"#,
+                ManifestError::Json,
+            ),
+            (
+                r#"{"version":"0.2.0","size":"100","sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#,
+                ManifestError::Json,
+            ),
+            (
+                r#"{"version":"0.2.0","size":-5,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#,
+                ManifestError::Json,
+            ),
             ("", ManifestError::Json),
             ("[]", ManifestError::Json),
             ("null", ManifestError::Json),
-            (r#"{"version":"0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015adba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#, ManifestError::Json),
+            (
+                r#"{"version":"0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015adba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32"}"#,
+                ManifestError::Json,
+            ),
         ];
         for (body, want) in cases {
             assert_eq!(Manifest::parse(body.as_bytes()), Err(want), "{body}");
