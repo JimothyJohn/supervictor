@@ -105,7 +105,7 @@ for exactly this, so the two ends cannot drift.
 
 | Register | `lo` (level 1) | `hi` (level 255) | step |
 |----------|----------------|------------------|------|
-| `current` (mA) | 0 | 6000 | 23.6 mA |
+| `current` (mA) | 0 | 20000 | 78.7 mA |
 | `temp_c` | -20 | 60 | 0.31 °C |
 | `humidity_pct` | 0 | 100 | 0.39 %RH |
 | `rssi_dbm` | -100 | -20 | 0.31 dB |
@@ -129,7 +129,10 @@ are folded into the history bucket means. Default firmware cadence:
 `UPLINK_BURST = 10` samples over the 5 s interval → one every 500 ms
 (`supervictor/edge/src/config.rs`); the desktop client takes `BURST=`.
 Changing a register's range re-scales every stored burst — append new
-registers at the end instead, never reorder.
+registers at the end instead, never reorder. The `current` range was
+6000 mA until 2026-10-25 (changed to the SEN0211 clamp's 20 A full scale
+before any real-sensor bursts were stored; sim bursts on staging from
+before that date dequantise 3.3× high).
 
 ## Uplink cadence
 

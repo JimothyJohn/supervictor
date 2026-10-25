@@ -213,7 +213,7 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
 
 - 2026-10-24: mTLS identity never reaches the Lambda. dev.supervictor.advin.io exists (PR 74) and API Gateway enforces the client cert, but the Lambda Web Adapter serializes `lambda_http`'s typed request context, whose REST v1 identity struct has no `clientCert` (aws_lambda_events 0.14 and 1.2; `catch-all-fields` off), and REST parameter mapping needs a non-proxy integration. After PR 75 (no fallback to the client-supplied `x-ssl-client-subject-dn`, which anyone could forge on dev and prod) every Lambda request is anonymous, so bound devices 403 there. Pick one: (a) drop the adapter and run axum under `lambda_http` with `catch-all-fields`, read `identity.other["clientCert"]["subjectDN"]`; (b) move to an HTTP API v2, whose typed context carries `authentication.clientCert` through the adapter; (c) a REQUEST Lambda authorizer that copies `$context.identity.clientCert.subjectDN` into the authorizer context. I'd take (a): Rust-native, no sidecar, REST stays. Bench boards sit on staging (in-binary TLS, unaffected) until then.
 - 2026-10-24: when real sensors land, does the telemetry simulator (`sim.rs` + the machine profiles in `profile.rs`) move behind a cargo feature (`sim`, off by default) so a production board can never report invented readings, or stay as the fallback for fields a board lacks? I'd put it behind a feature once the first real sensor ships (P2 item).
-- 2026-10-24: 8-bit register levels (PR 85) fix each register's full scale in `supervictor/common/src/levels.rs`: current 0..6000 mA, temp -20..60 °C, humidity 0..100 %RH, rssi -100..-20 dBm, heap 0..512 KiB (1..=255 = range, 0 = no reading; 0.39 %/step). Changing a range later re-scales every stored burst, so confirm them before boards ship bursts for real: is 6 A the right current full scale for the sensor you have in mind (the sim profiles go to 60 A — those bursts pin at 255 today), and is -20 °C a low enough floor?
+- 2026-10-24: 8-bit register levels (PR 85) fix each register's full scale in `supervictor/common/src/levels.rs`: temp -20..60 °C, humidity 0..100 %RH, rssi -100..-20 dBm, heap 0..512 KiB (1..=255 = range, 0 = no reading; 0.39 %/step). Current was answered 2026-10-25 (20 A, the SEN0211 probe range). Still open: is -20 °C a low enough temperature floor?
 - 2026-10-24: default burst is 10 samples per 5 s uplink (`UPLINK_BURST`, 500 ms spacing; desktop `BURST=`). Capacity is 12 samples/uplink before the JSON buffer (768) needs to grow again. Keep 10, or go to 1 Hz (5 samples) to leave headroom for the IMU registers when they land? The burst is plain JSON bytes (`[12,200,…]`, ~3.5 chars/datapoint); base64 would be 1.33 but needs an encoder on the device — not worth it until the burst is the dominant byte count.
 - 2026-10-25: heated machines — should `on` mean "producing" (needs a min-on-time or a second threshold per device) or stay "powered" (one bar, as shipped)? Extruder and molder are the only sim profiles where it matters (P3 item).
 - 2026-10-25: mesh identity model — my pick: the PoE gateway's cert vouches for
@@ -232,3 +232,30 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: mobile-preview-failed
       asked: 2026-10-25
       by: mobile-UI session (feat/ui-mobile-glance)
+- [ ] **Kit power threshold: default 1000 mA for clamp devices?** — `POWER_THRESHOLD_MA` defaults to 100 mA, below the SEN0211 clamp's ~1 A ADC floor (HARDWARE.md §6.2), so a kit device reads "on" from noise. Per-device `power_threshold_ma` already exists on the record.
+      needs: a number, or "per device only"
+      result: kit devices show off when the machine is off; the default documented in HARDWARE.md and the endpoint config
+      options: 1000 mA default | keep 100, set per device | other number
+      est: 30m
+      difficulty: low
+      id: kit-power-threshold
+      asked: 2026-10-25
+      by: hardware session (docs/hardware-spec, feat/current-register-20a)
+- [ ] **Clamp calibration gain: compile-time or NVS?** — one-point gain per board. Compile-time `CURRENT_GAIN_PPM` baked like `UPLINK_INTERVAL_S` (simple, a reflash to change, a column in certs/rack-inventory.tsv) or NVS (survives OTA, needs a write path). My pick: compile-time for v0. HARDWARE.md §7, §11.
+      needs: your pick
+      result: the firmware's `sensor-current` feature has one calibration path, not two
+      options: compile-time env | NVS | compile-time now, NVS after OTA
+      est: 2h
+      difficulty: low
+      id: clamp-calibration-location
+      asked: 2026-10-25
+      by: hardware session (docs/hardware-spec)
+- [ ] **Prototype scope to RFQ: hat only, or hat + integrated node?** — SV-HAT-A (`hardware/hat/`, ~$0.5–5k, 6–10 weeks) vs also the CERN-OHL derivative of the Olimex POE-ISO (~$12–30k, 12–20 weeks). Recommendation: hat now, node at 25+ units. hardware/SOURCING.md §1, §5.
+      needs: your pick, then the bracketed parts of hardware/RFQ-prototype.md §12
+      result: RFQ sent to three shops; quotes replace the blog-number estimates
+      options: hat only | hat + node | neither yet
+      est: 2h
+      difficulty: low
+      id: rfq-scope
+      asked: 2026-10-25
+      by: hardware session (docs/hardware-spec)

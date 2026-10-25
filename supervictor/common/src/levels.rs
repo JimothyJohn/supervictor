@@ -52,7 +52,9 @@ pub const REGISTERS: [Register; 5] = [
         label: "current",
         unit: "mA",
         lo: 0.0,
-        hi: 6_000.0,
+        // 20 A: the full range of the SEN0211 clamp the dev kit ships with
+        // (decided 2026-10-25; HARDWARE.md). One step is 78.7 mA.
+        hi: 20_000.0,
     },
     Register {
         key: fields::UPLINK_TEMP_C,
@@ -246,6 +248,27 @@ mod tests {
         assert_eq!(sample(&flat, 1).unwrap()[0], COUNT as u8);
         assert_eq!(sample(&flat, 2), None);
         assert_eq!(sample(&flat, usize::MAX), None);
+    }
+
+    /// The ranges are the stored-burst contract: a change re-scales every
+    /// burst already in a store, so it is a deliberate, documented decision
+    /// (docs/TELEMETRY.md), never a drive-by edit.
+    #[test]
+    fn register_ranges_are_the_documented_contract() {
+        let ranges: [(f32, f32); COUNT] =
+            core::array::from_fn(|i| (REGISTERS[i].lo, REGISTERS[i].hi));
+        assert_eq!(
+            ranges,
+            [
+                (0.0, 20_000.0),
+                (-20.0, 60.0),
+                (0.0, 100.0),
+                (-100.0, -20.0),
+                (0.0, 524_288.0),
+            ]
+        );
+        // 20 A over 254 steps: 78.7 mA per level.
+        assert!((REGISTERS[0].step() - 78.74).abs() < 0.01);
     }
 
     #[test]
