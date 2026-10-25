@@ -86,7 +86,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     esp_println::logger::init_logger_from_env();
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     // Second heap region in the otherwise unused dram2 segment (config.rs).
-    #[cfg(all(feature = "chip-esp32", feature = "espnow"))]
+    #[cfg(feature = "chip-esp32")]
     esp_alloc::heap_allocator!(#[link_section = ".dram2_uninit"] size: DRAM2_HEAP_SIZE);
 
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));

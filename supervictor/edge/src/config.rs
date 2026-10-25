@@ -18,21 +18,21 @@ pub const HOST: &str = env!("HOST");
 /// up; 112 KB leaves ~37 KB of stack, enough for mbedtls handshakes on
 /// Xtensa's stack-hungry windowed ABI. Check `_stack_start - _stack_end` in
 /// the ELF before raising this.
-#[cfg(all(feature = "chip-esp32", not(feature = "espnow")))]
-pub const HEAP_SIZE: usize = 112 * 1024;
-/// Primary heap for the ESP-NOW coexistence build. The radio blob adds ~34 KB
-/// of .data/.bss next to the EMAC rings, which at 112 KB left an 18 KB boot
-/// stack that overflowed before main printed a line. 80 KB puts the stack
-/// back at ~50 KB; the heap it gives up (and more) comes back from the
-/// second DRAM segment, see [`DRAM2_HEAP_SIZE`].
-#[cfg(all(feature = "chip-esp32", feature = "espnow"))]
+///
+/// Primary heap, every classic-ESP32 build: 80 KB here plus the 96 KB
+/// second heap in [`DRAM2_HEAP_SIZE`]. 112 KB was the figure before the
+/// radio blob and the OTA statics: the ESP-NOW build overflowed an 18 KB
+/// stack at 112 KB (2026-10-25), and with OTA's buffers in .bss the WiFi
+/// build was down to 26 KB. 80 KB leaves ~40-55 KB of stack on every
+/// variant; the heap it gives up comes back threefold from dram2. The
+/// two-heap layout soaked on poe-iso-rack-02/03 (espnow) from 19:30Z.
+#[cfg(feature = "chip-esp32")]
 pub const HEAP_SIZE: usize = 80 * 1024;
 /// Second heap region in the ESP32's `dram2_seg` (0x3ffe7e30, 98768 bytes:
 /// the DRAM after the ROM data/stack reservations, which esp-hal maps as
 /// `.dram2_uninit` and nothing else claims). Plain DMA-capable internal RAM,
-/// so the WiFi driver's buffers are fine there. Spike-only for now; it is a
-/// free 96 KB for every classic-ESP32 build once validated on the rack.
-#[cfg(all(feature = "chip-esp32", feature = "espnow"))]
+/// so the WiFi driver's buffers are fine there.
+#[cfg(feature = "chip-esp32")]
 pub const DRAM2_HEAP_SIZE: usize = 96 * 1024;
 /// Total heap allocation in bytes for the ESP32-C3 allocator.
 ///

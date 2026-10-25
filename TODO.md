@@ -229,9 +229,11 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       fresh. Cost: the radio blob is ~34 KB of DRAM, which overflowed the boot
       stack at the 112 KB heap; the espnow build runs 80 KB + a 96 KB second
       heap in `dram2_seg` (esp-hal `.dram2_uninit`), 92 KB used / 88 KB free.
-      Promote the dram2 heap to every classic-ESP32 build once the rack has
-      soaked on it. Next: the mesh identity answer (open question below), then
-      the ESP-NOW protocol (gateway/leaf roles, PMK) on top of this module.
+      dram2 heap promoted to every classic-ESP32 build in feat/ota (22:45Z,
+      after a 3 h soak on rack-02/03; the OTA statics had squeezed the WiFi
+      build's boot stack to 26 KB, now 59-61 KB). Next: the mesh identity
+      answer (open question below), then the ESP-NOW protocol (gateway/leaf
+      roles, PMK) on top of this module.
 
 ## Open questions for Nick
 
