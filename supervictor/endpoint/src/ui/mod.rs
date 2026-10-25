@@ -48,6 +48,10 @@ pub fn router(state: AppState) -> Router {
             "/ui/devices/{device_id}/status",
             axum::routing::post(set_status),
         )
+        .route(
+            "/ui/devices/{device_id}/threshold",
+            axum::routing::post(set_threshold),
+        )
         .route("/ui/events", get(sse::events))
         .route("/ui/assets/style.css", get(assets::stylesheet))
         .route_layer(middleware::from_fn(require_admin))
@@ -232,7 +236,8 @@ async fn device_detail(
             slot,
             power,
             current,
-            threshold_ma: state.power_threshold_ma,
+            threshold_ma: device.effective_threshold_ma(state.power_threshold_ma),
+            fleet_threshold_ma: state.power_threshold_ma,
         },
         &uplinks,
         &token,
@@ -318,4 +323,43 @@ async fn set_status(
         "fleet action"
     );
     Ok(Redirect::to("/ui").into_response())
+}
+
+#[derive(Deserialize)]
+struct ThresholdForm {
+    csrf: String,
+    /// Threshold in mA; empty clears the override (back to the fleet default).
+    #[serde(default)]
+    threshold_ma: String,
+}
+
+async fn set_threshold(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    headers: HeaderMap,
+    Form(form): Form<ThresholdForm>,
+) -> Result<Response, AppError> {
+    if !csrf_ok(&headers, &form.csrf) {
+        return Ok(forbidden("invalid CSRF token"));
+    }
+    let raw = form.threshold_ma.trim();
+    let threshold = if raw.is_empty() {
+        None
+    } else {
+        Some(raw.parse::<i64>().map_err(|_| AppError::InvalidPayload {
+            detail: "threshold_ma must be a whole number of milliamps, or empty to clear".into(),
+            structured: None,
+        })?)
+    };
+    // Same validation and store path as the JSON API.
+    let body = serde_json::json!({ "power_threshold_ma": threshold }).to_string();
+    crate::handlers::handle_set_device_threshold(&device_id, Some(&body), state.store.as_ref())?;
+    tracing::info!(
+        admin = %sanitize_for_log(&subject_of(&headers)),
+        device_id = %sanitize_for_log(&device_id),
+        action = "threshold",
+        threshold_ma = ?threshold,
+        "fleet action"
+    );
+    Ok(Redirect::to(&format!("/ui/devices/{device_id}")).into_response())
 }

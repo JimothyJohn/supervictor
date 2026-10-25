@@ -186,4 +186,3 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
 - 2026-10-25: board inventory for the rack — how many ESP32-POE2 vs
   ESP32-POE-ISO, and are any POE-ISO the WROVER variant (PSRAM → RMII clock on
   GPIO0 like the POE2; needs its own feature or a PSRAM flag)?
-- 2026-10-25: the simulated machine fleet (`scripts/sim-fleet.sh`, ten `sim-*` containers on the Studio posting to staging) shows that the global `POWER_THRESHOLD_MA` (100 mA) reads "powered", not "producing": an idle press-brake pump sits at 9 A, an oven's fan at 0.8 A, a compressor's controls at 150 mA, all "on". Do you want a per-device threshold (stored with the device record, set from the device page) so "on" can mean "working" per machine, or is powered/unpowered the intended semantics and "producing" a later state? I'd add a per-device override with the global as default.

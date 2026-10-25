@@ -128,8 +128,13 @@ pub struct FleetDevice {
     /// Last reported current in mA, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current: Option<i64>,
-    /// Power state from `current` against the fleet threshold.
+    /// Power state from `current` against `threshold_ma`.
     pub power: PowerState,
+    /// Current (mA) this device is judged against: its own override, else
+    /// the fleet default.
+    pub threshold_ma: i64,
+    /// Whether `threshold_ma` is a per-device override.
+    pub threshold_overridden: bool,
 }
 
 /// Aggregate counts, as served by `GET /fleet/summary`.
@@ -156,7 +161,7 @@ pub struct FleetSummary {
 }
 
 /// Snapshot of every device's health at `now` (Unix seconds), with power
-/// judged against `threshold_ma`.
+/// judged against each device's own threshold, else `threshold_ma`.
 pub fn snapshot(
     store: &dyn DeviceStore,
     now_unix: u64,
@@ -185,7 +190,8 @@ pub fn snapshot(
                 None => (None, None, None),
             };
             let staleness = staleness_of(last_uplink.as_deref(), now_unix);
-            let power = power_state(current, staleness, threshold_ma);
+            let device_threshold = device.effective_threshold_ma(threshold_ma);
+            let power = power_state(current, staleness, device_threshold);
             FleetDevice {
                 device_id: device.device_id,
                 owner_id: device.owner_id,
@@ -195,6 +201,8 @@ pub fn snapshot(
                 fw,
                 current,
                 power,
+                threshold_ma: device_threshold,
+                threshold_overridden: device.power_threshold_ma.is_some(),
             }
         })
         .collect())

@@ -286,8 +286,11 @@ pub struct DeviceHistory<'a> {
     pub power: PowerState,
     /// Last reported current in mA, if any.
     pub current: Option<i64>,
-    /// Current (mA) at or above which the device counts as on.
+    /// Current (mA) at or above which the device counts as on: its own
+    /// override, else the fleet default.
     pub threshold_ma: i64,
+    /// The fleet default, shown beside the override form.
+    pub fleet_threshold_ma: i64,
 }
 
 /// `GET /ui` — fleet table plus the register form.
@@ -318,6 +321,7 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
                             td {
                                 span .badge.power.(row.power.label()) { (row.power.label()) }
                                 @if let Some(c) = row.current { " " span .current-inline { (c) " mA" } }
+                                @if let Some(t) = row.device.power_threshold_ma { " " span .current-inline title="per-device power threshold" { "≥ " (t) } }
                             }
                             td { (row.device.owner_id) }
                             td .last-uplink { (row.last_uplink.as_deref().unwrap_or("never")) }
@@ -375,6 +379,8 @@ pub fn device_page(
                     span .badge.power.(history.power.label()) { (history.power.label()) }
                     @if let Some(c) = history.current { " " span .current-inline { (c) " mA, threshold " (history.threshold_ma) " mA" } }
                 }
+                dt { "power threshold" }
+                dd { (threshold_form(device, history, csrf)) }
                 dt { "owner" }
                 dd { (device.owner_id) }
                 dt { "cert subject" }
@@ -420,6 +426,31 @@ pub fn device_page(
 }
 
 /// Revoke/reactivate toggle for a device (CSRF-protected form post).
+/// Set or clear the device's power threshold override. The number box is
+/// prefilled with the override (empty when the fleet default applies);
+/// submitting it empty clears the override.
+fn threshold_form(device: &DeviceRecord, history: &DeviceHistory<'_>, csrf: &str) -> Markup {
+    let own = device.power_threshold_ma.map(|t| t.to_string());
+    html! {
+        form .inline method="post" action={ "/ui/devices/" (device.device_id) "/threshold" } {
+            input type="hidden" name="csrf" value=(csrf);
+            label {
+                "on ≥ "
+                input type="number" name="threshold_ma" step="1" size="8"
+                    value=[own.as_deref()]
+                    placeholder=(history.fleet_threshold_ma);
+                " mA"
+            }
+            button type="submit" { "set" }
+            @if own.is_some() {
+                " " span .muted { "(fleet default " (history.fleet_threshold_ma) " mA; submit empty to clear)" }
+            } @else {
+                " " span .muted { "(fleet default)" }
+            }
+        }
+    }
+}
+
 fn status_form(device: &DeviceRecord, csrf: &str) -> Markup {
     let (next, verb) = if device.status == status::ACTIVE {
         (status::INACTIVE, "revoke")

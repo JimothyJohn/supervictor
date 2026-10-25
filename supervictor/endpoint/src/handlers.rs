@@ -169,9 +169,45 @@ pub fn handle_register_device(
         subject_dn: req.subject_dn,
         status: status::ACTIVE.into(),
         created_at: now_rfc3339(),
+        power_threshold_ma: req.power_threshold_ma,
     };
 
     let saved = store.put_device(record)?;
+    Ok(DeviceResponse::from(saved))
+}
+
+/// Set or clear a device's power threshold override from a JSON body
+/// (`{"power_threshold_ma": 12000}`; `{}` or `null` clears it). An empty
+/// body also clears: the endpoint is single-purpose, so "nothing" can only
+/// mean "back to the fleet default".
+pub fn handle_set_device_threshold(
+    device_id: &str,
+    raw_body: Option<&str>,
+    store: &dyn DeviceStore,
+) -> Result<DeviceResponse, AppError> {
+    validate::check_device_id(fields::DEVICE_ID, device_id)?;
+    let invalid = |detail: String| AppError::InvalidPayload {
+        detail,
+        structured: None,
+    };
+    let req: supervictor_common::models::DeviceThresholdRequest =
+        match raw_body.map(str::trim).filter(|b| !b.is_empty()) {
+            None => Default::default(),
+            Some(body) => {
+                // Only an object (or null) is a request; serde would happily
+                // read `[]` as an all-default struct, which must not clear.
+                let value: serde_json::Value =
+                    serde_json::from_str(body).map_err(|e| invalid(e.to_string()))?;
+                match value {
+                    serde_json::Value::Null => Default::default(),
+                    serde_json::Value::Object(_) => {
+                        serde_json::from_value(value).map_err(|e| invalid(e.to_string()))?
+                    }
+                    _ => return Err(invalid("body must be a JSON object".into())),
+                }
+            }
+        };
+    let saved = store.set_device_threshold(device_id, req.power_threshold_ma)?;
     Ok(DeviceResponse::from(saved))
 }
 

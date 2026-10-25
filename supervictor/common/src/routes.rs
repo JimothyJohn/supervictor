@@ -13,6 +13,10 @@ pub const DEVICE_PATTERN: &str = "/devices/{device_id}";
 /// Device uplinks — GET. Axum pattern: /devices/{device_id}/uplinks
 pub const DEVICE_UPLINKS_PATTERN: &str = "/devices/{device_id}/uplinks";
 
+/// Per-device power threshold — PUT (admin mTLS). Axum pattern:
+/// /devices/{device_id}/threshold
+pub const DEVICE_THRESHOLD_PATTERN: &str = "/devices/{device_id}/threshold";
+
 /// Fleet status — GET (admin mTLS). Machine-readable per-device health.
 pub const FLEET: &str = "/fleet";
 

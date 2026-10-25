@@ -24,6 +24,7 @@ fn record(id: &str, status: &str, subject_dn: Option<&str>) -> DeviceRecord {
         subject_dn: subject_dn.map(str::to_string),
         status: status.into(),
         created_at: "2026-07-01T00:00:00+00:00".into(),
+        power_threshold_ma: None,
     }
 }
 

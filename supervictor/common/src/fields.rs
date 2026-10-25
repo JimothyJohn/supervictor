@@ -47,3 +47,5 @@ pub const SUBJECT_DN: &str = "subject_dn";
 pub const STATUS: &str = "status";
 /// ISO-8601 creation timestamp field name.
 pub const CREATED_AT: &str = "created_at";
+/// Per-device power threshold (mA) field name.
+pub const POWER_THRESHOLD_MA: &str = "power_threshold_ma";

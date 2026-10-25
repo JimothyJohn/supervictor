@@ -19,6 +19,17 @@ pub struct DeviceRecord {
     pub status: String,
     /// ISO 8601 timestamp of device registration.
     pub created_at: String,
+    /// Per-device power threshold (mA) overriding the fleet default;
+    /// `None` means use `POWER_THRESHOLD_MA`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_threshold_ma: Option<i64>,
+}
+
+impl DeviceRecord {
+    /// The threshold this device is judged against: its own, else the fleet's.
+    pub fn effective_threshold_ma(&self, fleet_threshold_ma: i64) -> i64 {
+        self.power_threshold_ma.unwrap_or(fleet_threshold_ma)
+    }
 }
 
 /// Persistent uplink message record stored in the database.
@@ -77,6 +88,7 @@ impl From<DeviceRecord> for DeviceResponse {
             subject_dn: r.subject_dn,
             status: r.status,
             created_at: r.created_at,
+            power_threshold_ma: r.power_threshold_ma,
         }
     }
 }

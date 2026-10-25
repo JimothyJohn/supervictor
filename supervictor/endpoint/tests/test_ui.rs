@@ -32,6 +32,7 @@ fn seed_device(store: &dyn DeviceStore, id: &str, status: &str) {
             subject_dn: Some(format!("CN={id},OU=devices")),
             status: status.into(),
             created_at: "2026-07-01T00:00:00+00:00".into(),
+            power_threshold_ma: None,
         })
         .unwrap();
 }
@@ -328,6 +329,129 @@ async fn status_toggle_revokes_and_reactivates() {
     assert_eq!(
         store.get_device("factory-01").unwrap().unwrap().status,
         "active"
+    );
+}
+
+// ── Per-device power threshold ────────────────────────────────────────
+
+#[tokio::test]
+async fn threshold_form_sets_and_clears_the_override() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+
+    let mut req = server.post("/ui/devices/factory-01/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req
+        .form(&[("csrf", "tok"), ("threshold_ma", " 12000 ")])
+        .await;
+    assert_eq!(resp.status_code(), 303, "{}", resp.text());
+    assert_eq!(
+        resp.headers().get("location").unwrap(),
+        "/ui/devices/factory-01",
+        "back to the device page, not the fleet table"
+    );
+    assert_eq!(
+        store
+            .get_device("factory-01")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(12_000)
+    );
+
+    // The device page shows the override and the fleet default side by side;
+    // the fleet table marks the row.
+    let (name, value) = dn(ADMIN_DN);
+    let html = server
+        .get("/ui/devices/factory-01")
+        .add_header(name, value)
+        .await
+        .text();
+    assert!(html.contains("power threshold"), "{html}");
+    assert!(html.contains(r#"value="12000""#), "{html}");
+    assert!(html.contains("fleet default 100 mA"), "{html}");
+    assert!(html.contains(r#"placeholder="100""#), "{html}");
+    let (name, value) = dn(ADMIN_DN);
+    let fleet_html = server.get("/ui").add_header(name, value).await.text();
+    assert!(fleet_html.contains("≥ 12000"), "{fleet_html}");
+
+    // Empty submission clears.
+    let mut req = server.post("/ui/devices/factory-01/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req.form(&[("csrf", "tok"), ("threshold_ma", "")]).await;
+    assert_eq!(resp.status_code(), 303);
+    assert_eq!(
+        store
+            .get_device("factory-01")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        None
+    );
+    let (name, value) = dn(ADMIN_DN);
+    let html = server
+        .get("/ui/devices/factory-01")
+        .add_header(name, value)
+        .await
+        .text();
+    assert!(html.contains("(fleet default)"), "{html}");
+    assert!(!html.contains(r#"value="12000""#), "{html}");
+}
+
+#[tokio::test]
+async fn threshold_form_rejects_non_numbers_and_needs_csrf_and_admin() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "factory-01", "active");
+    store
+        .set_device_threshold("factory-01", Some(5_000))
+        .unwrap();
+
+    for bad in ["abc", "1.5", "12 000", "1e3", "٣"] {
+        let mut req = server.post("/ui/devices/factory-01/threshold");
+        for (name, value) in admin_with_cookie("tok") {
+            req = req.add_header(name, value);
+        }
+        let resp = req.form(&[("csrf", "tok"), ("threshold_ma", bad)]).await;
+        assert_eq!(resp.status_code(), 422, "{bad:?}: {}", resp.text());
+    }
+
+    // Wrong CSRF token.
+    let mut req = server.post("/ui/devices/factory-01/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req.form(&[("csrf", "other"), ("threshold_ma", "1")]).await;
+    assert_eq!(resp.status_code(), 403);
+
+    // Device certificate.
+    let (name, value) = dn(DEVICE_DN);
+    let resp = server
+        .post("/ui/devices/factory-01/threshold")
+        .add_header(name, value)
+        .form(&[("csrf", "tok"), ("threshold_ma", "1")])
+        .await;
+    assert_eq!(resp.status_code(), 403);
+
+    // Unknown device.
+    let mut req = server.post("/ui/devices/ghost/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req.form(&[("csrf", "tok"), ("threshold_ma", "1")]).await;
+    assert_eq!(resp.status_code(), 404);
+
+    assert_eq!(
+        store
+            .get_device("factory-01")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(5_000),
+        "nothing above may have written"
     );
 }
 
