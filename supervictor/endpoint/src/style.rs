@@ -78,6 +78,10 @@ impl Color {
 }
 
 /// The style a trace is drawn with once defaults are filled in.
+///
+/// Serialises as what a page script needs to draw it: `class` (`s3` /
+/// `custom`), `color` (a CSS value: `var(--s3)` or the hex), `dash`
+/// (`stroke-dasharray` or null) and `marker` (its token).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
     /// Trace colour.
@@ -114,6 +118,18 @@ impl Resolved {
     /// `stroke-dasharray` for the line, `None` for solid.
     pub fn dash(&self) -> Option<&'static str> {
         dash_of(self.line)
+    }
+}
+
+impl serde::Serialize for Resolved {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = s.serialize_struct("Resolved", 4)?;
+        st.serialize_field("class", &self.color.class())?;
+        st.serialize_field("color", &self.color.css())?;
+        st.serialize_field("dash", &self.dash())?;
+        st.serialize_field("marker", self.marker.label())?;
+        st.end()
     }
 }
 
@@ -312,6 +328,25 @@ mod tests {
         })
         .unwrap_err();
         assert!(matches!(err, AppError::InvalidPayload { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn resolved_serialises_for_page_scripts() {
+        let slot = serde_json::to_value(Resolved::slot(3)).unwrap();
+        assert_eq!(
+            slot,
+            serde_json::json!({ "class": "s3", "color": "var(--s3)", "dash": null, "marker": "none" })
+        );
+        let custom = serde_json::to_value(Resolved {
+            color: Color::Hex("#ff8800".into()),
+            line: LineStyle::Dotted,
+            marker: Marker::Square,
+        })
+        .unwrap();
+        assert_eq!(
+            custom,
+            serde_json::json!({ "class": "custom", "color": "#ff8800", "dash": "1.5 4", "marker": "square" })
+        );
     }
 
     #[test]

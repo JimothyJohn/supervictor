@@ -458,10 +458,9 @@ fn main() {
         let mut ids: Vec<&str> = ids.clone();
         ids.sort_unstable();
         ids.iter()
-            .enumerate()
-            .map(|(slot, id)| LiveDevice {
+            .map(|id| LiveDevice {
                 device_id: id.to_string(),
-                slot,
+                style: style_of(id),
                 samples: match *id {
                     "factory-01" => demo_live_samples(11, now_ms),
                     "factory-02" => demo_live_samples(23, now_ms),

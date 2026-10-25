@@ -87,7 +87,8 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   0 = absent). `src/live.rs` expands a stored `levels`/`levels_ms` burst
   into timestamped samples (last sample = receive time) or quantises the
   scalar fields into one; the SSE event carries `t_ms`, `levels`,
-  `levels_ms`. The page is canvas (10 fps, same `--sN` tokens); the register
+  `levels_ms`. The page is canvas (10 fps) drawing each device in its
+  resolved style (`LiveDevice.style`: class / colour / dash / marker); the register
   bank's meters are the accessible readout. `validate::check_levels` gates
   ingest; `history::METRICS` is the register table, and `bucket_series`
   folds a burst's earlier samples into their own buckets. Distinct from the

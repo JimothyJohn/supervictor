@@ -1268,7 +1268,10 @@ async fn live_json_is_the_page_seed_with_expanded_bursts() {
     let devices = json["devices"].as_array().unwrap();
     assert_eq!(devices.len(), 2);
     assert_eq!(devices[0]["device_id"], "a", "sorted by id");
-    assert_eq!(devices[0]["slot"], 0);
+    assert_eq!(devices[0]["style"]["class"], "s0");
+    assert_eq!(devices[0]["style"]["color"], "var(--s0)");
+    assert!(devices[0]["style"]["dash"].is_null());
+    assert_eq!(devices[0]["style"]["marker"], "none");
     assert_eq!(
         devices[0]["samples"].as_array().unwrap().len(),
         0,
@@ -1280,4 +1283,66 @@ async fn live_json_is_the_page_seed_with_expanded_bursts() {
     assert!(t.windows(2).all(|w| w[1] == w[0] + 250), "{t:?}");
     assert_eq!(samples[0]["l"], serde_json::json!([1, 2, 3, 4, 5]));
     assert_eq!(samples[3]["l"][COUNT - 1], (COUNT * 4) as u64);
+}
+
+/// The live page draws each device in its stored style: the bank key and
+/// meter bar, the legend, and the seed the canvas script reads.
+#[tokio::test]
+async fn live_page_uses_the_stored_device_style() {
+    use supervictor_common::models::{LineStyle, Marker};
+    use supervictor_endpoint::models::DeviceStyle;
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "hexy", "active");
+    seed_device(store.as_ref(), "plain", "active");
+    store
+        .set_device_style(
+            "hexy",
+            DeviceStyle {
+                color: Some("#ff8800".into()),
+                line_style: Some(LineStyle::Dashed),
+                marker: Some(Marker::Triangle),
+            },
+        )
+        .unwrap();
+
+    let (name, value) = dn(ADMIN_DN);
+    let html = server.get("/ui/live").add_header(name, value).await.text();
+    assert!(
+        html.contains("class=\"meter-bar custom\" style=\"--c:#ff8800\""),
+        "{html}"
+    );
+    assert!(
+        html.contains("class=\"meter-bar s0\""),
+        "legacy device on a slot"
+    );
+    assert!(
+        html.contains("class=\"line custom dashed\" style=\"--c:#ff8800\""),
+        "bank key"
+    );
+    assert!(
+        html.contains("class=\"mark custom\" style=\"--c:#ff8800\""),
+        "triangle in the key"
+    );
+    assert!(
+        html.contains("&quot;dash&quot;:&quot;8 5&quot;"),
+        "seed carries the dash"
+    );
+    assert!(html.contains("&quot;marker&quot;:&quot;triangle&quot;"));
+
+    let (name, value) = dn(ADMIN_DN);
+    let json: serde_json::Value = server
+        .get("/ui/live.json")
+        .add_header(name, value)
+        .await
+        .json();
+    let hexy = json["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["device_id"] == "hexy")
+        .unwrap();
+    assert_eq!(hexy["style"]["class"], "custom");
+    assert_eq!(hexy["style"]["color"], "#ff8800");
+    assert_eq!(hexy["style"]["dash"], "8 5");
+    assert_eq!(hexy["style"]["marker"], "triangle");
 }

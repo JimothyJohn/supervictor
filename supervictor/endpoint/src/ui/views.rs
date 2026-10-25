@@ -13,7 +13,7 @@ use crate::history::{DeviceSeries, History, Window, METRICS};
 use crate::live;
 use crate::models::{DeviceRecord, UplinkRecord};
 use crate::style::{Color, LineStyle, Marker, Resolved, SLOTS};
-use crate::ui::charts::{self, slot_class, Reference, Series};
+use crate::ui::charts::{self, Reference, Series};
 use supervictor_common::status;
 
 /// One row of the fleet table.
@@ -195,9 +195,11 @@ pub const LIVE_SCRIPT: &str = r#"
 /// `#live[data-live]` plus whatever `sv:uplink` / `sv:snapshot` deliver.
 /// Levels are the y axis (1..=255 maps onto each register's fixed range,
 /// 0 breaks the line), so the scale never jumps as data arrives; tick
-/// labels are dequantised into real units. Colours come from the same
-/// `--sN` slot tokens as the SVG charts, read at draw time so the theme
-/// toggle applies immediately. All text goes in via `textContent`.
+/// labels are dequantised into real units. Each device draws in its
+/// resolved style (`crate::style`): palette colours are `--sN` tokens read
+/// at draw time so the theme toggle applies immediately, custom colours
+/// are literal; dash pattern and per-sample marker follow the record. All
+/// text goes in via `textContent`.
 pub const LIVE_PAGE_SCRIPT: &str = r#"
 (function () {
   var root = document.getElementById('live');
@@ -207,11 +209,26 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
   var skew = Date.now() - seed.now_ms;
   var span = 60, devices = {}, order = [];
   seed.devices.forEach(function (d) {
-    devices[d.device_id] = { slot: d.slot, t: d.samples.map(function (s) { return s.t; }), l: d.samples.map(function (s) { return s.l; }) };
+    devices[d.device_id] = { style: d.style || {}, t: d.samples.map(function (s) { return s.t; }), l: d.samples.map(function (s) { return s.l; }) };
     order.push(d.device_id);
   });
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-  function slotVar(slot) { return slot < 8 ? '--s' + slot : '--s-other'; }
+  // A palette colour is `var(--sN)`: resolve it against the current theme.
+  function paint(style) {
+    var c = style.color || '';
+    var m = /^var\((--[a-z0-9-]+)\)$/i.exec(c);
+    return m ? css(m[1]) : c;
+  }
+  function dashes(style) { return typeof style.dash === 'string' ? style.dash.split(/\s+/).map(Number).filter(function (n) { return n > 0; }) : []; }
+  function glyph(ctx, kind, px, py, r) {
+    ctx.beginPath();
+    if (kind === 'circle') ctx.arc(px, py, r, 0, Math.PI * 2);
+    else if (kind === 'square') ctx.rect(px - r, py - r, 2 * r, 2 * r);
+    else if (kind === 'diamond') { ctx.moveTo(px, py - r); ctx.lineTo(px + r, py); ctx.lineTo(px, py + r); ctx.lineTo(px - r, py); ctx.closePath(); }
+    else if (kind === 'triangle') { ctx.moveTo(px, py - r); ctx.lineTo(px + r, py + r); ctx.lineTo(px - r, py + r); ctx.closePath(); }
+    else return;
+    ctx.fill();
+  }
   function deq(r, lv) { if (!lv) return null; return REG[r].lo + (lv - 1) * (REG[r].hi - REG[r].lo) / 254; }
   function fmt(v) {
     if (v === null || v === undefined) return '–';
@@ -292,10 +309,11 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
       ctx.save(); ctx.beginPath(); ctx.rect(ml - 1, 0, pw + 2, H); ctx.clip();
       order.forEach(function (id) {
         var d = devices[id];
-        var color = colors[d.slot] || (colors[d.slot] = css(slotVar(d.slot)));
+        var color = colors[id] || (colors[id] = paint(d.style));
         ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+        ctx.setLineDash(dashes(d.style));
         ctx.beginPath();
-        var up = true, lx, ly;
+        var up = true, lx, ly, marks = [];
         for (var i = 0; i < d.t.length; i++) {
           if (d.t[i] < t0 - 2000) continue;
           var lv = d.l[i][r] | 0;
@@ -303,8 +321,11 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
           var px = x(Math.min(d.t[i], t1)), py = y(lv);
           if (up) ctx.moveTo(px, py); else ctx.lineTo(px, py);
           up = false; lx = px; ly = py;
+          if (d.style.marker && d.style.marker !== 'none') marks.push([px, py]);
         }
         ctx.stroke();
+        ctx.setLineDash([]);
+        for (var k = 0; k < marks.length; k++) glyph(ctx, d.style.marker, marks[k][0], marks[k][1], 2.5);
         if (lx !== undefined) {
           ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, Math.PI * 2); ctx.fill();
           ctx.strokeStyle = surface; ctx.lineWidth = 2; ctx.stroke();
@@ -703,7 +724,7 @@ pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
                         tbody {
                             @for d in &snapshot.devices {
                                 tr data-device=(d.device_id) {
-                                    td { span .key.(slot_class(d.slot)) {} a href={ "/ui/devices/" (d.device_id) } { (d.device_id) } }
+                                    td { (charts::key(&d.style)) a href={ "/ui/devices/" (d.device_id) } { (d.device_id) } }
                                     @for (i, r) in snapshot.registers.iter().enumerate() {
                                         @let level = d.latest().map(|s| s.l[i]).unwrap_or(0);
                                         @let value = METRICS[i].dequantize(level);
@@ -711,7 +732,7 @@ pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
                                             div .meter data-register=(i) style={ "--lv:" (level) } role="meter"
                                                 aria-label={ (d.device_id) " " (r.label) } aria-valuemin="1" aria-valuemax="255"
                                                 aria-valuenow=[(level > 0).then_some(level)] {
-                                                span .meter-bar.(slot_class(d.slot)) {}
+                                                span .meter-bar.(d.style.color.class()) style=[d.style.color.custom_hex().map(|h| format!("--c:{h}"))] {}
                                                 span .meter-value {
                                                     @match value {
                                                         Some(v) => (charts::fmt_value(f64::from(v))),
@@ -739,7 +760,7 @@ pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
                 @if snapshot.devices.len() >= 2 {
                     ul .legend {
                         @for d in &snapshot.devices {
-                            li { span .key.line-key.(slot_class(d.slot)) {} (d.device_id) }
+                            li { (charts::key(&d.style)) (d.device_id) }
                         }
                     }
                 }

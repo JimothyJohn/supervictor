@@ -327,6 +327,7 @@ select {
 .meter-bar.s4 { background: var(--s4); } .meter-bar.s5 { background: var(--s5); }
 .meter-bar.s6 { background: var(--s6); } .meter-bar.s7 { background: var(--s7); }
 .meter-bar.s-other { background: var(--s-other); }
+.meter-bar.custom { background: var(--c); }
 .meter-value { position: absolute; left: 0.4rem; top: 0; line-height: 1.6rem; font-size: 0.78rem; }
 .meter-level { position: absolute; right: 0.4rem; top: 0; line-height: 1.6rem; font-size: 0.7rem; color: var(--muted); }
 .strips { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; margin-top: 0.75rem; }
