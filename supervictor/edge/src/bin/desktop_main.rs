@@ -7,6 +7,8 @@
 //!
 //! Environment variables (all runtime):
 //!   HOST        - Target host for HTTP requests (e.g. supervictor.advin.io)
+//!   PORT        - TLS port on that host (default 443; a local Quickstart
+//!                 endpoint listens on 8443)
 //!   API_PATH    - Request path: "/" (custom domain, default) or "/<stage>"
 //!                 against a raw execute-api URL
 //!   DEVICE_ID   - Device id to post as (default "1234567890"); should match
@@ -59,12 +61,19 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
     let connector = create_connector()?;
 
     let base_host = env::var("HOST").expect("HOST environment variable not set");
-    let host_port = format!("{}:443", base_host);
+    let port: u16 = env_or("PORT", "443")
+        .parse()
+        .map_err(|_| "PORT must be a TCP port number")?;
+    let host_port = format!("{}:{}", base_host, port);
 
-    let socket_addr = tokio::net::lookup_host(&host_port)
-        .await?
-        .next()
-        .ok_or("DNS resolution failed: No addresses found")?;
+    // Every address the name resolves to: `localhost` is usually both ::1
+    // and 127.0.0.1, and an endpoint bound to 0.0.0.0 answers only the
+    // latter, so each tick tries them in order until one connects.
+    let socket_addrs: Vec<std::net::SocketAddr> =
+        tokio::net::lookup_host(&host_port).await?.collect();
+    if socket_addrs.is_empty() {
+        return Err("DNS resolution failed: No addresses found".into());
+    }
 
     // SNI server name must match the server's certificate
     let server_name = ServerName::try_from(base_host.as_str())?.to_owned();
@@ -130,7 +139,7 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
         );
         let delay = Duration::from_millis(u64::from(sim.next_delay_ms(interval_s * 1_000)));
 
-        match TcpStream::connect(socket_addr).await {
+        match connect_any(&socket_addrs).await {
             Ok(socket) => match connector.connect(server_name.clone(), socket).await {
                 Ok(mut tls_stream) => {
                     let request = match post_request(&base_host, &message, Some(&api_path)) {
@@ -178,6 +187,19 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
 
         tokio::time::sleep(delay).await;
     }
+}
+
+/// Connect to the first address that accepts; the last error is the one
+/// reported when none does.
+async fn connect_any(addrs: &[std::net::SocketAddr]) -> std::io::Result<TcpStream> {
+    let mut last = std::io::Error::other("no addresses to connect to");
+    for addr in addrs {
+        match TcpStream::connect(addr).await {
+            Ok(socket) => return Ok(socket),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
 }
 
 fn env_or(var: &str, default: &str) -> String {
