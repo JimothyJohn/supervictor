@@ -49,6 +49,15 @@ pub const ETH_LINK_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// needs sub-ms per datasheet; generous margin costs boot time once.
 pub const PHY_POWER_STABLE_DELAY_MS: u32 = 100;
 
+// --- ESP-NOW (coexistence spike, `espnow` feature) ---
+/// WiFi channel the spike boards meet on. There is no AP to follow, so every
+/// board pins the same one.
+pub const ESPNOW_CHANNEL: u8 = 1;
+/// Interval between broadcast beacons.
+pub const ESPNOW_BEACON_INTERVAL: Duration = Duration::from_secs(5);
+/// Interval between beacon/heap summary lines on the console.
+pub const ESPNOW_REPORT_INTERVAL: Duration = Duration::from_secs(60);
+
 // --- TCP/Socket ---
 /// TCP receive buffer size in bytes.
 pub const TCP_RX_BUFFER_SIZE: usize = 4096;

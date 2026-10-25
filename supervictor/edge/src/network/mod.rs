@@ -1,5 +1,8 @@
 /// DNS hijack server for captive portal mode.
 pub mod dns;
+/// ESP-NOW beacon + listener beside the wired uplink (coexistence spike).
+#[cfg(feature = "espnow")]
+pub mod espnow;
 /// Wired Ethernet uplink (EMAC + LAN8710A) for the ESP32-POE-ISO.
 #[cfg(feature = "ethernet")]
 pub mod ethernet;
