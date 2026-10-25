@@ -880,3 +880,58 @@ async fn device_uplinks_since_is_a_sort_key_range() {
 
     fx.teardown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_desired_fw_sets_clears_and_rejects_unknown() {
+    let fx = Fixture::new("desired-fw", TTL_DAYS).await;
+    fx.store
+        .put_device(device("dev-1", Some("CN=dev-1")))
+        .unwrap();
+    assert_eq!(
+        fx.store.get_device("dev-1").unwrap().unwrap().desired_fw,
+        None,
+        "no attribute = no target"
+    );
+
+    let updated = fx.store.set_desired_fw("dev-1", Some("0.2.0")).unwrap();
+    assert_eq!(updated.desired_fw.as_deref(), Some("0.2.0"));
+    assert_eq!(
+        updated.subject_dn.as_deref(),
+        Some("CN=dev-1"),
+        "ReturnValues ALL_NEW must carry the untouched fields"
+    );
+    assert_eq!(
+        fx.store
+            .get_device("dev-1")
+            .unwrap()
+            .unwrap()
+            .desired_fw
+            .as_deref(),
+        Some("0.2.0")
+    );
+
+    // Clearing REMOVEs the attribute rather than storing an empty string.
+    let cleared = fx.store.set_desired_fw("dev-1", None).unwrap();
+    assert_eq!(cleared.desired_fw, None);
+    assert_eq!(fx.store.list_devices().unwrap()[0].desired_fw, None);
+
+    // Unknown device: the conditional write fails closed.
+    assert!(matches!(
+        fx.store.set_desired_fw("ghost", Some("0.2.0")),
+        Err(AppError::DeviceNotFound { .. })
+    ));
+
+    // A target given at registration is stored with the item.
+    let mut with = device("dev-2", None);
+    with.desired_fw = Some("0.3.0".into());
+    fx.store.put_device(with).unwrap();
+    assert_eq!(
+        fx.store
+            .get_device("dev-2")
+            .unwrap()
+            .unwrap()
+            .desired_fw
+            .as_deref(),
+        Some("0.3.0")
+    );
+}

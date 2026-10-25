@@ -398,3 +398,119 @@ fn opening_a_pre_style_database_migrates_it_in_place() {
     }
     let _ = std::fs::remove_file(&path);
 }
+
+// ── desired_fw (OTA target) ────────────────────────────────────────────
+
+#[test]
+fn set_desired_fw_sets_clears_and_rejects_unknown() {
+    let store = common::test_store();
+    store.put_device(make_device("rack-1")).unwrap();
+    assert_eq!(
+        store.get_device("rack-1").unwrap().unwrap().desired_fw,
+        None
+    );
+
+    let updated = store.set_desired_fw("rack-1", Some("0.2.0")).unwrap();
+    assert_eq!(updated.desired_fw.as_deref(), Some("0.2.0"));
+    assert_eq!(updated.status, "active", "other fields untouched");
+    assert_eq!(
+        store
+            .get_device("rack-1")
+            .unwrap()
+            .unwrap()
+            .desired_fw
+            .as_deref(),
+        Some("0.2.0")
+    );
+    let listed = store.list_devices().unwrap();
+    assert_eq!(listed[0].desired_fw.as_deref(), Some("0.2.0"));
+
+    // The store remembers the string as given (validation is the handler's).
+    let updated = store.set_desired_fw("rack-1", Some("1.0.0-rc.1")).unwrap();
+    assert_eq!(updated.desired_fw.as_deref(), Some("1.0.0-rc.1"));
+
+    let cleared = store.set_desired_fw("rack-1", None).unwrap();
+    assert_eq!(cleared.desired_fw, None);
+    assert_eq!(
+        store.get_device("rack-1").unwrap().unwrap().desired_fw,
+        None
+    );
+
+    assert!(matches!(
+        store.set_desired_fw("ghost", Some("0.2.0")),
+        Err(supervictor_endpoint::error::AppError::DeviceNotFound { .. })
+    ));
+
+    // A target given at registration is stored with the row.
+    let mut with = make_device("rack-2");
+    with.desired_fw = Some("0.3.0".into());
+    store.put_device(with).unwrap();
+    assert_eq!(
+        store
+            .get_device("rack-2")
+            .unwrap()
+            .unwrap()
+            .desired_fw
+            .as_deref(),
+        Some("0.3.0")
+    );
+}
+
+#[test]
+fn opening_a_pre_desired_fw_database_migrates_it_in_place() {
+    use supervictor_endpoint::store::sqlite::SqliteDeviceStore;
+    use supervictor_endpoint::store::DeviceStore;
+
+    let path = std::env::temp_dir().join(format!(
+        "supervictor-desired-fw-migration-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let path_str = path.to_str().unwrap().to_string();
+    {
+        // The schema as the style PR left it: every column but desired_fw.
+        let conn = rusqlite::Connection::open(&path_str).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE devices (
+                device_id   TEXT PRIMARY KEY,
+                owner_id    TEXT NOT NULL,
+                subject_dn  TEXT,
+                status      TEXT NOT NULL DEFAULT 'active',
+                created_at  TEXT NOT NULL,
+                power_threshold_ma INTEGER,
+                color TEXT,
+                line_style TEXT,
+                marker TEXT
+            );
+            INSERT INTO devices VALUES ('legacy-1', 'owner-1', 'CN=legacy-1', 'active', '2025-01-01T00:00:00Z', 9000, 's3', 'dashed', NULL);",
+        )
+        .unwrap();
+    }
+
+    let store = SqliteDeviceStore::new(&path_str).expect("open + migrate");
+    let legacy = store.get_device("legacy-1").unwrap().unwrap();
+    assert_eq!(legacy.desired_fw, None, "no column = no target");
+    assert_eq!(legacy.power_threshold_ma, Some(9_000));
+    assert_eq!(legacy.style.color.as_deref(), Some("s3"));
+    let updated = store.set_desired_fw("legacy-1", Some("0.2.0")).unwrap();
+    assert_eq!(updated.desired_fw.as_deref(), Some("0.2.0"));
+    assert_eq!(updated.style.color.as_deref(), Some("s3"), "style survives");
+
+    // Rollback safety: an older binary that never selects the column still
+    // reads the row (the column is nullable, no constraint).
+    {
+        let conn = rusqlite::Connection::open(&path_str).unwrap();
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM devices WHERE device_id = 'legacy-1' AND desired_fw = '0.2.0'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+    let _ = std::fs::remove_file(&path);
+}
