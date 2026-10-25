@@ -88,10 +88,35 @@ fn uplink_full_telemetry_roundtrip() {
         accel_g: Some([0.01, -0.02, 1.0]),
         gyro_dps: Some([0.5, -0.5, 0.0]),
         mag_ut: Some([22.1, -4.3, 40.0]),
+        levels: vec![1, 2, 3, 4, 5, 255, 254, 253, 0, 1],
+        levels_ms: Some(500),
     };
     let json = serde_json::to_string(&msg).unwrap();
     let back: UplinkMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(msg, back);
+}
+
+/// The burst is a plain JSON array of 0..=255 integers — what the
+/// firmware's heapless serializer emits — never a string or a blob.
+#[test]
+fn uplink_levels_are_a_byte_array_on_the_wire() {
+    let msg = UplinkMessage {
+        id: "d".into(),
+        current: 0,
+        levels: vec![0, 1, 255],
+        levels_ms: Some(100),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""levels":[0,1,255]"#), "{json}");
+    assert!(json.contains(r#""levels_ms":100"#), "{json}");
+    // 256 does not fit a byte: the whole payload is rejected, not clamped.
+    let err = serde_json::from_str::<UplinkMessage>(r#"{"id":"d","current":0,"levels":[256]}"#);
+    assert!(err.is_err());
+    let err = serde_json::from_str::<UplinkMessage>(r#"{"id":"d","current":0,"levels":[-1]}"#);
+    assert!(err.is_err());
+    let err = serde_json::from_str::<UplinkMessage>(r#"{"id":"d","current":0,"levels":"AAEC"}"#);
+    assert!(err.is_err());
 }
 
 /// Absent telemetry is omitted from the wire, not serialized as null —
@@ -142,6 +167,8 @@ fn uplink_telemetry_field_names() {
         accel_g: Some([0.0; 3]),
         gyro_dps: Some([0.0; 3]),
         mag_ut: Some([0.0; 3]),
+        levels: vec![1; 5],
+        levels_ms: Some(1),
     };
     let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
     let obj = val.as_object().unwrap();
@@ -160,10 +187,12 @@ fn uplink_telemetry_field_names() {
         fields::UPLINK_ACCEL_G,
         fields::UPLINK_GYRO_DPS,
         fields::UPLINK_MAG_UT,
+        fields::UPLINK_LEVELS,
+        fields::UPLINK_LEVELS_MS,
     ] {
         assert!(obj.contains_key(key), "expected '{key}' on the wire");
     }
-    assert_eq!(obj.len(), 13);
+    assert_eq!(obj.len(), 15);
 }
 
 /// IMU vectors reject wrong arity — [x, y] is a malformed packet, not a

@@ -128,7 +128,7 @@ fn post_contains_json_body() {
 #[test]
 fn post_body_after_double_crlf() {
     let req = post_request("h", &make_msg("x", 1), Some("/")).unwrap();
-    let parts: HString<512> = req;
+    let parts: HString<768> = req;
     let s = parts.as_str();
     let sep = s.find("\r\n\r\n").expect("missing header/body separator");
     let body = &s[sep + 4..];

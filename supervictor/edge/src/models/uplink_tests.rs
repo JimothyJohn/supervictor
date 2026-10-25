@@ -199,19 +199,21 @@ fn make_full_telemetry(id: &str) -> UplinkMessage {
     msg.accel_g = Some([f32::MIN; 3]);
     msg.gyro_dps = Some([f32::MIN; 3]);
     msg.mag_ut = Some([f32::MIN; 3]);
+    msg.levels = core::iter::repeat_n(255u8, LEVELS_CAP).collect();
+    msg.levels_ms = Some(u32::MAX);
     msg
 }
 
 /// The contract behind post_request's buffer sizing: a worst-case uplink —
 /// max-length id, every telemetry field at its widest printing — must fit
-/// the 512-byte JSON buffer (network/http.rs). If this fails, grow the
+/// the 768-byte JSON buffer (network/http.rs). If this fails, grow the
 /// buffers there, not the assertion here.
 #[test]
 fn uplink_worst_case_fits_json_buffer() {
     let msg = make_full_telemetry(NAME_64);
-    let json = serde_json_core::to_string::<_, 512>(&msg)
-        .expect("worst-case uplink must fit post_request's 512-byte JSON buffer");
-    assert!(json.len() <= 512);
+    let json = serde_json_core::to_string::<_, 768>(&msg)
+        .expect("worst-case uplink must fit post_request's 768-byte JSON buffer");
+    assert!(json.len() <= 768, "{} bytes", json.len());
 }
 
 /// Full telemetry survives a no_std serialize → deserialize roundtrip.
@@ -359,6 +361,7 @@ fn lambda_response_empty_fields() {
 // ── Optional telemetry fields (wire contract, docs/TELEMETRY.md) ─────
 
 use crate::models::sim::{seed_from, Hardware, Simulator};
+use crate::models::uplink::LEVELS_CAP;
 
 /// Field names are the contract with `supervictor_common::fields`; a typo
 /// here would silently drop a column on the endpoint.
@@ -384,7 +387,7 @@ fn minimal_uplink_omits_every_optional_field() {
 #[test]
 fn full_uplink_serializes_every_field_by_its_wire_name() {
     let mut sim = Simulator::new(seed_from("dev-1", 0));
-    let msg = sim.uplink("dev-1".try_into().unwrap(), 42, 5, Hardware::default());
+    let msg = sim.uplink("dev-1".try_into().unwrap(), 42, 5, 1, Hardware::default());
     let json: HString<256> = serde_json_core::to_string(&msg).unwrap();
     for key in OPTIONAL_KEYS {
         let mut quoted = HString::<32>::new();
@@ -400,16 +403,19 @@ fn full_uplink_serializes_every_field_by_its_wire_name() {
 #[test]
 fn full_uplink_round_trips_through_serde_json_core() {
     let mut sim = Simulator::new(seed_from("dev-1", 1));
-    let msg = sim.uplink("dev-1".try_into().unwrap(), 7, 5, Hardware::default());
-    let json: HString<256> = serde_json_core::to_string(&msg).unwrap();
+    let msg = sim.uplink("dev-1".try_into().unwrap(), 7, 5, 10, Hardware::default());
+    let json: HString<640> = serde_json_core::to_string(&msg).unwrap();
+    assert!(json.contains("\"levels\":["), "{json}");
+    assert!(json.contains("\"levels_ms\":500"), "{json}");
     let (back, _): (UplinkMessage, _) = serde_json_core::from_str(json.as_str()).unwrap();
     assert_eq!(back, msg);
 }
 
-/// The worst case — a 64-byte id, extreme values in every field — must fit
-/// the `post_request` JSON buffer (384) and the request buffer (512), or
-/// the firmware would silently stop uplinking after a rename. (It is 260
-/// bytes; the old 256 buffer was one field short.)
+/// The worst case — a 64-byte id, extreme values in every field, a full
+/// levels burst of three-digit bytes, the nine IMU floats — must fit the
+/// `post_request` JSON buffer (768) and the request buffer (1024), or the
+/// firmware would silently stop uplinking after a rename. (It is 660
+/// bytes; the pre-burst worst case was 260.)
 #[test]
 fn full_uplink_with_max_id_fits_the_request_buffers() {
     let id: HString<64> = core::iter::repeat_n('x', 64).collect();
@@ -422,10 +428,15 @@ fn full_uplink_with_max_id_fits_the_request_buffers() {
     msg.rssi_dbm = Some(i8::MIN);
     msg.temp_c = Some(-99.999_99);
     msg.humidity_pct = Some(100.000_01);
-    let json: HString<384> = serde_json_core::to_string(&msg).expect("fits 384");
-    assert!(json.len() <= 384, "{} bytes", json.len());
+    msg.accel_g = Some([-99.999_99; 3]);
+    msg.gyro_dps = Some([-999.999_9; 3]);
+    msg.mag_ut = Some([-999.999_9; 3]);
+    msg.levels = core::iter::repeat_n(255u8, LEVELS_CAP).collect();
+    msg.levels_ms = Some(u32::MAX);
+    let json: HString<768> = serde_json_core::to_string(&msg).expect("fits 768");
+    assert!(json.len() <= 768, "{} bytes", json.len());
     let request = crate::network::http::post_request("staging.supervictor.advin.io", &msg, None)
-        .expect("fits 512");
+        .expect("fits 1024");
     assert!(request.ends_with(json.as_str()));
 }
 

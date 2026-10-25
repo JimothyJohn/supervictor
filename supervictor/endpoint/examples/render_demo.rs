@@ -12,8 +12,9 @@ use supervictor_endpoint::fleet::{FleetSummary, DEFAULT_POWER_THRESHOLD_MA};
 use supervictor_endpoint::history::{
     bucket_series, power_timeline, status_timeline, Grid, History, Window, BUCKETS, METRICS,
 };
+use supervictor_endpoint::live::{self, LiveDevice, RegisterInfo};
 use supervictor_endpoint::models::{DeviceRecord, UplinkRecord};
-use supervictor_endpoint::time::format_rfc3339;
+use supervictor_endpoint::time::{format_rfc3339, parse_rfc3339_unix_ms};
 use supervictor_endpoint::ui::views::{self, DeviceHistory, FleetRow, PowerState, Staleness};
 use supervictor_endpoint::ui::{assets, views::LIVE_SCRIPT};
 
@@ -42,12 +43,47 @@ const DEMO_SCRIPT: &str = r#"
   });
   var rows = Array.prototype.slice.call(document.querySelectorAll('tr[data-device]'));
   if (!rows.length) return;
+  // Live page: keep each device's walk going with a synthetic burst of
+  // ten 8-bit samples every five seconds, like the firmware does.
+  var live = document.getElementById('live');
+  var seed = null;
+  if (live) { try { seed = JSON.parse(live.dataset.live); } catch (_) { seed = null; } }
+  // The page aligns its clock to the seed's now_ms, so synthetic events
+  // must be stamped on that virtual clock, not the real one.
+  var walks = {}, homes = {}, loaded = Date.now();
+  if (seed) {
+    seed.devices.forEach(function (d) {
+      var first = d.samples.length ? d.samples[0].l : null;
+      var last = d.samples.length ? d.samples[d.samples.length - 1].l : null;
+      if (last) { walks[d.device_id] = last.slice(); homes[d.device_id] = first.slice(); }
+    });
+  }
+  function burst(id) {
+    var w = walks[id], home = homes[id], R = w.length, out = [];
+    for (var i = 0; i < 10; i++) {
+      for (var r = 0; r < R; r++) {
+        var step = r === 0 ? 6 : 1;
+        // Bounded walk with a pull back toward the seed's starting level.
+        var lv = w[r] + Math.round((Math.random() - 0.5) * 2 * step - (w[r] - home[r]) / 24);
+        if (r === 0 && Math.random() < 0.03) lv += 40;
+        w[r] = Math.max(1, Math.min(255, lv));
+        out.push(w[r]);
+      }
+    }
+    return out;
+  }
   setInterval(function () {
     var row = rows[Math.floor(Math.random() * rows.length)];
+    var id = row.getAttribute('data-device');
     var last = row.querySelector('.last-uplink');
     if (last) last.textContent = new Date().toISOString().replace(/\.\d+Z$/, '+00:00');
     var badge = row.querySelector('.staleness');
     if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
+    if (walks[id]) {
+      document.dispatchEvent(new CustomEvent('sv:uplink', { detail: {
+        device_id: id, t_ms: seed.now_ms + (Date.now() - loaded), levels: burst(id), levels_ms: 500
+      } }));
+    }
   }, 2500);
 })();
 "#;
@@ -88,6 +124,9 @@ fn staticize(html: String, devices: &[&str]) -> String {
         );
     }
     out = out.replace("href=\"/ui/history\"", "href=\"history.html\"");
+    out = out
+        .replace("href=\"/ui/live\"", "href=\"live.html\"")
+        .replace(" data-poll=\"/ui/live.json\"", "");
     for id in devices {
         for w in Window::ALL {
             out = out.replace(
@@ -140,6 +179,47 @@ fn demo_rows(id: &str, seed: u64, step_s: u64) -> Vec<UplinkRecord> {
         t += step_s;
     }
     rows
+}
+
+/// Two minutes of 8-bit samples for the live page: one burst of ten per
+/// 5 s uplink, each register a bounded walk in level space, run through
+/// the real burst expansion so the demo exercises the same code path.
+fn demo_live_samples(seed: u64, now_ms: u64) -> Vec<live::Sample> {
+    let mut state = seed;
+    let mut next = move |n: u64| {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (state >> 33) % n
+    };
+    let home: Vec<i64> = vec![60 + (seed % 7) as i64 * 15, 140, 110, 120, 200];
+    let mut level = home.clone();
+    let mut out = Vec::new();
+    let mut t = now_ms - live::WINDOW_S * 1_000;
+    while t <= now_ms {
+        let mut flat = Vec::with_capacity(10 * METRICS.len());
+        for _ in 0..10 {
+            for (r, lv) in level.iter_mut().enumerate() {
+                let step = if r == 0 { 6 } else { 1 };
+                // Bounded walk pulled back toward its home level.
+                *lv += next(2 * step + 1) as i64 - step as i64 - (*lv - home[r]) / 24;
+                if r == 0 && next(40) == 0 {
+                    *lv += 40;
+                }
+                *lv = (*lv).clamp(1, 255);
+                flat.push(*lv as u8);
+            }
+        }
+        let record = UplinkRecord {
+            device_id: "demo".into(),
+            received_at: format_rfc3339(t / 1_000, (t % 1_000) as u32 * 1_000_000),
+            payload: serde_json::json!({ "current": 1, "levels": flat, "levels_ms": 500 }),
+        };
+        debug_assert_eq!(parse_rfc3339_unix_ms(&record.received_at), Some(t));
+        out.extend(live::samples_of(&record));
+        t += 5_000;
+    }
+    out
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -338,10 +418,39 @@ fn main() {
         .expect("write device page");
     }
 
+    // Live page: the last two minutes of the two live devices as 8-bit
+    // bursts (ten samples per 5 s uplink), stamped so the page's clock
+    // alignment puts them at "now" on first paint.
+    let now_ms = DEMO_NOW * 1_000;
+    let live_devices: Vec<LiveDevice> = {
+        let mut ids: Vec<&str> = ids.clone();
+        ids.sort_unstable();
+        ids.iter()
+            .enumerate()
+            .map(|(slot, id)| LiveDevice {
+                device_id: id.to_string(),
+                slot,
+                samples: match *id {
+                    "factory-01" => demo_live_samples(11, now_ms),
+                    "factory-02" => demo_live_samples(23, now_ms),
+                    _ => Vec::new(),
+                },
+            })
+            .collect()
+    };
+    let snapshot = live::Snapshot {
+        now_ms,
+        window_s: live::WINDOW_S,
+        registers: METRICS.iter().map(RegisterInfo::from).collect(),
+        devices: live_devices,
+    };
+    let live_html = views::live_page(&snapshot, DEMO_SUBJECT).into_string();
+    fs::write(outdir.join("live.html"), staticize(live_html, &ids)).expect("write live page");
+
     fs::write(outdir.join("style.css"), assets::STYLESHEET).expect("write stylesheet");
     println!(
         "demo rendered: {} pages -> {}",
-        devices.len() + 2,
+        devices.len() + 3,
         outdir.display()
     );
 }

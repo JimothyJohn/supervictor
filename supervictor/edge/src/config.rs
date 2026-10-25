@@ -77,7 +77,8 @@ pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 pub const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Heapless buffer capacity for outgoing HTTP requests. Mirrored as a
 /// literal in `network/http.rs` (this module is embedded-gated; http.rs is
-/// host-testable) — keep the two in sync.
+/// host-testable) — keep the two in sync: 768 bytes of JSON body plus
+/// ~150 of headers.
 pub const HTTP_REQUEST_BUFFER_CAPACITY: usize = 1024;
 /// Heapless buffer capacity for incoming HTTP responses.
 pub const HTTP_RESPONSE_BUFFER_CAPACITY: usize = 1024;
@@ -113,6 +114,10 @@ const _: () = assert!(UPLINK_INTERVAL_S > 0, "UPLINK_INTERVAL_S must be >= 1");
 
 /// Delay between iterations of the main uplink loop on success.
 pub const MAIN_LOOP_DELAY: Duration = Duration::from_secs(UPLINK_INTERVAL_S as u64);
+/// Samples per uplink interval, shipped as an 8-bit `levels` burst (one
+/// byte per register per sample; `models::uplink::LEVELS_SAMPLES_MAX`
+/// caps it). 10 over the default 5 s interval = a sample every 500 ms.
+pub const UPLINK_BURST: usize = 10;
 /// Initial backoff delay after a transient failure (DNS, TCP, TLS, HTTP).
 pub const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
 /// Maximum backoff delay — caps exponential growth.

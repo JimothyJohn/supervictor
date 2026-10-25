@@ -16,9 +16,11 @@
 //! shutdowns that flip the dashboard's power state.
 
 use heapless::String as HString;
+use heapless::Vec as HVec;
+use supervictor_common::levels;
 
 use super::profile::{Machine, Profile};
-use super::uplink::UplinkMessage;
+use super::uplink::{UplinkMessage, LEVELS_CAP, LEVELS_SAMPLES_MAX};
 
 /// Simulated seconds per [`Simulator::sample`] call; `uplink` uses the real
 /// interval instead.
@@ -136,6 +138,19 @@ pub struct Sample {
     pub heap_free: u32,
 }
 
+impl Sample {
+    /// The sample as one byte per register (`supervictor_common::levels`).
+    pub fn levels(&self) -> levels::Levels {
+        levels::pack([
+            Some(self.current as f32),
+            Some(self.temp_c),
+            Some(self.humidity_pct),
+            Some(f32::from(self.rssi_dbm)),
+            Some(self.heap_free as f32),
+        ])
+    }
+}
+
 /// Stateful per-device simulator.
 #[derive(Debug, Clone)]
 pub struct Simulator {
@@ -151,6 +166,9 @@ pub struct Simulator {
     machine: Option<Machine>,
     /// Simulated seconds per real second.
     time_scale: u32,
+    /// The machine's current over its last simulated second (mA), repeated
+    /// by a sub-second burst sample.
+    machine_ma: i32,
 }
 
 impl Simulator {
@@ -181,6 +199,7 @@ impl Simulator {
             heap: HEAP_START,
             machine,
             time_scale: 1,
+            machine_ma: 0,
         }
     }
 
@@ -202,8 +221,9 @@ impl Simulator {
         self.machine.as_ref()
     }
 
-    /// Advance one default tick ([`DEFAULT_TICK_S`] simulated seconds) and
-    /// produce readings. Real `hardware` values win over simulated ones.
+    /// Advance one default tick ([`DEFAULT_TICK_S`] simulated seconds), count
+    /// it as an uplink and produce readings. Real `hardware` values win over
+    /// simulated ones.
     pub fn sample(&mut self, hardware: Hardware) -> Sample {
         self.sample_dt(hardware, DEFAULT_TICK_S)
     }
@@ -213,15 +233,36 @@ impl Simulator {
     /// current is the mean over that window; `Generic` ignores `dt_s`.
     pub fn sample_dt(&mut self, hardware: Hardware, dt_s: u32) -> Sample {
         self.seq = self.seq.wrapping_add(1);
+        let secs = dt_s.max(1).saturating_mul(self.time_scale).min(MAX_TICK_S);
+        self.advance(hardware, secs)
+    }
 
+    /// Advance one default tick *without* counting an uplink — a
+    /// sub-interval sample inside a `levels` burst. Same walks, same rare
+    /// events.
+    pub fn tick(&mut self, hardware: Hardware) -> Sample {
+        let secs = DEFAULT_TICK_S
+            .saturating_mul(self.time_scale)
+            .min(MAX_TICK_S);
+        self.advance(hardware, secs)
+    }
+
+    /// One reading set after `secs` simulated seconds (already scaled, ≤
+    /// [`MAX_TICK_S`]). With a machine profile the current is the mean over
+    /// those seconds — or, for `secs == 0` (a burst splitting an interval
+    /// finer than a second), the machine's last second again. `Generic`
+    /// walks once whatever `secs` is.
+    fn advance(&mut self, hardware: Hardware, secs: u32) -> Sample {
         let (current, machine_temp_milli) = match self.machine.as_mut() {
             Some(machine) => {
-                let secs = dt_s.max(1).saturating_mul(self.time_scale).min(MAX_TICK_S);
-                let mut sum: i64 = 0;
-                for _ in 0..secs {
-                    sum += i64::from(machine.tick(&mut self.rng));
+                if secs > 0 {
+                    let mut sum: i64 = 0;
+                    for _ in 0..secs {
+                        sum += i64::from(machine.tick(&mut self.rng));
+                    }
+                    self.machine_ma = (sum / i64::from(secs)) as i32;
                 }
-                ((sum / i64::from(secs)) as i32, Some(machine.temp_milli()))
+                (self.machine_ma, Some(machine.temp_milli()))
             }
             None => (self.generic_current(), None),
         };
@@ -308,15 +349,36 @@ impl Simulator {
         base_ms.saturating_add_signed(jitter).max(100)
     }
 
-    /// Build the wire message for one tick.
+    /// Build the wire message for one uplink interval: `burst` samples
+    /// spread over `interval_s` (clamped to `1..=LEVELS_SAMPLES_MAX`). With
+    /// `burst >= 2` the message carries every sample as 8-bit levels plus
+    /// their spacing; the scalar fields are always the last sample at full
+    /// precision, so a burst-less uplink (`burst == 1`) is unchanged.
     pub fn uplink(
         &mut self,
         id: HString<64>,
         uptime_s: u32,
         interval_s: u32,
+        burst: usize,
         hardware: Hardware,
     ) -> UplinkMessage {
-        let s = self.sample_dt(hardware, interval_s);
+        let burst = burst.clamp(1, LEVELS_SAMPLES_MAX);
+        let mut flat: HVec<u8, LEVELS_CAP> = HVec::new();
+        // The interval's simulated seconds are shared out across the
+        // samples; a sub-second share is 0 (the machine model repeats its
+        // last second, the generic walk still moves).
+        let total = u64::from(interval_s.max(1)) * u64::from(self.time_scale);
+        let share = |k: usize| (total * k as u64 / burst as u64).min(u64::from(MAX_TICK_S)) as u32;
+        let mut elapsed = 0;
+        for k in 1..burst {
+            let until = share(k);
+            let s = self.advance(hardware, until.saturating_sub(elapsed));
+            elapsed = until;
+            // Capacity is LEVELS_SAMPLES_MAX samples; burst is clamped to it.
+            let _ = flat.extend_from_slice(&s.levels());
+        }
+        self.seq = self.seq.wrapping_add(1);
+        let s = self.advance(hardware, share(burst).saturating_sub(elapsed));
         let mut msg = UplinkMessage::new(id, s.current);
         msg.seq = Some(s.seq);
         msg.uptime_s = Some(uptime_s);
@@ -325,6 +387,11 @@ impl Simulator {
         msg.rssi_dbm = Some(s.rssi_dbm);
         msg.temp_c = Some(s.temp_c);
         msg.humidity_pct = Some(s.humidity_pct);
+        if burst >= 2 {
+            let _ = flat.extend_from_slice(&s.levels());
+            msg.levels = flat;
+            msg.levels_ms = Some((interval_s.saturating_mul(1_000) / burst as u32).max(1));
+        }
         msg
     }
 }
@@ -571,7 +638,7 @@ mod tests {
         let mut saw_on = false;
         let mut saw_off = false;
         for _ in 0..2_000 {
-            let msg = sim.uplink("cnc-2".try_into().unwrap(), 0, 5, Hardware::default());
+            let msg = sim.uplink("cnc-2".try_into().unwrap(), 0, 5, 1, Hardware::default());
             saw_on |= msg.current >= 100;
             saw_off |= msg.current == 0;
             if saw_on && saw_off {
@@ -614,6 +681,7 @@ mod tests {
             "c3-wifi-01".try_into().unwrap(),
             3_600,
             5,
+            1,
             Hardware::default(),
         );
         assert_eq!(msg.id.as_str(), "c3-wifi-01");
@@ -624,5 +692,61 @@ mod tests {
         assert!(msg.rssi_dbm.is_some());
         assert!(msg.temp_c.is_some());
         assert!(msg.humidity_pct.is_some());
+        assert!(msg.levels.is_empty(), "no burst for a single sample");
+        assert_eq!(msg.levels_ms, None);
+    }
+
+    /// A burst is `burst` samples at `interval / burst` spacing, one byte
+    /// per register, and its last sample is the scalar fields quantised;
+    /// `seq` still counts uplinks, not samples.
+    #[test]
+    fn uplink_burst_packs_every_sample_and_ends_on_the_scalars() {
+        let mut sim = Simulator::new(seed_from("c3-wifi-01", 0));
+        let id: HString<64> = "c3-wifi-01".try_into().unwrap();
+        let msg = sim.uplink(id.clone(), 10, 5, 10, Hardware::default());
+        assert_eq!(msg.levels.len(), 10 * levels::COUNT);
+        assert_eq!(msg.levels_ms, Some(500));
+        assert_eq!(msg.seq, Some(1));
+        let last = levels::sample(&msg.levels, 9).unwrap();
+        assert_eq!(
+            last,
+            levels::pack([
+                Some(msg.current as f32),
+                msg.temp_c,
+                msg.humidity_pct,
+                msg.rssi_dbm.map(f32::from),
+                msg.heap_free.map(|h| h as f32),
+            ])
+        );
+        assert!(
+            msg.levels.iter().all(|l| *l >= levels::MIN),
+            "every register simulated"
+        );
+        // The samples move: not ten copies of one reading.
+        let first = levels::sample(&msg.levels, 0).unwrap();
+        assert_ne!(first, last);
+        // Spacing follows the interval; burst is clamped to the capacity.
+        let msg = sim.uplink(id.clone(), 20, 60, 100, Hardware::default());
+        assert_eq!(msg.levels.len(), LEVELS_CAP);
+        assert_eq!(msg.levels_ms, Some(60_000 / LEVELS_SAMPLES_MAX as u32));
+        assert_eq!(msg.seq, Some(2));
+        let msg = sim.uplink(id, 30, 1, 0, Hardware::default());
+        assert!(msg.levels.is_empty(), "burst 0 behaves as 1");
+        assert_eq!(msg.seq, Some(3));
+    }
+
+    #[test]
+    fn hardware_readings_land_in_the_burst_too() {
+        let mut sim = Simulator::new(3);
+        let hw = Hardware {
+            heap_free: Some(100 * 1024),
+            rssi_dbm: Some(-40),
+        };
+        let msg = sim.uplink("x".try_into().unwrap(), 1, 2, 4, hw);
+        for i in 0..4 {
+            let s = levels::sample(&msg.levels, i).unwrap();
+            assert_eq!(s[3], levels::REGISTERS[3].quantize(-40.0));
+            assert_eq!(s[4], levels::REGISTERS[4].quantize(102_400.0));
+        }
     }
 }

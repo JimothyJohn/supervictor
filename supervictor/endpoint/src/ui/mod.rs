@@ -28,6 +28,7 @@ use serde::Deserialize;
 use crate::error::AppError;
 use crate::fleet;
 use crate::history::{self, Window};
+use crate::live;
 use crate::middleware::{extract_client_subject, forbidden, require_admin, sanitize_for_log};
 use crate::routes::{AppState, HistoryQuery};
 use crate::store::DeviceStore;
@@ -42,6 +43,8 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/ui", get(fleet).post(register_device))
         .route("/ui/history", get(history_view))
+        .route("/ui/live", get(live_view))
+        .route("/ui/live.json", get(live_json))
         .route("/ui/devices", axum::routing::post(register_device))
         .route("/ui/devices/{device_id}", get(device_detail))
         .route(
@@ -192,6 +195,24 @@ async fn history_view(
     let summary = fleet::summarize(&fleet::snapshot(store, now, state.power_threshold_ma)?);
     let page = views::history_page(&history, &summary, window, &subject_of(&headers));
     Ok(page.into_response())
+}
+
+/// `GET /ui/live` — 8-bit register bank + scrolling strips.
+async fn live_view(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let snapshot = live::snapshot(state.store.as_ref(), crate::time::now_unix_ms())?;
+    Ok(views::live_page(&snapshot, &subject_of(&headers)).into_response())
+}
+
+/// `GET /ui/live.json` — the same snapshot, for the page's polling
+/// fallback where SSE does not get through.
+async fn live_json(State(state): State<AppState>) -> Result<axum::Json<live::Snapshot>, AppError> {
+    Ok(axum::Json(live::snapshot(
+        state.store.as_ref(),
+        crate::time::now_unix_ms(),
+    )?))
 }
 
 /// `GET /ui/devices/{id}?window=` — one device's charts + raw uplinks.

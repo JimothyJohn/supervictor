@@ -74,6 +74,40 @@ pub fn parse_rfc3339_unix(s: &str) -> Option<u64> {
     Some(days as u64 * 86_400 + hour * 3_600 + min * 60 + sec)
 }
 
+/// Parse an RFC 3339 UTC timestamp to Unix **milliseconds**: the seconds
+/// from [`parse_rfc3339_unix`] plus the first three fraction digits (a
+/// shorter fraction is right-padded, a longer one truncated). The live
+/// views need sub-second placement; everything else keeps whole seconds.
+pub fn parse_rfc3339_unix_ms(s: &str) -> Option<u64> {
+    let secs = parse_rfc3339_unix(s)?;
+    let rest = s.get(19..)?;
+    let millis = match rest.strip_prefix('.') {
+        Some(frac) => {
+            let digits: Vec<u8> = frac
+                .bytes()
+                .take_while(u8::is_ascii_digit)
+                .take(3)
+                .map(|c| c - b'0')
+                .collect();
+            let mut ms = 0u64;
+            for i in 0..3 {
+                ms = ms * 10 + u64::from(digits.get(i).copied().unwrap_or(0));
+            }
+            ms
+        }
+        None => 0,
+    };
+    secs.checked_mul(1_000)?.checked_add(millis)
+}
+
+/// Current Unix time in milliseconds.
+pub fn now_unix_ms() -> u64 {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    u64::try_from(now.as_millis()).unwrap_or(u64::MAX)
+}
+
 /// Format a Unix timestamp (seconds + nanoseconds since epoch) as RFC 3339 UTC.
 pub fn format_rfc3339(unix_secs: u64, nanos: u32) -> String {
     let days = unix_secs / 86_400;

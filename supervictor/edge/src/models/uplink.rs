@@ -1,9 +1,18 @@
 use heapless::String as HString;
+use heapless::Vec as HVec;
 use serde::{Deserialize, Serialize};
+use supervictor_common::levels;
 
 /// Firmware version baked in at compile time; reported with every uplink so
 /// the fleet dashboard can tell which devices need updating.
 pub const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Most samples one `levels` burst can carry.
+pub const LEVELS_SAMPLES_MAX: usize = 12;
+/// Capacity of the flat `levels` array (`LEVELS_SAMPLES_MAX` samples of
+/// `levels::COUNT` bytes). Sized into the JSON buffer in `network/http.rs`;
+/// `uplink_tests::full_uplink_with_max_id_fits_the_request_buffers` pins it.
+pub const LEVELS_CAP: usize = LEVELS_SAMPLES_MAX * levels::COUNT;
 
 /// Telemetry payload sent from the device to the cloud API.
 ///
@@ -58,6 +67,15 @@ pub struct UplinkMessage {
     /// 9-axis IMU: magnetic field [x, y, z] in µT.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mag_ut: Option<[f32; 3]>,
+
+    // --- Sub-interval burst (8-bit levels, `supervictor_common::levels`) ---
+    /// Flat register levels, `levels::COUNT` per sample, oldest first; the
+    /// last sample is this uplink's instant. Empty = no burst on the wire.
+    #[serde(default, skip_serializing_if = "HVec::is_empty")]
+    pub levels: HVec<u8, LEVELS_CAP>,
+    /// Milliseconds between consecutive samples in `levels`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels_ms: Option<u32>,
 }
 
 impl UplinkMessage {
@@ -78,6 +96,8 @@ impl UplinkMessage {
             accel_g: None,
             gyro_dps: None,
             mag_ut: None,
+            levels: HVec::new(),
+            levels_ms: None,
         }
     }
 }

@@ -1,14 +1,16 @@
 //! maud templates — pure functions from data to `Markup`. All interpolated
-//! values are auto-escaped by maud; `PreEscaped` appears exactly once, for a
-//! static script constant that contains no user data.
+//! values are auto-escaped by maud; `PreEscaped` is used only for the static
+//! script constants below, which contain no user data (page data reaches
+//! them through escaped `data-*` attributes).
 
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 use crate::fleet::FleetSummary;
 pub use crate::fleet::{PowerState, Staleness};
 use crate::history::{DeviceSeries, History, Window, METRICS};
+use crate::live;
 use crate::models::{DeviceRecord, UplinkRecord};
-use crate::ui::charts::{self, Reference, Series};
+use crate::ui::charts::{self, slot_class, Reference, Series};
 use supervictor_common::status;
 
 /// One row of the fleet table.
@@ -50,16 +52,23 @@ impl PageMode {
     }
 }
 
-/// Static SSE hookup — live row updates, with a reload fallback where SSE
-/// doesn't survive the proxy (Lambda/API GW buffers responses).
+/// Static SSE hookup. One `EventSource` per page: it keeps the header dot
+/// honest, patches the fleet table's row for the device that just pinged,
+/// and re-dispatches every uplink as a `sv:uplink` DOM event for whatever
+/// else is listening (the live strips). Where SSE doesn't survive the proxy
+/// (Lambda / API GW buffer responses) a page that declares `data-poll` on
+/// `#live` falls back to polling that snapshot URL (`sv:snapshot`); other
+/// pages fall back to a periodic reload.
 /// Public so the static-demo renderer (`examples/render_demo.rs`) can swap it
 /// for a simulated feed on the GitHub Pages demo.
 pub const LIVE_SCRIPT: &str = r#"
 (function () {
   var dot = document.getElementById('live-dot');
   var live = document.body.getAttribute('data-live') === '1';
-  var errors = 0, pending = null, inflight = false, dirty = false;
+  var strips = document.getElementById('live');
+  var errors = 0, pending = null, inflight = false, dirty = false, poll = null;
   function setDot(text, cls) { if (dot) { dot.textContent = text; dot.className = cls; } }
+  function emit(name, detail) { document.dispatchEvent(new CustomEvent(name, { detail: detail })); }
   function flash(el) { el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick'); }
   // Fleet table: patch the device's row in place — last uplink, freshness,
   // current, and the power badge judged against the row's own threshold.
@@ -108,13 +117,27 @@ pub const LIVE_SCRIPT: &str = r#"
   es.onopen = function () { errors = 0; setDot('live', live ? 'connected live' : 'connected'); };
   es.addEventListener('uplink', function (e) {
     var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+    if (!ev || typeof ev.device_id !== 'string') return;
     patchRow(ev);
+    emit('sv:uplink', ev);
     if (live && document.visibilityState === 'visible') schedule();
   });
   es.onerror = function () {
     errors += 1;
     setDot('offline', '');
-    if (errors >= 3) { es.close(); setTimeout(function () { location.reload(); }, live ? 5000 : 30000); }
+    if (errors < 3) return;
+    es.close();
+    var url = strips && strips.getAttribute('data-poll');
+    if (!url) { setTimeout(function () { location.reload(); }, live ? 5000 : 30000); return; }
+    if (poll) return;
+    setDot('polling', 'polling');
+    poll = setInterval(function () {
+      if (document.visibilityState !== 'visible') return;
+      fetch(url, { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (snap) { if (snap) emit('sv:snapshot', snap); })
+        .catch(function () {});
+    }, 2000);
   };
   if (live) {
     // The time axis keeps moving even while every machine is quiet, and a
@@ -122,6 +145,140 @@ pub const LIVE_SCRIPT: &str = r#"
     setInterval(function () { if (document.visibilityState === 'visible') schedule(); }, 15000);
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') schedule(); });
   }
+})();
+"#;
+
+/// The live page: a register bank of 8-bit meters and one scrolling strip
+/// per register, drawn on canvas at 10 fps from the samples seeded in
+/// `#live[data-live]` plus whatever `sv:uplink` / `sv:snapshot` deliver.
+/// Levels are the y axis (1..=255 maps onto each register's fixed range,
+/// 0 breaks the line), so the scale never jumps as data arrives; tick
+/// labels are dequantised into real units. Colours come from the same
+/// `--sN` slot tokens as the SVG charts, read at draw time so the theme
+/// toggle applies immediately. All text goes in via `textContent`.
+pub const LIVE_PAGE_SCRIPT: &str = r#"
+(function () {
+  var root = document.getElementById('live');
+  if (!root) return;
+  var seed; try { seed = JSON.parse(root.dataset.live); } catch (_) { return; }
+  var REG = seed.registers, R = REG.length, KEEP_MS = seed.window_s * 1000;
+  var skew = Date.now() - seed.now_ms;
+  var span = 60, devices = {}, order = [];
+  seed.devices.forEach(function (d) {
+    devices[d.device_id] = { slot: d.slot, t: d.samples.map(function (s) { return s.t; }), l: d.samples.map(function (s) { return s.l; }) };
+    order.push(d.device_id);
+  });
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function slotVar(slot) { return slot < 8 ? '--s' + slot : '--s-other'; }
+  function deq(r, lv) { if (!lv) return null; return REG[r].lo + (lv - 1) * (REG[r].hi - REG[r].lo) / 254; }
+  function fmt(v) {
+    if (v === null || v === undefined) return '–';
+    var a = Math.abs(v);
+    if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    if (a >= 1e4) return Math.round(v / 1e3) + 'K';
+    if (a >= 100 || v === Math.round(v)) return Math.round(v).toString();
+    if (a >= 10) return v.toFixed(1);
+    return v.toFixed(2);
+  }
+  function push(id, t, l) {
+    var d = devices[id];
+    d.t.push(t); d.l.push(l);
+    var cut = t - KEEP_MS - 10000;
+    while (d.t.length && d.t[0] < cut) { d.t.shift(); d.l.shift(); }
+  }
+  function updateMeters(id) {
+    var d = devices[id], last = d.l[d.l.length - 1];
+    var row = root.querySelector('tr[data-device="' + CSS.escape(id) + '"]');
+    if (!last || !row) return;
+    row.querySelectorAll('.meter').forEach(function (m) {
+      var r = parseInt(m.dataset.register, 10), lv = last[r] | 0, v = deq(r, lv);
+      m.style.setProperty('--lv', lv);
+      m.querySelector('.meter-value').textContent = v === null ? '–' : fmt(v);
+      m.querySelector('.meter-level').textContent = lv ? String(lv) : '–';
+      if (lv) m.setAttribute('aria-valuenow', lv); else m.removeAttribute('aria-valuenow');
+    });
+  }
+  function ingest(ev) {
+    if (!ev || !devices[ev.device_id] || !Array.isArray(ev.levels)) return;
+    var n = Math.floor(ev.levels.length / R);
+    if (!n) return;
+    var step = ev.levels_ms | 0, t0 = ev.t_ms || (Date.now() - skew);
+    for (var i = 0; i < n; i++) push(ev.device_id, t0 - (n - 1 - i) * step, ev.levels.slice(i * R, (i + 1) * R));
+    updateMeters(ev.device_id);
+  }
+  document.addEventListener('sv:uplink', function (e) { ingest(e.detail); });
+  document.addEventListener('sv:snapshot', function (e) {
+    var snap = e.detail;
+    if (!snap || !Array.isArray(snap.devices)) return;
+    if (snap.now_ms) skew = Date.now() - snap.now_ms;
+    snap.devices.forEach(function (d) {
+      var cur = devices[d.device_id];
+      if (!cur || !Array.isArray(d.samples)) return;
+      cur.t = d.samples.map(function (s) { return s.t; }); cur.l = d.samples.map(function (s) { return s.l; });
+      updateMeters(d.device_id);
+    });
+  });
+  var strips = [].slice.call(root.querySelectorAll('figure.strip'));
+  function draw() {
+    var now = Date.now() - skew, t1 = now, t0 = now - span * 1000;
+    var grid = css('--border'), muted = css('--muted'), surface = css('--surface'), colors = {};
+    strips.forEach(function (fig) {
+      var r = parseInt(fig.dataset.register, 10), canvas = fig.querySelector('canvas');
+      var rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      var dpr = window.devicePixelRatio || 1, W = Math.round(rect.width), H = Math.round(rect.height);
+      if (canvas.width !== W * dpr || canvas.height !== H * dpr) { canvas.width = W * dpr; canvas.height = H * dpr; }
+      var ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      var ml = 56, mr = 14, mt = 8, mb = 18, pw = W - ml - mr, ph = H - mt - mb;
+      function x(t) { return ml + (t - t0) / (t1 - t0) * pw; }
+      function y(lv) { return mt + (255 - lv) / 254 * ph; }
+      function yv(v) { return y(1 + (v - REG[r].lo) / (REG[r].hi - REG[r].lo) * 254); }
+      ctx.font = '10px ui-monospace, "SF Mono", Menlo, monospace';
+      ctx.lineWidth = 1; ctx.strokeStyle = grid; ctx.fillStyle = muted;
+      for (var g = 0; g <= 4; g++) {
+        var v = REG[r].lo + (REG[r].hi - REG[r].lo) * g / 4, yy = Math.round(yv(v)) + 0.5;
+        ctx.beginPath(); ctx.moveTo(ml, yy); ctx.lineTo(W - mr, yy); ctx.stroke();
+        ctx.textAlign = 'right'; ctx.fillText(fmt(v), ml - 6, yy + 3.5);
+      }
+      for (var k = 0; k <= 4; k++) {
+        var tt = t0 + (t1 - t0) * k / 4, ago = Math.round((t1 - tt) / 1000);
+        ctx.textAlign = k === 0 ? 'left' : (k === 4 ? 'right' : 'center');
+        ctx.fillText(ago ? '-' + ago + 's' : 'now', x(tt), H - 5);
+      }
+      ctx.save(); ctx.beginPath(); ctx.rect(ml - 1, 0, pw + 2, H); ctx.clip();
+      order.forEach(function (id) {
+        var d = devices[id];
+        var color = colors[d.slot] || (colors[d.slot] = css(slotVar(d.slot)));
+        ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+        ctx.beginPath();
+        var up = true, lx, ly;
+        for (var i = 0; i < d.t.length; i++) {
+          if (d.t[i] < t0 - 2000) continue;
+          var lv = d.l[i][r] | 0;
+          if (!lv) { up = true; continue; }
+          var px = x(Math.min(d.t[i], t1)), py = y(lv);
+          if (up) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          up = false; lx = px; ly = py;
+        }
+        ctx.stroke();
+        if (lx !== undefined) {
+          ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = surface; ctx.lineWidth = 2; ctx.stroke();
+        }
+      });
+      ctx.restore();
+    });
+  }
+  root.querySelectorAll('button[data-span]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      span = parseInt(b.dataset.span, 10) || 60;
+      root.querySelectorAll('button[data-span]').forEach(function (o) { o.classList.toggle('active', o === b); });
+    });
+  });
+  setInterval(function () { if (document.visibilityState === 'visible') draw(); }, 100);
+  draw();
 })();
 "#;
 
@@ -258,6 +415,7 @@ fn layout(title: &str, subject: &str, mode: PageMode, body: Markup) -> Markup {
                     h1 { a href="/ui" { "supervictor fleet" } }
                     nav {
                         a href="/ui" { "fleet" }
+                        a href="/ui/live" { "live" }
                         a href="/ui/history" { "history" }
                     }
                     span #live-dot { "static" }
@@ -351,6 +509,96 @@ pub fn history_page(
                     }).collect();
                     div { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window, None)) }
                 }
+            }
+        },
+    )
+}
+
+/// Spans the live strips can show, seconds (client-side; the seed and the
+/// poll snapshot always cover `live::WINDOW_S`).
+pub const LIVE_SPANS: [u64; 3] = [30, 60, 120];
+/// Span selected on load.
+pub const LIVE_DEFAULT_SPAN: u64 = 60;
+
+/// `GET /ui/live` — register bank (one 8-bit meter per device per
+/// register, newest sample: the bar is level/255, the text is the value in
+/// the column's unit and the raw level) and one scrolling strip per register.
+pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
+    let data = serde_json::to_string(snapshot).unwrap_or_else(|_| "{}".into());
+    let samples: usize = snapshot.devices.iter().map(|d| d.samples.len()).sum();
+    layout(
+        "live",
+        subject,
+        PageMode::Rows,
+        html! {
+            div #live data-live=(data) data-poll="/ui/live.json" {
+                section .tiles {
+                    (charts::stat_tile("devices", &snapshot.devices.len().to_string(), "registered", ""))
+                    (charts::stat_tile("samples", &samples.to_string(), &format!("in the last {} s", snapshot.window_s), ""))
+                    (charts::stat_tile("resolution", "8-bit", "1 byte per register per sample", ""))
+                }
+                section .bank aria-label="register bank" {
+                    table {
+                        thead {
+                            tr {
+                                th { "device" }
+                                @for r in &snapshot.registers {
+                                    th { (r.label) " " span .unit { "(" (r.unit) ")" } }
+                                }
+                            }
+                        }
+                        tbody {
+                            @for d in &snapshot.devices {
+                                tr data-device=(d.device_id) {
+                                    td { span .key.(slot_class(d.slot)) {} a href={ "/ui/devices/" (d.device_id) } { (d.device_id) } }
+                                    @for (i, r) in snapshot.registers.iter().enumerate() {
+                                        @let level = d.latest().map(|s| s.l[i]).unwrap_or(0);
+                                        @let value = METRICS[i].dequantize(level);
+                                        td {
+                                            div .meter data-register=(i) style={ "--lv:" (level) } role="meter"
+                                                aria-label={ (d.device_id) " " (r.label) } aria-valuemin="1" aria-valuemax="255"
+                                                aria-valuenow=[(level > 0).then_some(level)] {
+                                                span .meter-bar.(slot_class(d.slot)) {}
+                                                span .meter-value {
+                                                    @match value {
+                                                        Some(v) => (charts::fmt_value(f64::from(v))),
+                                                        None => "–",
+                                                    }
+                                                }
+                                                span .meter-level { @if level > 0 { (level) } @else { "–" } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    @if snapshot.devices.is_empty() {
+                        p { "no registered devices" }
+                    }
+                }
+                nav .filters aria-label="strip span" {
+                    span .filters-label { "span" }
+                    @for s in LIVE_SPANS {
+                        button type="button" .active[s == LIVE_DEFAULT_SPAN] data-span=(s) { (s) " s" }
+                    }
+                }
+                @if snapshot.devices.len() >= 2 {
+                    ul .legend {
+                        @for d in &snapshot.devices {
+                            li { span .key.line-key.(slot_class(d.slot)) {} (d.device_id) }
+                        }
+                    }
+                }
+                section .strips {
+                    @for (i, r) in snapshot.registers.iter().enumerate() {
+                        figure .strip.wide[i == 0] data-register=(i) {
+                            figcaption { (r.label) " " span .unit { "(" (r.unit) ")" } }
+                            canvas width="640" height="150" role="img" aria-label={ "live " (r.label) ", last " (LIVE_DEFAULT_SPAN) " seconds" } {}
+                        }
+                    }
+                }
+                script { (PreEscaped(LIVE_PAGE_SCRIPT)) }
             }
         },
     )

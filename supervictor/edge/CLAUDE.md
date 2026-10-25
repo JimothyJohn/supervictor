@@ -54,6 +54,10 @@ no-reset-no-sync` to attach without rebooting the running firmware.
 - Use `heapless::String<N>` (aliased as `HString<N>`) for strings
 - Use `serde-json-core` for JSON serialization (not `serde_json`)
 - Buffer sizes and capacities are defined in `src/config.rs` — check before changing message formats
+- The wire twin `models/uplink.rs` carries an optional `levels` burst: `UPLINK_BURST`
+  samples per interval, one byte per register, quantised with `supervictor_common::levels`
+  (the one shared dependency). `uplink_tests::full_uplink_with_max_id_fits_the_request_buffers`
+  pins the JSON (768) / request (1024) buffers in `network/http.rs`.
 
 ## Telemetry simulator
 - `src/models/sim.rs` fills the uplink; `src/models/profile.rs` makes it act

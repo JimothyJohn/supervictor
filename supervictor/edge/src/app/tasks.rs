@@ -227,11 +227,27 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt, seed:
                 rssi_dbm: None,
             };
             #[allow(unused_mut)]
-            let mut uplink = sim.uplink(device_id.clone(), uptime_s, UPLINK_INTERVAL_S, hardware);
-            // RSSI is a WiFi notion; wired boards leave it off the wire.
+            let mut uplink = sim.uplink(
+                device_id.clone(),
+                uptime_s,
+                UPLINK_INTERVAL_S,
+                UPLINK_BURST,
+                hardware,
+            );
+            // RSSI is a WiFi notion; wired boards leave it off the wire —
+            // the scalar and the burst's register alike.
             #[cfg(not(feature = "wifi"))]
             {
+                use supervictor_common::{fields, levels};
                 uplink.rssi_dbm = None;
+                if let Some(r) = levels::REGISTERS
+                    .iter()
+                    .position(|r| r.key == fields::UPLINK_RSSI_DBM)
+                {
+                    for sample in uplink.levels.chunks_mut(levels::COUNT) {
+                        sample[r] = levels::ABSENT;
+                    }
+                }
             }
 
             let request = match post_request(HOST, &uplink, Some(API_PATH)) {
