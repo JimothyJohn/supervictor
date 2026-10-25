@@ -63,3 +63,18 @@ pub const COLOR: &str = "color";
 pub const LINE_STYLE: &str = "line_style";
 /// Per-device chart point marker field name.
 pub const MARKER: &str = "marker";
+/// Per-device target firmware version field name (OTA control channel):
+/// on the device record, in `PUT /devices/{id}/desired_fw`, and echoed in
+/// the uplink response when set.
+pub const DESIRED_FW: &str = "desired_fw";
+
+// --- FirmwareManifest ---
+
+/// Firmware version string.
+pub const FW_VERSION: &str = "version";
+/// Image size in bytes.
+pub const FW_SIZE: &str = "size";
+/// SHA-256 of the whole image, lowercase hex.
+pub const FW_SHA256: &str = "sha256";
+/// Chip the image targets (`esp32` / `esp32c3`).
+pub const FW_CHIP: &str = "chip";

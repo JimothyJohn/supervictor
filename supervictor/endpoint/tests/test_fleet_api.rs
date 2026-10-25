@@ -34,6 +34,7 @@ fn seed(store: &dyn DeviceStore, id: &str, status: &str) {
             created_at: "2026-07-01T00:00:00+00:00".into(),
             power_threshold_ma: None,
             style: Default::default(),
+            desired_fw: None,
         })
         .unwrap();
 }
@@ -65,6 +66,7 @@ fn seed_with_threshold(store: &dyn DeviceStore, id: &str, threshold: Option<i64>
             created_at: "2026-07-01T00:00:00+00:00".into(),
             power_threshold_ma: threshold,
             style: Default::default(),
+            desired_fw: None,
         })
         .unwrap();
 }

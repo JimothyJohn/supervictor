@@ -29,6 +29,11 @@ pub struct DeviceRecord {
     /// defaults (`crate::style::resolve`).
     #[serde(default, skip_serializing_if = "DeviceStyle::is_default")]
     pub style: DeviceStyle,
+    /// Firmware version the device should run next (OTA target); `None`
+    /// means "whatever it runs". Set by `PUT /devices/{id}/desired_fw`
+    /// and echoed to the device in every uplink response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired_fw: Option<String>,
 }
 
 impl DeviceRecord {
@@ -73,6 +78,11 @@ pub struct UplinkResponse {
     /// mTLS client subject DN if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_subject: Option<String>,
+    /// Firmware version the device should run next, when an operator has
+    /// set one (OTA control channel): the device compares it with what it
+    /// runs and pulls the image if newer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desired_fw: Option<String>,
 }
 
 /// JSON error response body returned on request failures.
@@ -98,6 +108,7 @@ impl From<DeviceRecord> for DeviceResponse {
             color: r.style.color,
             line_style: r.style.line_style,
             marker: r.style.marker,
+            desired_fw: r.desired_fw,
         }
     }
 }

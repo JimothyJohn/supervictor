@@ -49,6 +49,9 @@ pub struct Config {
     /// Terminate mTLS in-process when set (single-binary deployment);
     /// plain HTTP behind API Gateway / a proxy when `None`.
     pub tls: Option<TlsConfig>,
+    /// Directory for OTA firmware images (`FIRMWARE_DIR`); `None` leaves
+    /// the firmware routes answering 503.
+    pub firmware_dir: Option<PathBuf>,
 }
 
 /// `TLS_CERT` + `TLS_KEY` + `TLS_CLIENT_CA` → `Some(TlsConfig)`; none set →
@@ -137,6 +140,10 @@ impl Config {
                 parse_bool("REQUIRE_REGISTRATION", &raw)?
             },
             tls: tls_from_env()?,
+            firmware_dir: env::var("FIRMWARE_DIR")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(PathBuf::from),
         })
     }
 }

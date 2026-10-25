@@ -106,6 +106,7 @@ fn seed(store: &dyn DeviceStore) {
                 created_at: now_rfc3339(),
                 power_threshold_ma: None,
                 style: DeviceStyle::default(),
+                desired_fw: None,
             })
             .unwrap();
     }

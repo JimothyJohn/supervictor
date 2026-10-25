@@ -11,6 +11,8 @@ extern crate alloc;
 
 /// JSON field-name constants shared across device and endpoint.
 pub mod fields;
+/// Firmware image header, slot size and version order (OTA).
+pub mod firmware;
 /// 8-bit register levels: fixed full-scale ranges and the quantiser.
 pub mod levels;
 /// Serde-serializable request/response models (requires `alloc`).

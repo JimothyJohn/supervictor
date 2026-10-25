@@ -16,6 +16,7 @@ fn test_config(backend: &str) -> Config {
         uplink_ttl_days: 30,
         require_registration: false,
         tls: None,
+        firmware_dir: None,
     }
 }
 
