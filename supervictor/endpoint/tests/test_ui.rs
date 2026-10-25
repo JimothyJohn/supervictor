@@ -38,6 +38,14 @@ fn seed_device(store: &dyn DeviceStore, id: &str, status: &str) {
         .unwrap();
 }
 
+/// The desktop layer of a page: everything from the first `.deep` block
+/// on. The phone glance that precedes it repeats keys, badges, legends and
+/// one chart, so counts of those are taken here.
+fn deep(html: &str) -> &str {
+    let at = html.find("<div class=\"deep\">").expect("deep layer");
+    &html[at..]
+}
+
 fn seed_uplink(store: &dyn DeviceStore, id: &str, at: &str, current: i32) {
     store
         .put_uplink(UplinkRecord {
@@ -145,7 +153,11 @@ async fn fleet_page_lists_devices_with_status() {
     // Power column: factory-01's last current (42 mA, 2026) is too old to
     // trust -> unknown; factory-02 has no reading -> unknown.
     assert!(html.contains("<th>power</th>"));
-    assert_eq!(html.matches("badge power unknown").count(), 2, "{html}");
+    assert_eq!(
+        deep(&html).matches("badge power unknown").count(),
+        2,
+        "{html}"
+    );
     assert!(
         html.contains("42 mA"),
         "last current shown beside the badge"
@@ -162,8 +174,8 @@ async fn fleet_page_shows_on_and_off_from_fresh_readings() {
     seed_uplink(store.as_ref(), "idle", &now, 0);
     let (name, value) = dn(ADMIN_DN);
     let html = server.get("/ui").add_header(name, value).await.text();
-    assert_eq!(html.matches("badge power on").count(), 1, "{html}");
-    assert_eq!(html.matches("badge power off").count(), 1, "{html}");
+    assert_eq!(deep(&html).matches("badge power on").count(), 1, "{html}");
+    assert_eq!(deep(&html).matches("badge power off").count(), 1, "{html}");
 }
 
 #[tokio::test]
@@ -720,7 +732,7 @@ async fn device_chips_toggle_the_selection_in_the_url() {
     assert_eq!(html.matches("class=\"chip on\"").count(), 1);
     assert_eq!(html.matches("<figure class=\"chart\"").count(), 5);
     assert_eq!(
-        html.matches("class=\"legend\"").count(),
+        deep(&html).matches("class=\"legend\"").count(),
         2,
         "one series: only the two stacks carry legends"
     );
@@ -731,7 +743,7 @@ async fn device_chips_toggle_the_selection_in_the_url() {
         .text();
     assert_eq!(html.matches("class=\"chip on\"").count(), 2, "{html}");
     assert_eq!(
-        html.matches("class=\"legend\"").count(),
+        deep(&html).matches("class=\"legend\"").count(),
         7,
         "two series: every line chart gets a legend too"
     );
@@ -788,7 +800,7 @@ async fn device_style_is_drawn_on_every_page() {
     let (name, value) = dn(ADMIN_DN);
     let fleet = server.get("/ui").add_header(name, value).await.text();
     assert_eq!(
-        fleet.matches("class=\"key-svg\"").count(),
+        deep(&fleet).matches("class=\"key-svg\"").count(),
         3,
         "a key per row"
     );
@@ -1065,7 +1077,7 @@ async fn device_page_has_window_filters_and_metric_charts() {
     );
     assert!(html.contains("55 mA, threshold 100 mA"));
     assert_eq!(
-        html.matches("class=\"threshold\"").count(),
+        deep(&html).matches("class=\"threshold\"").count(),
         1,
         "only the current chart"
     );
@@ -1121,6 +1133,13 @@ async fn every_page_has_the_theme_toggle_and_light_tokens_exist() {
     assert!(css.contains("@media (prefers-color-scheme: light)"));
     assert!(css.contains(":root:not([data-theme=\"dark\"])"));
     assert!(css.contains("@media (max-width: 640px)"));
+    // Two layers: the glance is phone-only, the deep layer hides on phones
+    // until the viewer lifts it.
+    assert!(css.contains(".glance, #view-toggle { display: none; }"));
+    assert!(css.contains(".deep { display: none; }"));
+    assert!(css.contains(":root[data-view=\"full\"] .deep { display: block; }"));
+    assert!(css.contains(":root[data-view=\"full\"] .glance { display: none; }"));
+    assert!(css.contains("figure.chart.narrow svg { min-width: 0; }"));
     // Live re-renders no longer wash the whole page green; chips, dash
     // patterns and custom colours have their rules.
     assert!(!css.contains("main.tick"), "no page-wide flash");
@@ -1176,9 +1195,9 @@ async fn live_page_has_a_meter_per_device_per_register_and_a_strip_per_register(
         "one meter per device per register"
     );
     assert_eq!(
-        html.matches("class=\"strip wide\"").count() + html.matches("class=\"strip\"").count(),
+        html.matches("class=\"strip wide\"").count() + html.matches("class=\"strip deep\"").count(),
         COUNT,
-        "one strip per register"
+        "one strip per register; only the first is in the phone glance"
     );
     for r in &REGISTERS {
         assert!(html.contains(r.label), "{} strip missing", r.label);
@@ -1345,4 +1364,126 @@ async fn live_page_uses_the_stored_device_style() {
     assert_eq!(hexy["style"]["color"], "#ff8800");
     assert_eq!(hexy["style"]["dash"], "8 5");
     assert_eq!(hexy["style"]["marker"], "triangle");
+}
+
+// ── Phone glance ──────────────────────────────────────────────────────
+
+/// Every page carries a `.glance` layer ahead of its `.deep` layer: the
+/// fleet's verdict and one tappable row per device, a device's state and
+/// its current trace drawn at phone width, the fleet-wide stacks narrow,
+/// and a live card per device whose meters the live script also updates.
+/// The header marks the current tab and the view toggle is on every page.
+#[tokio::test]
+async fn every_page_has_a_phone_glance_ahead_of_the_deep_layer() {
+    use supervictor_common::levels::COUNT;
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "pump", "active");
+    seed_device(store.as_ref(), "idle", "active");
+    seed_device(store.as_ref(), "retired", "inactive");
+    seed_device(store.as_ref(), "<b>x</b>", "active");
+    let now = supervictor_endpoint::time::now_rfc3339();
+    seed_uplink(store.as_ref(), "pump", &now, 1500);
+    seed_uplink(store.as_ref(), "idle", &now, 0);
+    seed_uplink(store.as_ref(), "retired", "2026-01-01T00:00:00+00:00", 900);
+    let get = |path: &'static str| {
+        let (name, value) = dn(ADMIN_DN);
+        server.get(path).add_header(name, value)
+    };
+
+    // Fleet: verdict first (one off beats two... the off machine is the
+    // headline), then a row per device with its threshold for the live
+    // script, relative times coloured by freshness, inactive dimmed.
+    let html = get("/ui").await.text();
+    let glance_end = html.find("<div class=\"deep\">").expect("deep layer");
+    let glance = &html[..glance_end];
+    assert!(glance.contains("<section class=\"glance\">"));
+    assert!(
+        glance.contains("<section class=\"verdict off\""),
+        "{glance}"
+    );
+    assert!(glance.contains("<span class=\"verdict-head\">1 off</span>"));
+    assert!(glance.contains("1 on · 1 off · 1 never heard · 1 inactive"));
+    assert_eq!(glance.matches("class=\"glance-row\"").count(), 4);
+    assert_eq!(glance.matches("data-threshold=\"100\"").count(), 4);
+    assert!(glance.contains("<li class=\"inactive\" data-device=\"retired\""));
+    assert!(glance.contains("<span class=\"badge inactive\">inactive</span>"));
+    assert_eq!(glance.matches("class=\"when fresh\">just now<").count(), 2);
+    assert!(glance.contains("class=\"when unknown\">never<"));
+    assert!(
+        glance.contains("class=\"when dark\">") && glance.contains(" d ago<"),
+        "{glance}"
+    );
+    assert!(glance.contains("&lt;b&gt;x&lt;/b&gt;") && !glance.contains("<b>x</b>"));
+    assert!(html.contains("id=\"view-toggle\""));
+    assert!(html.contains("class=\"current\" href=\"/ui\" aria-current=\"page\""));
+    assert!(!html.contains("class=\"current\" href=\"/ui/live\""));
+    assert!(deep(&html).contains("register device"), "forms are desktop");
+
+    // Device: the hero state, facts, window filters and a narrow current
+    // chart with the threshold but no table twin; the forms stay deep.
+    let html = get("/ui/devices/pump?window=6h").await.text();
+    let glance_end = html.find("<div class=\"deep\">").expect("deep layer");
+    let glance = &html[..glance_end];
+    assert!(glance.contains("<div class=\"hero on\">"), "{glance}");
+    assert!(glance.contains("<span class=\"hero-state\">on</span>"));
+    assert!(glance.contains("<span class=\"hero-current\">1500 mA</span>"));
+    assert!(glance.contains("on ≥ 100 mA"));
+    assert!(glance.contains("<dd class=\"when fresh\">just now</dd>"));
+    assert!(glance.contains("1 in 6h"));
+    assert!(glance.contains("class=\"active\" href=\"/ui/devices/pump?window=6h\""));
+    assert!(glance.contains("<figure class=\"chart narrow\" id=\"current-glance\""));
+    assert!(glance.contains("viewBox=\"0 0 340 120\""));
+    assert!(glance.contains("class=\"threshold\""));
+    assert!(
+        !glance.contains("table-view"),
+        "no table twin in the glance"
+    );
+    assert!(
+        !glance.contains("end-label"),
+        "no direct labels in the glance"
+    );
+    assert!(!glance.contains("<form"), "no forms in the glance");
+    assert!(deep(&html).contains("<form"));
+
+    // History: verdict and the two stacks narrow; chips and tiles deep.
+    let html = get("/ui/history").await.text();
+    let glance_end = html.find("<div class=\"deep\">").expect("deep layer");
+    let glance = &html[..glance_end];
+    assert!(glance.contains("<section class=\"verdict off\""));
+    assert!(glance.contains("<figure class=\"chart status-chart narrow\" id=\"power-glance\""));
+    assert!(glance.contains("<figure class=\"chart status-chart narrow\" id=\"status-glance\""));
+    assert!(!glance.contains("table-view"));
+    assert!(!glance.contains("class=\"chip"), "chips are desktop");
+    assert!(deep(&html).contains("<nav class=\"devices\""));
+    assert!(html.contains("class=\"current\" href=\"/ui/history\" aria-current=\"page\""));
+
+    // Live: a card per device — a hero meter for the first register, a
+    // mini for each other one — and only the first strip in the glance.
+    let html = get("/ui/live").await.text();
+    let glance_end = html.find("<div class=\"deep\">").expect("deep layer");
+    let glance = &html[..glance_end];
+    assert_eq!(
+        glance
+            .matches("<li class=\"live-card\" data-device=")
+            .count(),
+        4
+    );
+    assert_eq!(glance.matches("class=\"meter hero-meter\"").count(), 4);
+    assert_eq!(
+        glance.matches("class=\"meter mini\"").count(),
+        4 * (COUNT - 1)
+    );
+    assert_eq!(
+        html.matches("class=\"meter\"").count(),
+        4 * COUNT,
+        "the bank's meters are unchanged"
+    );
+    assert!(
+        glance.contains("--lv:0"),
+        "a device with no sample reads empty"
+    );
+    assert!(glance.contains("&lt;b&gt;x&lt;/b&gt;") && !glance.contains("<b>x</b>"));
+    assert_eq!(html.matches("class=\"strip wide\"").count(), 1);
+    assert_eq!(html.matches("class=\"strip deep\"").count(), COUNT - 1);
+    assert!(html.contains("class=\"current\" href=\"/ui/live\" aria-current=\"page\""));
 }

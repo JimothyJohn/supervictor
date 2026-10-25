@@ -16,16 +16,64 @@ use crate::history::{PowerPoint, TimelinePoint, Window};
 use crate::style::{Marker, Resolved};
 use crate::time::format_rfc3339;
 
-/// Drawing surface in viewBox units.
+/// Drawing surface in viewBox units (the desktop frame).
 pub const W: f64 = 640.0;
-/// Height of the plot area plus the x-axis band.
+/// Height of the plot area plus the x-axis band (the desktop frame).
 pub const H: f64 = 220.0;
-const MT: f64 = 12.0;
-const MB: f64 = 28.0;
-const ML: f64 = 56.0;
-const MR_PLAIN: f64 = 16.0;
-/// Right margin when the series carry direct end labels.
-const MR_LABELED: f64 = 104.0;
+
+/// Drawing frame in viewBox units. The desktop chart and the phone glance
+/// chart share every drawing routine and differ only here: the glance is
+/// drawn at phone width so 10 px labels stay 10 px with no sideways pan,
+/// and it drops the parts a point check never needs (direct end labels,
+/// the table twin).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frame {
+    /// Width.
+    pub w: f64,
+    /// Height of the plot area plus the x-axis band.
+    pub h: f64,
+    /// Top margin.
+    pub mt: f64,
+    /// Bottom margin (x-axis band).
+    pub mb: f64,
+    /// Left margin (y-axis labels).
+    pub ml: f64,
+    /// Right margin.
+    pub mr: f64,
+    /// Right margin when the series carry direct end labels.
+    pub mr_labeled: f64,
+    /// x-axis ticks across the window.
+    pub x_ticks: usize,
+    /// Direct end labels and the table twin — the desktop frame only.
+    pub full: bool,
+}
+
+impl Frame {
+    /// The desktop chart.
+    pub const WIDE: Frame = Frame {
+        w: W,
+        h: H,
+        mt: 12.0,
+        mb: 28.0,
+        ml: 56.0,
+        mr: 16.0,
+        mr_labeled: 104.0,
+        x_ticks: 5,
+        full: true,
+    };
+    /// The phone glance chart: fits a 360 px screen inside the page gutters.
+    pub const NARROW: Frame = Frame {
+        w: 340.0,
+        h: 120.0,
+        mt: 10.0,
+        mb: 22.0,
+        ml: 40.0,
+        mr: 10.0,
+        mr_labeled: 10.0,
+        x_ticks: 3,
+        full: false,
+    };
+}
 /// Up to this many series are direct-labelled at the line end.
 pub const DIRECT_LABEL_MAX: usize = 4;
 /// Categorical slots available; the 9th device onward shares the
@@ -191,9 +239,9 @@ impl Axis {
         Axis { lo: 0.0, hi, ticks }
     }
 
-    fn y(&self, v: f64, ph: f64) -> f64 {
+    fn y(&self, v: f64, ph: f64, mt: f64) -> f64 {
         let span = (self.hi - self.lo).max(f64::EPSILON);
-        MT + (self.hi - v) / span * ph
+        mt + (self.hi - v) / span * ph
     }
 }
 
@@ -238,19 +286,30 @@ fn x_of(i: usize, n: usize, ml: f64, pw: f64) -> f64 {
     ml + i as f64 * pw / (n - 1) as f64
 }
 
-/// Five x ticks across the buckets.
-fn x_ticks(n: usize) -> Vec<usize> {
-    if n == 0 {
+/// `count` evenly spaced x ticks across the buckets (first and last
+/// included); duplicates collapse when there are fewer buckets than ticks.
+fn x_ticks(n: usize, count: usize) -> Vec<usize> {
+    if n == 0 || count == 0 {
         return Vec::new();
     }
-    [0.0, 0.25, 0.5, 0.75, 1.0]
-        .iter()
-        .map(|f| ((n - 1) as f64 * f).round() as usize)
-        .collect()
+    let mut out: Vec<usize> = Vec::with_capacity(count);
+    for k in 0..count {
+        let f = if count > 1 {
+            k as f64 / (count - 1) as f64
+        } else {
+            0.0
+        };
+        let i = ((n - 1) as f64 * f).round() as usize;
+        if out.last() != Some(&i) {
+            out.push(i);
+        }
+    }
+    out
 }
 
-/// Multi-series line chart with hover layer and table twin. `times` are
-/// bucket starts; every `series.values` must be `times.len()` long.
+/// Multi-series line chart with hover layer and table twin, in the
+/// desktop frame. `times` are bucket starts; every `series.values` must be
+/// `times.len()` long.
 pub fn line_chart(
     chart_id: &str,
     title: &str,
@@ -260,11 +319,38 @@ pub fn line_chart(
     window: Window,
     reference: Option<Reference<'_>>,
 ) -> Markup {
+    line_chart_in(
+        Frame::WIDE,
+        chart_id,
+        title,
+        unit,
+        times,
+        series,
+        window,
+        reference,
+    )
+}
+
+/// [`line_chart`] drawn in `frame`.
+#[allow(clippy::too_many_arguments)]
+pub fn line_chart_in(
+    frame: Frame,
+    chart_id: &str,
+    title: &str,
+    unit: &str,
+    times: &[u64],
+    series: &[Series<'_>],
+    window: Window,
+    reference: Option<Reference<'_>>,
+) -> Markup {
+    let Frame {
+        w, h, mt, mb, ml, ..
+    } = frame;
     let n = times.len();
-    let labeled = !series.is_empty() && series.len() <= DIRECT_LABEL_MAX;
-    let mr = if labeled { MR_LABELED } else { MR_PLAIN };
-    let pw = W - ML - mr;
-    let ph = H - MT - MB;
+    let labeled = frame.full && !series.is_empty() && series.len() <= DIRECT_LABEL_MAX;
+    let mr = if labeled { frame.mr_labeled } else { frame.mr };
+    let pw = w - ml - mr;
+    let ph = h - mt - mb;
 
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
@@ -306,8 +392,8 @@ pub fn line_chart(
             for (i, v) in s.values.iter().enumerate().take(n) {
                 match v {
                     Some(v) if v.is_finite() => {
-                        let x = x_of(i, n, ML, pw);
-                        let y = axis.y(*v, ph);
+                        let x = x_of(i, n, ml, pw);
+                        let y = axis.y(*v, ph, mt);
                         let joined = matches!(gap, Some(g) if g <= bridge);
                         d.push_str(if joined { "L" } else { "M" });
                         d.push_str(&format!("{x:.1},{y:.1} "));
@@ -344,27 +430,27 @@ pub fn line_chart(
         "kind": "line",
         "unit": unit,
         "t": times,
-        "ml": ML, "pw": pw, "w": W,
+        "ml": ml, "pw": pw, "w": w,
         "series": line_series,
     });
 
     html! {
-        figure .chart #(chart_id) data-chart=(data.to_string()) {
+        figure .chart.narrow[!frame.full] #(chart_id) data-chart=(data.to_string()) {
             figcaption { (title) " " span .unit { "(" (unit) ")" } }
-            svg viewBox={ "0 0 " (W) " " (H) } role="img" aria-label=(title) preserveAspectRatio="none" {
+            svg viewBox={ "0 0 " (w) " " (h) } role="img" aria-label=(title) preserveAspectRatio="none" {
                 @for tick in &axis.ticks {
-                    line .grid x1=(ML) x2=(W - mr) y1=(fmt1(axis.y(*tick, ph))) y2=(fmt1(axis.y(*tick, ph))) {}
-                    text .tick x=(ML - 8.0) y=(fmt1(axis.y(*tick, ph) + 3.5)) text-anchor="end" { (fmt_value(*tick)) }
+                    line .grid x1=(ml) x2=(w - mr) y1=(fmt1(axis.y(*tick, ph, mt))) y2=(fmt1(axis.y(*tick, ph, mt))) {}
+                    text .tick x=(ml - 8.0) y=(fmt1(axis.y(*tick, ph, mt) + 3.5)) text-anchor="end" { (fmt_value(*tick)) }
                 }
-                @for i in x_ticks(n) {
-                    text .tick x=(fmt1(x_of(i, n, ML, pw))) y=(H - 8.0) text-anchor=(x_anchor(i, n)) { (time_label(times[i], window)) }
+                @for i in x_ticks(n, frame.x_ticks) {
+                    text .tick x=(fmt1(x_of(i, n, ml, pw))) y=(h - 8.0) text-anchor=(x_anchor(i, n)) { (time_label(times[i], window)) }
                 }
                 @if !any {
-                    text .empty x=(ML + pw / 2.0) y=(MT + ph / 2.0) text-anchor="middle" { "no data in window" }
+                    text .empty x=(ml + pw / 2.0) y=(mt + ph / 2.0) text-anchor="middle" { "no data in window" }
                 }
                 @if let Some(r) = &reference {
-                    line .threshold x1=(ML) x2=(W - mr) y1=(fmt1(axis.y(r.value, ph))) y2=(fmt1(axis.y(r.value, ph))) {}
-                    text .threshold-label x=(ML + 4.0) y=(fmt1(axis.y(r.value, ph) - 4.0)) { (r.label) }
+                    line .threshold x1=(ml) x2=(w - mr) y1=(fmt1(axis.y(r.value, ph, mt))) y2=(fmt1(axis.y(r.value, ph, mt))) {}
+                    text .threshold-label x=(ml + 4.0) y=(fmt1(axis.y(r.value, ph, mt) - 4.0)) { (r.label) }
                 }
                 @for (idx, trace) in paths.iter().enumerate() {
                     @let style = &series[idx].style;
@@ -386,7 +472,7 @@ pub fn line_chart(
                         }
                     }
                 }
-                line .crosshair x1="0" x2="0" y1=(MT) y2=(MT + ph) {}
+                line .crosshair x1="0" x2="0" y1=(mt) y2=(mt + ph) {}
             }
             div .tooltip hidden {}
             @if series.len() >= 2 {
@@ -396,7 +482,9 @@ pub fn line_chart(
                     }
                 }
             }
-            (table_twin(unit, times, series))
+            @if frame.full {
+                (table_twin(unit, times, series))
+            }
         }
     }
 }
@@ -432,13 +520,24 @@ fn table_twin(unit: &str, times: &[u64], series: &[Series<'_>]) -> Markup {
 /// Stacked columns of active-device staleness per bucket: fresh at the
 /// baseline, then stale, dark, never — status colours, 2 px surface gaps.
 pub fn status_chart(chart_id: &str, timeline: &[TimelinePoint], window: Window) -> Markup {
+    status_chart_in(Frame::WIDE, chart_id, timeline, window)
+}
+
+/// [`status_chart`] drawn in `frame`.
+pub fn status_chart_in(
+    frame: Frame,
+    chart_id: &str,
+    timeline: &[TimelinePoint],
+    window: Window,
+) -> Markup {
     let times: Vec<u64> = timeline.iter().map(|p| p.t).collect();
     let seg = |label: &'static str, f: fn(&TimelinePoint) -> usize| Segment {
         label,
         class: label,
         values: timeline.iter().map(f).collect(),
     };
-    stacked_chart(
+    stacked_chart_in(
+        frame,
         chart_id,
         "fleet status over time",
         "active devices",
@@ -462,6 +561,17 @@ pub fn power_chart(
     threshold_ma: i64,
     window: Window,
 ) -> Markup {
+    power_chart_in(Frame::WIDE, chart_id, points, threshold_ma, window)
+}
+
+/// [`power_chart`] drawn in `frame`.
+pub fn power_chart_in(
+    frame: Frame,
+    chart_id: &str,
+    points: &[PowerPoint],
+    threshold_ma: i64,
+    window: Window,
+) -> Markup {
     let times: Vec<u64> = points.iter().map(|p| p.t).collect();
     let note = format!("on = current ≥ {threshold_ma} mA");
     let seg = |label: &'static str, f: fn(&PowerPoint) -> usize| Segment {
@@ -469,7 +579,8 @@ pub fn power_chart(
         class: label,
         values: points.iter().map(f).collect(),
     };
-    stacked_chart(
+    stacked_chart_in(
+        frame,
         chart_id,
         "power state over time",
         &note,
@@ -485,7 +596,8 @@ pub fn power_chart(
 }
 
 /// Stacked columns, one per bucket, segments bottom-up in `segments`
-/// order with 2 px surface gaps; legend, hover data and table twin.
+/// order with 2 px surface gaps; legend, hover data and table twin, in
+/// the desktop frame.
 #[allow(clippy::too_many_arguments)]
 pub fn stacked_chart(
     chart_id: &str,
@@ -496,10 +608,42 @@ pub fn stacked_chart(
     segments: &[Segment<'_>],
     window: Window,
 ) -> Markup {
+    stacked_chart_in(
+        Frame::WIDE,
+        chart_id,
+        title,
+        note,
+        empty_text,
+        times,
+        segments,
+        window,
+    )
+}
+
+/// [`stacked_chart`] drawn in `frame`.
+#[allow(clippy::too_many_arguments)]
+pub fn stacked_chart_in(
+    frame: Frame,
+    chart_id: &str,
+    title: &str,
+    note: &str,
+    empty_text: &str,
+    times: &[u64],
+    segments: &[Segment<'_>],
+    window: Window,
+) -> Markup {
+    let Frame {
+        w,
+        h,
+        mt,
+        mb,
+        ml,
+        mr,
+        ..
+    } = frame;
     let n = times.len();
-    let mr = MR_PLAIN;
-    let pw = W - ML - mr;
-    let ph = H - MT - MB;
+    let pw = w - ml - mr;
+    let ph = h - mt - mb;
     let total = (0..n)
         .map(|i| {
             segments
@@ -517,8 +661,8 @@ pub fn stacked_chart(
     // baseline with a surface gap between neighbours.
     let mut rects: Vec<(&str, f64, f64, f64, f64)> = Vec::new();
     for i in 0..n {
-        let x = ML + i as f64 * colw + GAP / 2.0;
-        let mut base = MT + ph;
+        let x = ml + i as f64 * colw + GAP / 2.0;
+        let mut base = mt + ph;
         for s in segments {
             let count = s.values.get(i).copied().unwrap_or(0);
             if count == 0 {
@@ -537,28 +681,28 @@ pub fn stacked_chart(
         "kind": "stack",
         "unit": "devices",
         "t": times,
-        "ml": ML, "pw": pw, "w": W,
+        "ml": ml, "pw": pw, "w": w,
         "series": stack_series,
     });
 
     html! {
-        figure .chart.status-chart #(chart_id) data-chart=(data.to_string()) {
+        figure .chart.status-chart.narrow[!frame.full] #(chart_id) data-chart=(data.to_string()) {
             figcaption { (title) " " span .unit { "(" (note) ")" } }
-            svg viewBox={ "0 0 " (W) " " (H) } role="img" aria-label=(title) preserveAspectRatio="none" {
+            svg viewBox={ "0 0 " (w) " " (h) } role="img" aria-label=(title) preserveAspectRatio="none" {
                 @for tick in &axis.ticks {
-                    line .grid x1=(ML) x2=(W - mr) y1=(fmt1(axis.y(*tick, ph))) y2=(fmt1(axis.y(*tick, ph))) {}
-                    text .tick x=(ML - 8.0) y=(fmt1(axis.y(*tick, ph) + 3.5)) text-anchor="end" { (fmt_value(*tick)) }
+                    line .grid x1=(ml) x2=(w - mr) y1=(fmt1(axis.y(*tick, ph, mt))) y2=(fmt1(axis.y(*tick, ph, mt))) {}
+                    text .tick x=(ml - 8.0) y=(fmt1(axis.y(*tick, ph, mt) + 3.5)) text-anchor="end" { (fmt_value(*tick)) }
                 }
-                @for i in x_ticks(n) {
-                    text .tick x=(fmt1(ML + (i as f64 + 0.5) * colw)) y=(H - 8.0) text-anchor="middle" { (time_label(times[i], window)) }
+                @for i in x_ticks(n, frame.x_ticks) {
+                    text .tick x=(fmt1(ml + (i as f64 + 0.5) * colw)) y=(h - 8.0) text-anchor="middle" { (time_label(times[i], window)) }
                 }
                 @for (class, x, y, w, h) in &rects {
                     rect .seg.(class) x=(fmt1(*x)) y=(fmt1(*y)) width=(fmt1(*w)) height=(fmt1(*h)) {}
                 }
                 @if total == 0 {
-                    text .empty x=(ML + pw / 2.0) y=(MT + ph / 2.0) text-anchor="middle" { (empty_text) }
+                    text .empty x=(ml + pw / 2.0) y=(mt + ph / 2.0) text-anchor="middle" { (empty_text) }
                 }
-                line .crosshair x1="0" x2="0" y1=(MT) y2=(MT + ph) {}
+                line .crosshair x1="0" x2="0" y1=(mt) y2=(mt + ph) {}
             }
             div .tooltip hidden {}
             ul .legend {
@@ -566,15 +710,17 @@ pub fn stacked_chart(
                     li { span .key.(s.class) {} (s.label) }
                 }
             }
-            details .table-view {
-                summary { "table" }
-                table {
-                    thead { tr { th { "bucket (UTC)" } @for s in segments { th { (s.label) } } } }
-                    tbody {
-                        @for (i, t) in times.iter().enumerate() {
-                            tr {
-                                td { (time_full(*t)) }
-                                @for s in segments { td { (s.values.get(i).copied().unwrap_or(0)) } }
+            @if frame.full {
+                details .table-view {
+                    summary { "table" }
+                    table {
+                        thead { tr { th { "bucket (UTC)" } @for s in segments { th { (s.label) } } } }
+                        tbody {
+                            @for (i, t) in times.iter().enumerate() {
+                                tr {
+                                    td { (time_full(*t)) }
+                                    @for s in segments { td { (s.values.get(i).copied().unwrap_or(0)) } }
+                                }
                             }
                         }
                     }
