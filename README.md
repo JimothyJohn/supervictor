@@ -1,4 +1,4 @@
-![supervictor](docs/banner.jpg)
+![supervictor](docs/banner.svg)
 
 # supervictor
 
