@@ -34,6 +34,10 @@ use supervictor::config::*;
 
 #[cfg(feature = "ethernet")]
 use esp_hal::gpio::{Level, Output, OutputConfig};
+#[cfg(feature = "espnow")]
+use supervictor::app::tasks::DEVICE_ID_ON_WIRE;
+#[cfg(feature = "espnow")]
+use supervictor::network::espnow;
 #[cfg(feature = "ethernet")]
 use supervictor::network::ethernet;
 
@@ -68,6 +72,9 @@ macro_rules! make_static {
 async fn main(spawner: embassy_executor::Spawner) -> ! {
     esp_println::logger::init_logger_from_env();
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
+    // Second heap region in the otherwise unused dram2 segment (config.rs).
+    #[cfg(all(feature = "chip-esp32", feature = "espnow"))]
+    esp_alloc::heap_allocator!(#[link_section = ".dram2_uninit"] size: DRAM2_HEAP_SIZE);
 
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let timg0 = TimerGroup::new(peripherals.TIMG0);
@@ -164,6 +171,42 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         spawner.spawn(net_task(runner)).ok();
         stack
     };
+
+    // --- ESP-NOW beside the EMAC (coexistence spike, TODO.md P2) ---
+    // Radio init comes after the wired stack so a radio failure can never
+    // take the uplink down with it; the uplink keeps feeding the watchdog.
+    #[cfg(feature = "espnow")]
+    {
+        let radio = &*make_static!(
+            esp_radio::Controller<'static>,
+            match esp_radio::init() {
+                Ok(ctrl) => ctrl,
+                Err(e) => {
+                    println!("FATAL: Failed to initialize esp-radio: {:?}", e);
+                    halt().await;
+                }
+            }
+        );
+        match espnow::init(radio, peripherals.WIFI) {
+            Ok((controller, esp_now)) => {
+                // Dropping the controller deinits the radio: park it for good.
+                let _ = make_static!(esp_radio::wifi::WifiController<'static>, controller);
+                let (_manager, sender, receiver) = esp_now.split();
+                spawner
+                    .spawn(espnow::espnow_beacon_task(sender, DEVICE_ID_ON_WIRE))
+                    .ok();
+                spawner.spawn(espnow::espnow_listen_task(receiver)).ok();
+                println!(
+                    "ESP-NOW up on channel {} as {} (heap used {} free {})",
+                    ESPNOW_CHANNEL,
+                    DEVICE_ID_ON_WIRE,
+                    esp_alloc::HEAP.used(),
+                    esp_alloc::HEAP.free()
+                );
+            }
+            Err(e) => println!("ESP-NOW init failed: {:?} — wired uplink continues", e),
+        }
+    }
 
     // Initialize TLS — mbedtls-rs needs Trng (implements CryptoRng)
     let trng = match Trng::try_new() {

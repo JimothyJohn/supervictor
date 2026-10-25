@@ -18,8 +18,22 @@ pub const HOST: &str = env!("HOST");
 /// up; 112 KB leaves ~37 KB of stack, enough for mbedtls handshakes on
 /// Xtensa's stack-hungry windowed ABI. Check `_stack_start - _stack_end` in
 /// the ELF before raising this.
-#[cfg(feature = "chip-esp32")]
+#[cfg(all(feature = "chip-esp32", not(feature = "espnow")))]
 pub const HEAP_SIZE: usize = 112 * 1024;
+/// Primary heap for the ESP-NOW coexistence build. The radio blob adds ~34 KB
+/// of .data/.bss next to the EMAC rings, which at 112 KB left an 18 KB boot
+/// stack that overflowed before main printed a line. 80 KB puts the stack
+/// back at ~50 KB; the heap it gives up (and more) comes back from the
+/// second DRAM segment, see [`DRAM2_HEAP_SIZE`].
+#[cfg(all(feature = "chip-esp32", feature = "espnow"))]
+pub const HEAP_SIZE: usize = 80 * 1024;
+/// Second heap region in the ESP32's `dram2_seg` (0x3ffe7e30, 98768 bytes:
+/// the DRAM after the ROM data/stack reservations, which esp-hal maps as
+/// `.dram2_uninit` and nothing else claims). Plain DMA-capable internal RAM,
+/// so the WiFi driver's buffers are fine there. Spike-only for now; it is a
+/// free 96 KB for every classic-ESP32 build once validated on the rack.
+#[cfg(all(feature = "chip-esp32", feature = "espnow"))]
+pub const DRAM2_HEAP_SIZE: usize = 96 * 1024;
 /// Total heap allocation in bytes for the ESP32-C3 allocator.
 ///
 /// The C3's RAM is one 400 KB segment, so the boot stack has ample leftover
@@ -48,6 +62,15 @@ pub const ETH_LINK_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// Wait after enabling PHY power (GPIO12) before MDIO access. The LAN8710A
 /// needs sub-ms per datasheet; generous margin costs boot time once.
 pub const PHY_POWER_STABLE_DELAY_MS: u32 = 100;
+
+// --- ESP-NOW (coexistence spike, `espnow` feature) ---
+/// WiFi channel the spike boards meet on. There is no AP to follow, so every
+/// board pins the same one.
+pub const ESPNOW_CHANNEL: u8 = 1;
+/// Interval between broadcast beacons.
+pub const ESPNOW_BEACON_INTERVAL: Duration = Duration::from_secs(5);
+/// Interval between beacon/heap summary lines on the console.
+pub const ESPNOW_REPORT_INTERVAL: Duration = Duration::from_secs(60);
 
 // --- TCP/Socket ---
 /// TCP receive buffer size in bytes.

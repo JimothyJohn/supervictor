@@ -204,10 +204,18 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       loop (cert, `POST /devices`, flash, cabling prompt, uplink poll) and
       records it in `certs/rack-inventory.tsv`. Names by board type and
       position, e.g. `poe2-rack-01`.
-- [ ] Fault test: pull one cable, watch the fleet row go stale → dark, plug it
-      back, watch it recover. This is the baseline the mesh fallback has to beat.
-- [ ] Then the coexistence spike: esp-radio ESP-NOW + ph-esp32-mac EMAC on one
-      board (POE-ISO is the safest rig). Go/no-go for the mesh.
+- [x] Fault test (2026-10-25): pulled poe-iso-eth-01's cable at 18:46Z, the
+      row went stale at 19:01Z (FRESH_SECS = 15 min) and was fresh again 20 s
+      after the cable went back. Dark (2 h) not exercised. Baseline for the mesh.
+- [x] Coexistence spike (2026-10-25): **GO.** `--features ethernet,espnow`
+      (src/network/espnow.rs) on poe-iso-rack-02 + -03: 29/29 beacons heard,
+      no gaps, both boards uplinking every 5 s throughout, all six rack rows
+      fresh. Cost: the radio blob is ~34 KB of DRAM, which overflowed the boot
+      stack at the 112 KB heap; the espnow build runs 80 KB + a 96 KB second
+      heap in `dram2_seg` (esp-hal `.dram2_uninit`), 92 KB used / 88 KB free.
+      Promote the dram2 heap to every classic-ESP32 build once the rack has
+      soaked on it. Next: the mesh identity answer (open question below), then
+      the ESP-NOW protocol (gateway/leaf roles, PMK) on top of this module.
 
 ## Open questions for Nick
 
