@@ -118,7 +118,7 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
     row.querySelectorAll('.meter').forEach(function (m) {
       var r = parseInt(m.dataset.register, 10), lv = last[r] | 0, v = deq(r, lv);
       m.style.setProperty('--lv', lv);
-      m.querySelector('.meter-value').textContent = v === null ? '–' : fmt(v) + ' ' + REG[r].unit;
+      m.querySelector('.meter-value').textContent = v === null ? '–' : fmt(v);
       m.querySelector('.meter-level').textContent = lv ? String(lv) : '–';
       if (lv) m.setAttribute('aria-valuenow', lv); else m.removeAttribute('aria-valuenow');
     });
@@ -159,13 +159,14 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
       var ml = 56, mr = 14, mt = 8, mb = 18, pw = W - ml - mr, ph = H - mt - mb;
       function x(t) { return ml + (t - t0) / (t1 - t0) * pw; }
       function y(lv) { return mt + (255 - lv) / 254 * ph; }
+      function yv(v) { return y(1 + (v - REG[r].lo) / (REG[r].hi - REG[r].lo) * 254); }
       ctx.font = '10px ui-monospace, "SF Mono", Menlo, monospace';
       ctx.lineWidth = 1; ctx.strokeStyle = grid; ctx.fillStyle = muted;
-      [1, 64, 128, 191, 255].forEach(function (lv) {
-        var yy = Math.round(y(lv)) + 0.5;
+      for (var g = 0; g <= 4; g++) {
+        var v = REG[r].lo + (REG[r].hi - REG[r].lo) * g / 4, yy = Math.round(yv(v)) + 0.5;
         ctx.beginPath(); ctx.moveTo(ml, yy); ctx.lineTo(W - mr, yy); ctx.stroke();
-        ctx.textAlign = 'right'; ctx.fillText(fmt(deq(r, lv)), ml - 6, yy + 3.5);
-      });
+        ctx.textAlign = 'right'; ctx.fillText(fmt(v), ml - 6, yy + 3.5);
+      }
       for (var k = 0; k <= 4; k++) {
         var tt = t0 + (t1 - t0) * k / 4, ago = Math.round((t1 - tt) / 1000);
         ctx.textAlign = k === 0 ? 'left' : (k === 4 ? 'right' : 'center');
@@ -420,7 +421,8 @@ pub const LIVE_SPANS: [u64; 3] = [30, 60, 120];
 pub const LIVE_DEFAULT_SPAN: u64 = 60;
 
 /// `GET /ui/live` — register bank (one 8-bit meter per device per
-/// register, newest sample) and one scrolling strip per register.
+/// register, newest sample: the bar is level/255, the text is the value in
+/// the column's unit and the raw level) and one scrolling strip per register.
 pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
     let data = serde_json::to_string(snapshot).unwrap_or_else(|_| "{}".into());
     let samples: usize = snapshot.devices.iter().map(|d| d.samples.len()).sum();
@@ -459,7 +461,7 @@ pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
                                                 span .meter-bar.(slot_class(d.slot)) {}
                                                 span .meter-value {
                                                     @match value {
-                                                        Some(v) => { (charts::fmt_value(f64::from(v))) " " (r.unit) }
+                                                        Some(v) => (charts::fmt_value(f64::from(v))),
                                                         None => "–",
                                                     }
                                                 }

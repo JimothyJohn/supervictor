@@ -617,7 +617,7 @@ async fn live_page_has_a_meter_per_device_per_register_and_a_strip_per_register(
         REGISTERS[0].dequantize(200).unwrap(),
     ));
     assert!(
-        html.contains(&format!("{expected} mA")),
+        html.contains(&format!("<span class=\"meter-value\">{expected}</span>")),
         "dequantised readout"
     );
     assert!(

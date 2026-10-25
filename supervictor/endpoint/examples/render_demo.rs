@@ -48,19 +48,23 @@ const DEMO_SCRIPT: &str = r#"
   var live = document.getElementById('live');
   var seed = null;
   if (live) { try { seed = JSON.parse(live.dataset.live); } catch (_) { seed = null; } }
-  var walks = {};
+  // The page aligns its clock to the seed's now_ms, so synthetic events
+  // must be stamped on that virtual clock, not the real one.
+  var walks = {}, homes = {}, loaded = Date.now();
   if (seed) {
     seed.devices.forEach(function (d) {
+      var first = d.samples.length ? d.samples[0].l : null;
       var last = d.samples.length ? d.samples[d.samples.length - 1].l : null;
-      if (last) walks[d.device_id] = last.slice();
+      if (last) { walks[d.device_id] = last.slice(); homes[d.device_id] = first.slice(); }
     });
   }
   function burst(id) {
-    var w = walks[id], R = w.length, out = [];
+    var w = walks[id], home = homes[id], R = w.length, out = [];
     for (var i = 0; i < 10; i++) {
       for (var r = 0; r < R; r++) {
         var step = r === 0 ? 6 : 1;
-        var lv = w[r] + Math.round((Math.random() - 0.5) * 2 * step);
+        // Bounded walk with a pull back toward the seed's starting level.
+        var lv = w[r] + Math.round((Math.random() - 0.5) * 2 * step - (w[r] - home[r]) / 24);
         if (r === 0 && Math.random() < 0.03) lv += 40;
         w[r] = Math.max(1, Math.min(255, lv));
         out.push(w[r]);
@@ -77,7 +81,7 @@ const DEMO_SCRIPT: &str = r#"
     if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
     if (walks[id]) {
       document.dispatchEvent(new CustomEvent('sv:uplink', { detail: {
-        device_id: id, t_ms: Date.now(), levels: burst(id), levels_ms: 500
+        device_id: id, t_ms: seed.now_ms + (Date.now() - loaded), levels: burst(id), levels_ms: 500
       } }));
     }
   }, 2500);
@@ -187,7 +191,8 @@ fn demo_live_samples(seed: u64, now_ms: u64) -> Vec<live::Sample> {
             .wrapping_add(1_442_695_040_888_963_407);
         (state >> 33) % n
     };
-    let mut level: Vec<i64> = vec![60 + (seed % 7) as i64 * 15, 140, 110, 120, 200];
+    let home: Vec<i64> = vec![60 + (seed % 7) as i64 * 15, 140, 110, 120, 200];
+    let mut level = home.clone();
     let mut out = Vec::new();
     let mut t = now_ms - live::WINDOW_S * 1_000;
     while t <= now_ms {
@@ -195,7 +200,8 @@ fn demo_live_samples(seed: u64, now_ms: u64) -> Vec<live::Sample> {
         for _ in 0..10 {
             for (r, lv) in level.iter_mut().enumerate() {
                 let step = if r == 0 { 6 } else { 1 };
-                *lv += next(2 * step + 1) as i64 - step as i64;
+                // Bounded walk pulled back toward its home level.
+                *lv += next(2 * step + 1) as i64 - step as i64 - (*lv - home[r]) / 24;
                 if r == 0 && next(40) == 0 {
                     *lv += 40;
                 }

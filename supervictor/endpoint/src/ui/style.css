@@ -240,7 +240,7 @@ figure.chart svg:focus-visible { outline: 1px solid var(--accent); outline-offse
    colour; the text is the dequantised value and the raw level. */
 .meter {
   --lv: 0;
-  position: relative; display: block; min-width: 7.5rem; height: 1.6rem;
+  position: relative; display: block; min-width: 7rem; height: 1.6rem;
   background: var(--bg); border: 1px solid var(--border); border-radius: 3px; overflow: hidden;
   font-variant-numeric: tabular-nums;
 }
