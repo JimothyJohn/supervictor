@@ -106,7 +106,20 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     // OTA: count this boot against an unconfirmed image (reverts + resets
     // when the budget is spent), before anything that could wedge. None on
     // the factory partition table — the board still uplinks.
-    let mut ota = supervictor::ota::device::Ota::new(peripherals.FLASH);
+    // Buffers and the state machine itself live in statics, not in main's
+    // frame or the app task's future (see `ota::device::Ota`).
+    let ota = supervictor::ota::device::Ota::new(
+        peripherals.FLASH,
+        make_static!(
+            [u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN],
+            [0; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN]
+        ),
+        make_static!(
+            [u8; supervictor::ota::install::SECTOR],
+            [0; supervictor::ota::install::SECTOR]
+        ),
+    );
+    let mut ota = ota.map(|o| &mut *make_static!(supervictor::ota::device::Ota, o));
     if let Some(o) = ota.as_mut() {
         o.boot_check();
     }
@@ -247,7 +260,17 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     };
     tls.set_debug(TLS_DEBUG_LEVEL);
 
-    spawner.spawn(app(stack, tls, rwdt, sim_seed, ota)).ok();
+    spawner
+        .spawn(app(
+            stack,
+            tls,
+            rwdt,
+            sim_seed,
+            ota,
+            make_static!([u8; TCP_RX_BUFFER_SIZE], [0; TCP_RX_BUFFER_SIZE]),
+            make_static!([u8; TCP_TX_BUFFER_SIZE], [0; TCP_TX_BUFFER_SIZE]),
+        ))
+        .ok();
 
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;

@@ -129,11 +129,15 @@ fn slot_subtype(n: u8) -> Option<AppPartitionSubType> {
     }
 }
 
-/// OTA state machine owner. One per board; lives in a `StaticCell`.
+/// OTA state machine owner. One per board; lives in a `StaticCell`, and
+/// its two buffers (partition table 3 KB, sector 4 KB) are statics handed
+/// in by the caller: the boot stack on the classic ESP32 is whatever the
+/// linker leaves (~25-50 KB) and neither this struct nor the task future
+/// that owns it may carry them.
 pub struct Ota {
     flash: FlashStorage<'static>,
-    pt_buf: [u8; PARTITION_TABLE_MAX_LEN],
-    sector: [u8; SECTOR],
+    pt_buf: &'static mut [u8; PARTITION_TABLE_MAX_LEN],
+    sector: &'static mut [u8; SECTOR],
     confirming: bool,
 }
 
@@ -142,14 +146,18 @@ impl Ota {
     /// partition table has no OTA slots — a board still on the factory
     /// layout keeps uplinking, it just cannot update until its one more
     /// USB flash.
-    pub fn new(flash: esp_hal::peripherals::FLASH<'static>) -> Option<Ota> {
+    pub fn new(
+        flash: esp_hal::peripherals::FLASH<'static>,
+        pt_buf: &'static mut [u8; PARTITION_TABLE_MAX_LEN],
+        sector: &'static mut [u8; SECTOR],
+    ) -> Option<Ota> {
         let mut me = Ota {
             flash: FlashStorage::new(flash),
-            pt_buf: [0; PARTITION_TABLE_MAX_LEN],
-            sector: [0; SECTOR],
+            pt_buf,
+            sector,
             confirming: false,
         };
-        match OtaUpdater::new(&mut me.flash, &mut me.pt_buf) {
+        match OtaUpdater::new(&mut me.flash, &mut *me.pt_buf) {
             Ok(mut updater) => {
                 let selected = updater.selected_partition();
                 println!(
@@ -181,7 +189,7 @@ impl Ota {
                     previous_slot
                 );
                 if let Some(sub) = slot_subtype(previous_slot) {
-                    let result = OtaUpdater::new(&mut self.flash, &mut self.pt_buf).and_then(
+                    let result = OtaUpdater::new(&mut self.flash, &mut *self.pt_buf).and_then(
                         |mut updater| {
                             let mut data = updater.ota_data()?;
                             // Mark the slot we are leaving so nothing boots it on purpose.
@@ -214,7 +222,7 @@ impl Ota {
         if !self.confirming {
             return;
         }
-        let result = OtaUpdater::new(&mut self.flash, &mut self.pt_buf)
+        let result = OtaUpdater::new(&mut self.flash, &mut *self.pt_buf)
             .and_then(|mut updater| updater.set_current_ota_state(OtaImageState::Valid));
         match result {
             Ok(()) => println!("OTA: {} confirmed", FIRMWARE_VERSION),
@@ -274,8 +282,8 @@ impl Ota {
         );
 
         // 2. Slot + resume point.
-        let mut updater =
-            OtaUpdater::new(&mut self.flash, &mut self.pt_buf).map_err(|_| OtaError::NoOtaTable)?;
+        let mut updater = OtaUpdater::new(&mut self.flash, &mut *self.pt_buf)
+            .map_err(|_| OtaError::NoOtaTable)?;
         let previous = updater
             .selected_partition()
             .ok()
@@ -285,7 +293,7 @@ impl Ota {
         let resume_at = policy::resume_offset(rtc_load(), manifest.size, &manifest.sha256);
         let mut installer = if resume_at > 0 {
             println!("OTA: resuming at {} into {:?}", resume_at, target);
-            match Installer::resume(region, &mut self.sector, &manifest, resume_at) {
+            match Installer::resume(region, &mut *self.sector, &manifest, resume_at) {
                 Ok(i) => i,
                 Err(e) => {
                     // Whatever is in the slot is not what the record says:
@@ -296,7 +304,7 @@ impl Ota {
             }
         } else {
             println!("OTA: writing into {:?}", target);
-            Installer::new(region, &mut self.sector, &manifest)?
+            Installer::new(region, &mut *self.sector, &manifest)?
         };
         let mut committed = installer.committed();
 
@@ -374,8 +382,8 @@ impl Ota {
         // 5. Verify (size, digest, read-back) and activate.
         let verified = installer.finish()?;
         drop(updater);
-        let mut updater =
-            OtaUpdater::new(&mut self.flash, &mut self.pt_buf).map_err(|_| OtaError::NoOtaTable)?;
+        let mut updater = OtaUpdater::new(&mut self.flash, &mut *self.pt_buf)
+            .map_err(|_| OtaError::NoOtaTable)?;
         updater
             .activate_next_partition()
             .map_err(OtaError::Partition)?;

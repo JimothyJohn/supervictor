@@ -190,7 +190,9 @@ const fn parse_u32(s: &str) -> u32 {
 /// Main application loop: resolves DNS, establishes mTLS, and sends uplink
 /// telemetry. `seed` (hardware RNG) salts the telemetry simulator so two
 /// boots of the same board don't replay the same trace. `ota` is `None`
-/// on a board still on the factory partition table.
+/// on a board still on the factory partition table. The TCP buffers are
+/// statics: the task future is built on the boot stack before it moves
+/// into its pool, and 8 KB of buffers (plus OTA's) overflowed it.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
 pub async fn app(
@@ -198,7 +200,9 @@ pub async fn app(
     tls: Tls<'static>,
     mut rwdt: Rwdt,
     seed: u64,
-    mut ota: Option<Ota>,
+    mut ota: Option<&'static mut Ota>,
+    rx_buffer: &'static mut [u8; TCP_RX_BUFFER_SIZE],
+    tx_buffer: &'static mut [u8; TCP_TX_BUFFER_SIZE],
 ) {
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;
@@ -266,11 +270,9 @@ pub async fn app(
 
         let remote_endpoint = (address, AWS_IOT_PORT);
 
-        let mut rx_buffer = [0u8; TCP_RX_BUFFER_SIZE];
-        let mut tx_buffer = [0u8; TCP_TX_BUFFER_SIZE];
         let client_conf = load_certificates();
 
-        let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+        let mut socket = TcpSocket::new(stack, &mut rx_buffer[..], &mut tx_buffer[..]);
         socket.set_timeout(Some(SOCKET_TIMEOUT));
 
         if let Err(e) = socket.connect(remote_endpoint).await {
@@ -407,8 +409,8 @@ pub async fn app(
                 .update(
                     stack,
                     tls.reference(),
-                    &mut rx_buffer,
-                    &mut tx_buffer,
+                    &mut rx_buffer[..],
+                    &mut tx_buffer[..],
                     target.as_str(),
                 )
                 .await
