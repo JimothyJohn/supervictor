@@ -185,7 +185,7 @@ fn subject_of(headers: &HeaderMap) -> String {
 async fn fleet(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, AppError> {
     let rows = fleet_rows(state.store.as_ref(), state.power_threshold_ma)?;
     let (token, set_cookie) = ensure_csrf(&headers);
-    let page = views::fleet_page(&rows, &token, &subject_of(&headers));
+    let page = views::fleet_page(&rows, &token, &subject_of(&headers), now_unix());
     Ok(match set_cookie {
         Some(cookie) => (cookie, page).into_response(),
         None => page.into_response(),
@@ -314,6 +314,7 @@ async fn device_detail(
         &uplinks,
         &token,
         &subject_of(&headers),
+        now,
     );
     Ok(match set_cookie {
         Some(cookie) => (cookie, page).into_response(),

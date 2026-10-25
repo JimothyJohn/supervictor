@@ -171,6 +171,7 @@ tr.tick td { animation: sv-tick 0.6s ease-out; }
 
 /* ── history views ─────────────────────────────────────────────────── */
 header nav a { margin-right: 1rem; font-size: 0.85rem; text-decoration: none; }
+header nav a.current { text-decoration: underline; text-underline-offset: 5px; }
 .filters { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0 0 1rem; }
 .filters-label { color: var(--muted); font-size: 0.75rem; margin-right: 0.25rem; }
 .filters a {
@@ -341,26 +342,128 @@ figure.strip .unit { color: var(--muted); }
 figure.strip canvas { display: block; width: 100%; height: 150px; }
 #live .legend { margin: 0.5rem 0 0; }
 
+/* ── two layers ────────────────────────────────────────────────────── */
+/* The desktop is the command centre: it shows `.deep` and never `.glance`.
+   A phone shows `.glance` — one verdict, tappable rows, one narrow chart —
+   and hides `.deep` until the viewer asks for everything
+   (`data-view="full"` on <html>, set by #view-toggle; see THEME_SCRIPT). */
+.glance, #view-toggle { display: none; }
+.verdict {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 1rem 1rem 0.9rem; margin: 0 0 1rem;
+}
+.verdict-head { font-size: 2rem; line-height: 1.1; font-weight: 600; overflow-wrap: anywhere; }
+.verdict-detail { color: var(--muted); font-size: 0.8rem; margin-top: 0.35rem; }
+.verdict.on .verdict-head { color: var(--green); }
+.verdict.off .verdict-head, .verdict.stale .verdict-head { color: var(--accent); }
+.verdict.dark .verdict-head { color: var(--red); }
+.verdict.unknown .verdict-head { color: var(--muted); }
+/* Relative time, coloured by freshness. */
+.when.fresh { color: var(--green); }
+.when.stale { color: var(--accent); }
+.when.dark { color: var(--red); }
+.when.unknown { color: var(--muted); }
+/* Fleet glance: one tappable row per device. */
+.glance-list { list-style: none; padding: 0; margin: 0; }
+.glance-list li { border-bottom: 1px solid var(--border); }
+.glance-list li.inactive { opacity: 0.55; }
+.glance-list li.inactive .when { color: var(--muted); }
+a.glance-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 0.15rem 0.75rem; align-items: center;
+  padding: 0.8rem 0.25rem; color: var(--text); text-decoration: none; min-height: 3.5rem;
+}
+a.glance-row .name { font-size: 1rem; overflow-wrap: anywhere; }
+a.glance-row .pow { text-align: right; white-space: nowrap; }
+a.glance-row .when { grid-column: 1 / -1; font-size: 0.75rem; }
+a.glance-row:active { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+/* Device glance: the state, big. */
+.hero {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 1rem; margin: 0 0 0.75rem;
+}
+.hero-state { font-size: 2.4rem; line-height: 1; font-weight: 600; }
+.hero-current { font-size: 1.3rem; color: var(--text); }
+.hero-note { flex-basis: 100%; color: var(--muted); font-size: 0.8rem; margin-top: 0.25rem; }
+.hero.on .hero-state { color: var(--green); }
+.hero.off .hero-state { color: var(--red); }
+.hero.unknown .hero-state { color: var(--muted); }
+.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem 1rem; margin: 0 0 1rem; }
+.facts div { min-width: 0; }
+.facts dt { color: var(--muted); font-size: 0.72rem; }
+.facts dd { margin: 0; font-size: 0.95rem; overflow-wrap: anywhere; }
+.charts-glance { display: grid; gap: 0.75rem; }
+figure.chart.narrow { padding: 0.6rem 0.6rem 0.4rem; }
+/* Live glance: a card per device. */
+.live-cards { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; gap: 0.6rem; }
+.live-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 0.7rem 0.8rem 0.6rem;
+}
+.live-card a.name { display: block; color: var(--text); text-decoration: none; font-size: 1rem; margin-bottom: 0.4rem; }
+.live-card .mini-label { display: block; color: var(--muted); font-size: 0.68rem; margin-bottom: 0.15rem; }
+.live-card .meter.hero-meter { height: 2.2rem; }
+.live-card .hero-meter .meter-value { font-size: 1.1rem; line-height: 2.2rem; }
+.live-card .meter-level { display: none; }
+.minis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin-top: 0.6rem; }
+.mini { min-width: 0; }
+.meter.mini { min-width: 0; height: 1.2rem; border: 0; border-radius: 0; background: transparent; }
+.meter.mini .meter-bar { top: auto; bottom: 0; height: 2px; opacity: 0.8; }
+.meter.mini .meter-value { left: 0; line-height: 1.1rem; font-size: 0.85rem; }
+.meter.mini .meter-level { display: none; }
+.live-card.tick, .glance-list li.tick { animation: sv-tick 0.6s ease-out; }
+@media (prefers-reduced-motion: reduce) { .live-card.tick, .glance-list li.tick { animation: none; } }
+#view-toggle {
+  margin: 1.5rem auto 0.5rem; padding: 0.6rem 1rem; font-size: 0.85rem; color: var(--muted);
+}
+#view-toggle .when-full { display: none; }
+:root[data-view="full"] #view-toggle .when-full { display: inline; }
+:root[data-view="full"] #view-toggle .when-glance { display: none; }
+
 /* ── phones ────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
   body { font-size: 14px; }
-  header { padding: 0.75rem 1rem; }
-  header .subject { order: 9; flex-basis: 100%; margin-left: 0; max-width: 100%; }
+  .glance { display: block; }
+  .deep { display: none; }
+  #view-toggle { display: block; }
+  :root[data-view="full"] .deep { display: block; }
+  :root[data-view="full"] .glance { display: none; }
+  /* Header: title and controls on one line, the pages as a tab bar. */
+  header { padding: 0.6rem 1rem 0; gap: 0.4rem 0.75rem; align-items: center; }
+  header .subject { display: none; }
+  #theme-toggle { margin-left: auto; }
+  header nav {
+    order: 9; flex-basis: 100%; display: flex; gap: 0;
+    margin: 0.3rem -1rem 0; border-top: 1px solid var(--border);
+  }
+  header nav a {
+    flex: 1; text-align: center; margin: 0; padding: 0.7rem 0; font-size: 0.9rem;
+    color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent;
+  }
+  header nav a.current { color: var(--text); border-bottom-color: var(--accent); }
   main { padding: 1rem; }
   h2 { font-size: 0.95rem; }
   /* Tables scroll sideways instead of squeezing columns to one letter. */
   main > table, main > section > table, dl.meta + table, table:not(.table-view table) { display: block; overflow-x: auto; max-width: 100%; }
   th, td { padding: 0.4rem 0.5rem; white-space: nowrap; }
   td code { white-space: pre; }
+  /* Presets scroll sideways rather than orphaning the last one. */
+  .filters { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 0.25rem; scrollbar-width: none; }
+  .filters::-webkit-scrollbar { display: none; }
+  .filters a, .filters button { flex: none; }
   .filters a { padding: 0.4rem 0.75rem; font-size: 0.85rem; }
   .tiles { grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0.5rem; }
   .tile { padding: 0.5rem 0.7rem; }
   .tile-value { font-size: 1.2rem; }
   .charts { grid-template-columns: 1fr; }
   /* A 640-unit SVG shrunk to a phone makes 10px labels 5px: keep the
-     chart at a legible scale and let it pan sideways. */
+     desktop chart at a legible scale and let it pan sideways. The glance
+     chart is drawn at phone width and needs neither. */
   figure.chart { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0.6rem 0.6rem 0.4rem; }
   figure.chart svg { min-width: 560px; }
+  figure.chart.narrow { overflow-x: visible; }
+  figure.chart.narrow svg { min-width: 0; }
   figure.chart svg.key-svg { min-width: 0; }
   .tooltip { min-width: 9rem; font-size: 0.72rem; }
   fieldset form { display: grid; gap: 0.5rem; }

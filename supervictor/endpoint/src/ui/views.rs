@@ -2,6 +2,15 @@
 //! values are auto-escaped by maud; `PreEscaped` is used only for the static
 //! script constants below, which contain no user data (page data reaches
 //! them through escaped `data-*` attributes).
+//!
+//! Every page is two layers of one document. The desktop is the command
+//! centre: tables, every chart, every form. A phone is a check on the go
+//! — is the fleet all right, is that one machine on — so each page also
+//! renders a `.glance` block (one verdict, tappable rows, one chart drawn
+//! at phone width) and wraps the dense material in `.deep`. The
+//! stylesheet shows one layer or the other by viewport; the phone's
+//! "show everything" toggle (`data-view="full"` on `<html>`) lifts the
+//! `.deep` layer when a point check turns into real work.
 
 use std::collections::HashMap;
 
@@ -13,7 +22,8 @@ use crate::history::{DeviceSeries, History, Window, METRICS};
 use crate::live;
 use crate::models::{DeviceRecord, UplinkRecord};
 use crate::style::{Color, LineStyle, Marker, Resolved, SLOTS};
-use crate::ui::charts::{self, Reference, Series};
+use crate::time::parse_rfc3339_unix;
+use crate::ui::charts::{self, Frame, Reference, Series};
 use supervictor_common::status;
 
 /// One row of the fleet table.
@@ -109,26 +119,29 @@ pub const LIVE_SCRIPT: &str = r#"
       schedule();
     });
   }
-  // Fleet table: patch the device's row in place — last uplink, freshness,
-  // current, and the power badge judged against the row's own threshold.
+  // Fleet table row and glance row alike (anything wearing the device id):
+  // patch in place — last uplink, freshness, current, and the power badge
+  // judged against the row's own threshold.
   function patchRow(ev) {
-    var row = document.querySelector('tr[data-device="' + CSS.escape(ev.device_id) + '"]');
-    if (!row) return;
-    var last = row.querySelector('.last-uplink');
-    if (last) last.textContent = ev.received_at;
-    var badge = row.querySelector('.staleness');
-    if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
-    if (typeof ev.current === 'number') {
-      var now = row.querySelector('.current-now');
-      if (now) now.textContent = ev.current + ' mA';
-      var threshold = parseInt(row.getAttribute('data-threshold'), 10);
-      var power = row.querySelector('.badge.power');
-      if (power && Number.isFinite(threshold)) {
-        var state = ev.current >= threshold ? 'on' : 'off';
-        power.textContent = state; power.className = 'badge power ' + state;
+    document.querySelectorAll('[data-device="' + CSS.escape(ev.device_id) + '"]').forEach(function (row) {
+      var last = row.querySelector('.last-uplink');
+      if (last) last.textContent = ev.received_at;
+      var badge = row.querySelector('.staleness');
+      if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
+      var when = row.querySelector('.when');
+      if (when) { when.textContent = 'just now'; when.className = 'when fresh'; }
+      if (typeof ev.current === 'number') {
+        var now = row.querySelector('.current-now');
+        if (now) now.textContent = ev.current + ' mA';
+        var threshold = parseInt(row.getAttribute('data-threshold'), 10);
+        var power = row.querySelector('.badge.power');
+        if (power && Number.isFinite(threshold)) {
+          var state = ev.current >= threshold ? 'on' : 'off';
+          power.textContent = state; power.className = 'badge power ' + state;
+        }
       }
-    }
-    flash(row);
+      flash(row);
+    });
   }
   // Live pages (short windows): re-render <main> from the server on every
   // uplink. Bursts coalesce into one fetch (150 ms), fetches never overlap,
@@ -247,9 +260,8 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
   }
   function updateMeters(id) {
     var d = devices[id], last = d.l[d.l.length - 1];
-    var row = root.querySelector('tr[data-device="' + CSS.escape(id) + '"]');
-    if (!last || !row) return;
-    row.querySelectorAll('.meter').forEach(function (m) {
+    if (!last) return;
+    root.querySelectorAll('[data-device="' + CSS.escape(id) + '"] .meter').forEach(function (m) {
       var r = parseInt(m.dataset.register, 10), lv = last[r] | 0, v = deq(r, lv);
       m.style.setProperty('--lv', lv);
       m.querySelector('.meter-value').textContent = v === null ? '–' : fmt(v);
@@ -442,22 +454,32 @@ pub const CHART_SCRIPT: &str = r#"
 })();
 "#;
 
-/// Theme bootstrap + toggle. Runs in `<head>` so a stored choice applies
-/// before first paint (no flash); the click handler attaches once the
-/// header exists. The choice is a per-viewer convenience in localStorage,
-/// wrapped in try/catch — private windows and blocked storage just fall
-/// back to the OS preference.
+/// Theme bootstrap + toggle, and the phone's view toggle. Runs in `<head>`
+/// so a stored choice applies before first paint (no flash); the theme
+/// click handler attaches once the header exists, the view toggle is
+/// delegated because live pages swap `<main>` out from under it. Both
+/// choices are per-viewer conveniences in localStorage, wrapped in
+/// try/catch — private windows and blocked storage just fall back to the
+/// OS preference and the glance.
 pub const THEME_SCRIPT: &str = r#"
 (function () {
-  var KEY = 'sv-theme', root = document.documentElement;
-  function stored() { try { return localStorage.getItem(KEY); } catch (_) { return null; } }
+  var KEY = 'sv-theme', VIEW = 'sv-view', root = document.documentElement;
+  function stored(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
   function effective() {
     var t = root.getAttribute('data-theme');
     if (t) return t;
     return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
   }
-  var saved = stored();
+  var saved = stored(KEY);
   if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+  if (stored(VIEW) === 'full') root.setAttribute('data-view', 'full');
+  document.addEventListener('click', function (e) {
+    var button = e.target && e.target.closest ? e.target.closest('#view-toggle') : null;
+    if (!button) return;
+    var full = root.getAttribute('data-view') === 'full';
+    if (full) root.removeAttribute('data-view'); else root.setAttribute('data-view', 'full');
+    try { localStorage.setItem(VIEW, full ? 'glance' : 'full'); } catch (_) {}
+  });
   document.addEventListener('DOMContentLoaded', function () {
     var button = document.getElementById('theme-toggle');
     if (!button) return;
@@ -474,7 +496,18 @@ pub const THEME_SCRIPT: &str = r#"
 /// Seconds between reloads of the history pages (visible tab only).
 const HISTORY_REFRESH_S: u32 = 60;
 
-fn layout(title: &str, subject: &str, mode: PageMode, body: Markup) -> Markup {
+/// Which header tab a page belongs to (device pages sit under the fleet).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nav {
+    /// `/ui` and `/ui/devices/{id}`.
+    Fleet,
+    /// `/ui/live`.
+    Live,
+    /// `/ui/history`.
+    History,
+}
+
+fn layout(nav: Nav, title: &str, subject: &str, mode: PageMode, body: Markup) -> Markup {
     let refresh = match mode {
         PageMode::Timed(secs) => Some(secs),
         PageMode::Rows | PageMode::Live => None,
@@ -496,10 +529,10 @@ fn layout(title: &str, subject: &str, mode: PageMode, body: Markup) -> Markup {
             body data-refresh=[refresh] data-live=[live] {
                 header {
                     h1 { a href="/ui" { "supervictor fleet" } }
-                    nav {
-                        a href="/ui" { "fleet" }
-                        a href="/ui/live" { "live" }
-                        a href="/ui/history" { "history" }
+                    nav aria-label="pages" {
+                        a .current[nav == Nav::Fleet] href="/ui" aria-current=[(nav == Nav::Fleet).then_some("page")] { "fleet" }
+                        a .current[nav == Nav::Live] href="/ui/live" aria-current=[(nav == Nav::Live).then_some("page")] { "live" }
+                        a .current[nav == Nav::History] href="/ui/history" aria-current=[(nav == Nav::History).then_some("page")] { "history" }
                     }
                     span #live-dot { "static" }
                     span .subject { (subject) }
@@ -513,10 +546,160 @@ fn layout(title: &str, subject: &str, mode: PageMode, body: Markup) -> Markup {
                         }
                     }
                 }
-                main { (body) }
+                main {
+                    (body)
+                    // Phone only (CSS): lift the desktop layer when a glance
+                    // turns into work. Labelled by CSS from `data-view`.
+                    button #view-toggle type="button" aria-label="switch between the glance and everything" {
+                        span .when-glance { "show everything" }
+                        span .when-full { "back to the glance" }
+                    }
+                }
                 script { (PreEscaped(LIVE_SCRIPT)) }
                 script { (PreEscaped(CHART_SCRIPT)) }
             }
+        }
+    }
+}
+
+/// Aggregate fleet rows the way `fleet::summarize` aggregates a snapshot:
+/// staleness and power buckets count ACTIVE devices only.
+pub fn summarize_rows(rows: &[FleetRow]) -> FleetSummary {
+    let mut summary = FleetSummary {
+        total: rows.len(),
+        ..FleetSummary::default()
+    };
+    for row in rows {
+        if row.device.status == status::ACTIVE {
+            summary.active += 1;
+            match row.staleness {
+                Staleness::Fresh => summary.fresh += 1,
+                Staleness::Stale => summary.stale += 1,
+                Staleness::Dark => summary.dark += 1,
+                Staleness::Unknown => summary.never += 1,
+            }
+            match row.power {
+                PowerState::On => summary.on += 1,
+                PowerState::Off => summary.off += 1,
+                PowerState::Unknown => {}
+            }
+        } else {
+            summary.inactive += 1;
+        }
+    }
+    summary
+}
+
+/// The one-line answer a phone asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Verdict {
+    /// Status class: `on`, `off`, `stale`, `dark` or `unknown`.
+    pub class: &'static str,
+    /// Headline — the fleet's worst condition.
+    pub head: String,
+    /// The counts behind it.
+    pub detail: String,
+}
+
+/// Rank the fleet's state: silence outranks a stale reading, a stale
+/// reading outranks a machine that is off, and "all on" needs every
+/// active device to be on.
+pub fn verdict(s: &FleetSummary) -> Verdict {
+    let unknown_power = s.active.saturating_sub(s.on + s.off);
+    let (class, head) = if s.active == 0 {
+        ("unknown", "no active devices".to_string())
+    } else if s.dark > 0 {
+        ("dark", format!("{} dark", s.dark))
+    } else if s.stale > 0 {
+        ("stale", format!("{} stale", s.stale))
+    } else if s.off > 0 {
+        ("off", format!("{} off", s.off))
+    } else if s.on == s.active {
+        (
+            "on",
+            if s.on == 1 {
+                "on".into()
+            } else {
+                format!("all {} on", s.on)
+            },
+        )
+    } else if s.on > 0 {
+        ("unknown", format!("{} on, {unknown_power} unknown", s.on))
+    } else {
+        ("unknown", "no readings".to_string())
+    };
+    let mut parts: Vec<String> = Vec::new();
+    for (n, word) in [
+        (s.on, "on"),
+        (s.off, "off"),
+        (s.stale, "stale"),
+        (s.dark, "dark"),
+        (s.never, "never heard"),
+        (s.inactive, "inactive"),
+    ] {
+        if n > 0 {
+            parts.push(format!("{n} {word}"));
+        }
+    }
+    let detail = if parts.is_empty() {
+        format!("{} registered", s.total)
+    } else {
+        parts.join(" · ")
+    };
+    Verdict {
+        class,
+        head,
+        detail,
+    }
+}
+
+/// How long ago an RFC 3339 timestamp was, for a glance: `just now`,
+/// `4 min ago`, `3 h ago`, `2 d ago`; `never` without one.
+pub fn ago(last: Option<&str>, now_unix: u64) -> String {
+    let Some(t) = last.and_then(parse_rfc3339_unix) else {
+        return "never".into();
+    };
+    let d = now_unix.saturating_sub(t);
+    if d < 60 {
+        "just now".into()
+    } else if d < 3600 {
+        format!("{} min ago", d / 60)
+    } else if d < 86_400 {
+        format!("{} h ago", d / 3600)
+    } else {
+        format!("{} d ago", d / 86_400)
+    }
+}
+
+fn verdict_block(v: &Verdict) -> Markup {
+    html! {
+        section .verdict.(v.class) aria-label="fleet verdict" {
+            span .verdict-head { (v.head) }
+            span .verdict-detail { (v.detail) }
+        }
+    }
+}
+
+/// One 8-bit meter for register `i` of a live device: the bar is
+/// level/255 in the device's colour, the text is the dequantised value and
+/// the raw level. `extra` is a second class (`hero-meter` / `mini`) for the
+/// glance; the bank's meters carry none so the live script finds them all
+/// by `.meter`.
+fn meter(d: &live::LiveDevice, i: usize, r: &live::RegisterInfo, extra: &str) -> Markup {
+    let level = d.latest().map(|s| s.l[i]).unwrap_or(0);
+    let value = METRICS[i].dequantize(level);
+    html! {
+        div class={ "meter" @if !extra.is_empty() { " " (extra) } } data-register=(i) style={ "--lv:" (level) } role="meter"
+            aria-label={ (d.device_id) " " (r.label) } aria-valuemin="1" aria-valuemax="255"
+            aria-valuenow=[(level > 0).then_some(level)] {
+            span .meter-bar.(d.style.color.class()) style=[d.style.color.custom_hex().map(|h| format!("--c:{h}"))] {}
+            span .meter-value {
+                @match value {
+                    Some(v) => (charts::fmt_value(f64::from(v))),
+                    None => "–",
+                }
+            }
+            span .meter-level { @if level > 0 { (level) } @else { "–" } }
         }
     }
 }
@@ -637,15 +820,25 @@ pub fn history_page(
         })
         .collect();
     layout(
+        Nav::History,
         "history",
         subject,
         PageMode::for_window(window),
         html! {
             (window_filters("/ui/history", window))
-            (device_chips(history, window, selection))
             @if history.truncated {
                 p .banner { "row cap reached: the most recent part of this window is not shown — pick a shorter window" }
             }
+            // Phone: the verdict and the two fleet-wide stacks, drawn narrow.
+            section .glance {
+                (verdict_block(&verdict(summary)))
+                div .charts-glance {
+                    (charts::power_chart_in(Frame::NARROW, "power-glance", &history.power, history.threshold_ma, window))
+                    (charts::status_chart_in(Frame::NARROW, "status-glance", &history.timeline, window))
+                }
+            }
+            div .deep {
+            (device_chips(history, window, selection))
             section .tiles {
                 (charts::stat_tile("active devices", &summary.active.to_string(), &format!("{} registered, {} inactive", summary.total, summary.inactive), ""))
                 (charts::stat_tile("powered on", &summary.on.to_string(), &format!("current ≥ {} mA", history.threshold_ma), "on"))
@@ -684,6 +877,7 @@ pub fn history_page(
                     }
                 }
             }
+            }
         },
     )
 }
@@ -701,11 +895,41 @@ pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
     let data = serde_json::to_string(snapshot).unwrap_or_else(|_| "{}".into());
     let samples: usize = snapshot.devices.iter().map(|d| d.samples.len()).sum();
     layout(
+        Nav::Live,
         "live",
         subject,
         PageMode::Rows,
         html! {
             div #live data-live=(data) data-poll="/ui/live.json" {
+                // Phone: one card per device — current as the big meter,
+                // the other registers as small readouts. Same `.meter`
+                // markup as the bank, so the live script updates both.
+                section .glance {
+                    @if snapshot.devices.is_empty() {
+                        p .hint { "no registered devices" }
+                    } @else {
+                        ul .live-cards {
+                            @for d in &snapshot.devices {
+                                li .live-card data-device=(d.device_id) {
+                                    a .name href={ "/ui/devices/" (d.device_id) } { (charts::key(&d.style)) (d.device_id) }
+                                    @if let Some(r) = snapshot.registers.first() {
+                                        span .mini-label { (r.label) " (" (r.unit) ")" }
+                                        (meter(d, 0, r, "hero-meter"))
+                                    }
+                                    div .minis {
+                                        @for (i, r) in snapshot.registers.iter().enumerate().skip(1) {
+                                            div .mini {
+                                                span .mini-label { (r.label) " (" (r.unit) ")" }
+                                                (meter(d, i, r, "mini"))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                div .deep {
                 section .tiles {
                     (charts::stat_tile("devices", &snapshot.devices.len().to_string(), "registered", ""))
                     (charts::stat_tile("samples", &samples.to_string(), &format!("in the last {} s", snapshot.window_s), ""))
@@ -726,22 +950,7 @@ pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
                                 tr data-device=(d.device_id) {
                                     td { (charts::key(&d.style)) a href={ "/ui/devices/" (d.device_id) } { (d.device_id) } }
                                     @for (i, r) in snapshot.registers.iter().enumerate() {
-                                        @let level = d.latest().map(|s| s.l[i]).unwrap_or(0);
-                                        @let value = METRICS[i].dequantize(level);
-                                        td {
-                                            div .meter data-register=(i) style={ "--lv:" (level) } role="meter"
-                                                aria-label={ (d.device_id) " " (r.label) } aria-valuemin="1" aria-valuemax="255"
-                                                aria-valuenow=[(level > 0).then_some(level)] {
-                                                span .meter-bar.(d.style.color.class()) style=[d.style.color.custom_hex().map(|h| format!("--c:{h}"))] {}
-                                                span .meter-value {
-                                                    @match value {
-                                                        Some(v) => (charts::fmt_value(f64::from(v))),
-                                                        None => "–",
-                                                    }
-                                                }
-                                                span .meter-level { @if level > 0 { (level) } @else { "–" } }
-                                            }
-                                        }
+                                        td { (meter(d, i, r, "")) }
                                     }
                                 }
                             }
@@ -750,6 +959,7 @@ pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
                     @if snapshot.devices.is_empty() {
                         p { "no registered devices" }
                     }
+                }
                 }
                 nav .filters aria-label="strip span" {
                     span .filters-label { "span" }
@@ -764,9 +974,10 @@ pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
                         }
                     }
                 }
+                // The first register's strip is the glance; the rest are deep.
                 section .strips {
                     @for (i, r) in snapshot.registers.iter().enumerate() {
-                        figure .strip.wide[i == 0] data-register=(i) {
+                        figure .strip.wide[i == 0].deep[i > 0] data-register=(i) {
                             figcaption { (r.label) " " span .unit { "(" (r.unit) ")" } }
                             canvas width="640" height="150" role="img" aria-label={ "live " (r.label) ", last " (LIVE_DEFAULT_SPAN) " seconds" } {}
                         }
@@ -800,13 +1011,42 @@ pub struct DeviceHistory<'a> {
     pub fleet_threshold_ma: i64,
 }
 
-/// `GET /ui` — fleet table plus the register form.
-pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
+/// `GET /ui` — fleet table plus the register form; on a phone, the verdict
+/// and one tappable row per device. `now_unix` dates the glance's "ago".
+pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str, now_unix: u64) -> Markup {
     layout(
+        Nav::Fleet,
         "fleet",
         subject,
         PageMode::Rows,
         html! {
+            section .glance {
+                (verdict_block(&verdict(&summarize_rows(rows))))
+                @if rows.is_empty() {
+                    p .hint { "no devices registered" }
+                } @else {
+                    ul .glance-list {
+                        @for row in rows {
+                            @let active = row.device.status == status::ACTIVE;
+                            li .inactive[!active] data-device=(row.device.device_id) data-threshold=(row.threshold_ma) {
+                                a .glance-row href={ "/ui/devices/" (row.device.device_id) } {
+                                    span .name { (charts::key(&row.style)) (row.device.device_id) }
+                                    span .pow {
+                                        @if active {
+                                            span .badge.power.(row.power.label()) { (row.power.label()) }
+                                            " " span .current-inline.current-now { @if let Some(c) = row.current { (c) " mA" } }
+                                        } @else {
+                                            span .badge.inactive { "inactive" }
+                                        }
+                                    }
+                                    span .when.(row.staleness.label()) { (ago(row.last_uplink.as_deref(), now_unix)) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            div .deep {
             h2 { (rows.len()) " device(s) · " a href="/ui/history" { "status over time" } }
             table {
                 thead {
@@ -848,18 +1088,22 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
                     button type="submit" { "register" }
                 }
             }
+            }
         },
     )
 }
 
 /// `GET /ui/devices/{id}` — detail: metric charts over the window, then
-/// the most recent raw uplinks.
+/// the most recent raw uplinks. On a phone: is it on, how much current,
+/// when did it last speak, and the current trace drawn narrow. `now_unix`
+/// dates the glance's "ago".
 pub fn device_page(
     device: &DeviceRecord,
     history: &DeviceHistory<'_>,
     uplinks: &[UplinkRecord],
     csrf: &str,
     subject: &str,
+    now_unix: u64,
 ) -> Markup {
     let times: Vec<u64> = history.series.points.iter().map(|p| p.t).collect();
     let columns: Vec<Vec<Option<f64>>> = (0..METRICS.len())
@@ -872,12 +1116,42 @@ pub fn device_page(
         .unwrap_or("—")
         .to_string();
     let base = format!("/ui/devices/{}", device.device_id);
+    let last_at = last.map(|u| u.received_at.as_str());
+    let staleness = crate::fleet::staleness_of(last_at, now_unix);
+    let threshold_label = format!("on ≥ {} mA", history.threshold_ma);
     layout(
+        Nav::Fleet,
         &device.device_id,
         subject,
         PageMode::for_window(history.window),
         html! {
             h2 { (device.device_id) }
+            section .glance {
+                div .hero.(history.power.label()) {
+                    span .hero-state { (history.power.label()) }
+                    @if let Some(c) = history.current { span .hero-current { (c) " mA" } }
+                    span .hero-note {
+                        (threshold_label)
+                        @if device.status != status::ACTIVE { " · " span .badge.(device.status) { (device.status) } }
+                    }
+                }
+                dl .facts {
+                    div { dt { "last uplink" } dd .when.(staleness.label()) { (ago(last_at, now_unix)) } }
+                    div { dt { "uplinks" } dd { (history.series.uplinks) " in " (history.window.label()) } }
+                    div { dt { "firmware" } dd { (fw) } }
+                    div { dt { "owner" } dd { (device.owner_id) } }
+                }
+                (window_filters(&base, history.window))
+                @if history.truncated {
+                    p .banner { "row cap reached: the most recent part of this window is not shown — pick a shorter window" }
+                }
+                div .charts-glance {
+                    @let series = [Series { label: &device.device_id, style: history.style.clone(), values: &columns[0] }];
+                    (charts::line_chart_in(Frame::NARROW, "current-glance", METRICS[0].label, METRICS[0].unit, &times, &series, history.window,
+                        Some(Reference { value: history.threshold_ma as f64, label: &threshold_label })))
+                }
+            }
+            div .deep {
             dl .meta {
                 dt { "status" }
                 dd { span .badge.(device.status) { (device.status) } " " (status_form(device, csrf)) }
@@ -907,7 +1181,6 @@ pub fn device_page(
                 (charts::stat_tile("firmware", &fw, "as last reported", ""))
             }
             section .charts {
-                @let threshold_label = format!("on ≥ {} mA", history.threshold_ma);
                 @for (m, metric) in METRICS.iter().enumerate() {
                     @let series = [Series { label: &device.device_id, style: history.style.clone(), values: &columns[m] }];
                     @let reference = (m == 0).then(|| Reference { value: history.threshold_ma as f64, label: &threshold_label });
@@ -929,6 +1202,7 @@ pub fn device_page(
                         }
                     }
                 }
+            }
             }
         },
     )
@@ -1040,5 +1314,68 @@ mod tests {
         );
         assert_eq!(percent_encode("A-z_0.9~"), "A-z_0.9~");
         assert_eq!(percent_encode("<&>\"'"), "%3C%26%3E%22%27");
+    }
+
+    fn summary(active: usize, on: usize, off: usize, stale: usize, dark: usize) -> FleetSummary {
+        FleetSummary {
+            total: active + 1,
+            active,
+            inactive: 1,
+            fresh: active.saturating_sub(stale + dark),
+            stale,
+            dark,
+            never: 0,
+            on,
+            off,
+        }
+    }
+
+    #[test]
+    fn verdict_ranks_silence_over_stale_over_off_and_needs_every_device_on() {
+        let v = verdict(&summary(3, 3, 0, 0, 0));
+        assert_eq!((v.class, v.head.as_str()), ("on", "all 3 on"));
+        assert_eq!(v.detail, "3 on · 1 inactive");
+        assert_eq!(verdict(&summary(1, 1, 0, 0, 0)).head, "on");
+        let v = verdict(&summary(3, 2, 1, 0, 0));
+        assert_eq!((v.class, v.head.as_str()), ("off", "1 off"));
+        let v = verdict(&summary(3, 2, 0, 1, 0));
+        assert_eq!((v.class, v.head.as_str()), ("stale", "1 stale"));
+        let v = verdict(&summary(3, 1, 1, 1, 1));
+        assert_eq!(
+            (v.class, v.head.as_str()),
+            ("dark", "1 dark"),
+            "dark beats everything"
+        );
+        assert_eq!(v.detail, "1 on · 1 off · 1 stale · 1 dark · 1 inactive");
+        // Fresh but no current reading: on is not claimed.
+        let v = verdict(&summary(3, 2, 0, 0, 0));
+        assert_eq!((v.class, v.head.as_str()), ("unknown", "2 on, 1 unknown"));
+        let v = verdict(&summary(2, 0, 0, 0, 0));
+        assert_eq!((v.class, v.head.as_str()), ("unknown", "no readings"));
+        let v = verdict(&FleetSummary {
+            total: 2,
+            inactive: 2,
+            ..FleetSummary::default()
+        });
+        assert_eq!((v.class, v.head.as_str()), ("unknown", "no active devices"));
+        assert_eq!(v.detail, "2 inactive");
+        let v = verdict(&FleetSummary::default());
+        assert_eq!(v.detail, "0 registered");
+    }
+
+    #[test]
+    fn ago_is_coarse_and_never_negative() {
+        let now = 1_783_742_400; // 2026-07-11T04:00:00Z
+        assert_eq!(ago(None, now), "never");
+        assert_eq!(ago(Some("garbage"), now), "never");
+        assert_eq!(ago(Some("2026-07-11T03:59:30+00:00"), now), "just now");
+        assert_eq!(ago(Some("2026-07-11T03:55:00+00:00"), now), "5 min ago");
+        assert_eq!(ago(Some("2026-07-11T01:10:00+00:00"), now), "2 h ago");
+        assert_eq!(ago(Some("2026-07-01T04:00:00+00:00"), now), "10 d ago");
+        assert_eq!(
+            ago(Some("2026-07-11T04:05:00+00:00"), now),
+            "just now",
+            "a clock ahead of ours is not the future"
+        );
     }
 }

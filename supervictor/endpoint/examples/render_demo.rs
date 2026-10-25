@@ -23,7 +23,7 @@ use supervictor_endpoint::ui::{assets, views::LIVE_SCRIPT};
 
 /// "Now" for the seeded history: 2026-07-11T04:00:00Z, just after the
 /// newest canned uplink.
-const DEMO_NOW: u64 = 1_783_828_800;
+const DEMO_NOW: u64 = 1_783_742_400;
 const DEMO_WINDOW: Window = Window::H1;
 
 const DEMO_SUBJECT: &str = "CN=demo-viewer,OU=admin,O=supervictor";
@@ -343,7 +343,7 @@ fn main() {
         },
     ];
 
-    let fleet = views::fleet_page(&rows, DEMO_CSRF, DEMO_SUBJECT).into_string();
+    let fleet = views::fleet_page(&rows, DEMO_CSRF, DEMO_SUBJECT, DEMO_NOW).into_string();
     fs::write(outdir.join("index.html"), staticize(fleet, &ids)).expect("write fleet page");
 
     // History page: an hour of seeded telemetry for the two live devices.
@@ -441,8 +441,15 @@ fn main() {
             threshold_ma: record.effective_threshold_ma(DEFAULT_POWER_THRESHOLD_MA),
             fleet_threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
         };
-        let page = views::device_page(record, &device_history, &uplinks, DEMO_CSRF, DEMO_SUBJECT)
-            .into_string();
+        let page = views::device_page(
+            record,
+            &device_history,
+            &uplinks,
+            DEMO_CSRF,
+            DEMO_SUBJECT,
+            DEMO_NOW,
+        )
+        .into_string();
         fs::write(
             outdir.join(format!("{}.html", record.device_id)),
             staticize(page, &ids),
