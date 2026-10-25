@@ -4684,6 +4684,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "supervictor-mcp"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "httparse",
+ "rustls 0.23.46",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "supervictor-common",
+ "supervictor-endpoint",
+ "tokio",
+ "tokio-rustls 0.26.6",
+]
+
+[[package]]
 name = "svgbobdoc"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
