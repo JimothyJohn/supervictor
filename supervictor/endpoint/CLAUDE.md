@@ -36,6 +36,15 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   (no JS chart lib); the inline script only adds hover/keyboard tooltips
   and a visible-tab reload. Colours by fleet slot (`.s0`–`.s7`), validated
   against the dark surface — don't hand-pick new ones.
+- Live view: `/ui/live` (+ `/ui/live.json` for the polling fallback) shows
+  the last 120 s at *sample* resolution as 8-bit register levels
+  (`supervictor_common::levels`: 1..=255 spans a fixed range per register,
+  0 = absent). `src/live.rs` expands a stored `levels`/`levels_ms` burst
+  into timestamped samples (last sample = receive time) or quantises the
+  scalar fields into one; the SSE event carries `t_ms`, `levels`,
+  `levels_ms`. The page is canvas (10 fps, same `--sN` tokens); the register
+  bank's meters are the accessible readout. `validate::check_levels` gates
+  ingest; `history::METRICS` is the register table.
 - Uplink identity: a device registered with a `subject_dn` is bound to that
   certificate — `POST /` for it must carry a matching mTLS subject or it is
   403'd (`handlers::authorize_uplink`). `REQUIRE_REGISTRATION=true` further

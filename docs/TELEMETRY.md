@@ -78,6 +78,45 @@ Floats must be finite: the device serializer (`serde-json-core`) emits
 non-finite floats as `null`, which the endpoint rejects inside a `[f32; 3]`.
 When real sensor drivers land, clamp/skip NaN before filling these fields.
 
+## Sub-interval burst: 8-bit levels (optional)
+
+A *register* is one charted field — `current`, `temp_c`, `humidity_pct`,
+`rssi_dbm`, `heap_free`, in that order. Each has a fixed full-scale range,
+and a *level* maps that range onto one byte: `1..=255` is the range (254
+steps, 0.39 % of full scale per step, 0.2 % worst rounding error) and `0`
+means "no reading" (a wired board has no RSSI). The table lives once, in
+`supervictor/common/src/levels.rs`, and both the firmware and the endpoint
+quantise/dequantise with it — the edge crate depends on `supervictor-common`
+for exactly this, so the two ends cannot drift.
+
+| Register | `lo` (level 1) | `hi` (level 255) | step |
+|----------|----------------|------------------|------|
+| `current` (mA) | 0 | 6000 | 23.6 mA |
+| `temp_c` | -20 | 60 | 0.31 °C |
+| `humidity_pct` | 0 | 100 | 0.39 %RH |
+| `rssi_dbm` | -100 | -20 | 0.31 dB |
+| `heap_free` (bytes) | 0 | 524288 | 2 KiB |
+
+The point is bytes per datapoint: a keyed float costs ~15 bytes on the
+wire, a level costs one. So a device can sample ten times between uplinks
+and ship the whole burst:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `levels` | u8 array | Flat, 5 bytes per sample, oldest first; the last sample is the uplink instant. Length must be a multiple of 5, at most 600 samples |
+| `levels_ms` | u32 | Milliseconds between consecutive samples; required with `levels`, `1..=3600000` |
+
+The scalar fields keep carrying the latest sample at full precision, so a
+burst-less uplink is unchanged and old firmware needs nothing. The endpoint
+rejects a malformed burst (ragged length, missing or zero spacing, a byte
+over 255) with 422 and stores nothing (`validate::check_levels`). Stored
+bursts feed the live view (`/ui/live`, sample resolution, last 120 s) and
+are folded into the history bucket means. Default firmware cadence:
+`UPLINK_BURST = 10` samples over the 5 s interval → one every 500 ms
+(`supervictor/edge/src/config.rs`); the desktop client takes `BURST=`.
+Changing a register's range re-scales every stored burst — append new
+registers at the end instead, never reorder.
+
 ## Uplink cadence
 
 `interval_s` is the canonical knob: **t seconds between pings**, set per
@@ -98,11 +137,13 @@ a future rollup layer, not the raw ping table — this is the guardrail the
 
 ## Payload budget
 
-Worst case (64-char id, every field at its widest printing) is ~475 bytes.
-The firmware's buffers are sized for it: 512-byte JSON buffer and 1024-byte
+Worst case (64-char id, every field at its widest printing, a full
+12-sample `levels` burst of three-digit bytes) is ~535 bytes. The
+firmware's buffers are sized for it: 640-byte JSON buffer and 768-byte
 request buffer in `supervictor/edge/src/network/http.rs`, guarded by
-`uplink_tests::uplink_worst_case_fits_json_buffer`. Adding a field means
-re-checking that test, not hoping.
+`uplink_tests::full_uplink_with_max_id_fits_the_request_buffers`. Adding a
+field (or growing `LEVELS_SAMPLES_MAX`) means re-checking that test, not
+hoping.
 
 ## Sensor candidates for the placeholders
 

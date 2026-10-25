@@ -52,6 +52,10 @@ name = "tls_dns_dhcp_wifi"
 required-features = ["embedded"]
 
 [dependencies]
+# Shared wire contract: the 8-bit register table (`levels`) must be the
+# same bytes on both ends, so it lives in one crate. no_std, zero deps
+# without its `alloc` feature.
+supervictor-common = { path = "../common", default-features = false }
 embassy-net = { version = "0.9.1", features = [
   "dhcpv4",
   "medium-ethernet",

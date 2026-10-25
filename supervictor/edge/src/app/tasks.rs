@@ -166,7 +166,13 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, seed: u64) {
                 heap_free: Some(esp_alloc::HEAP.free().min(u32::MAX as usize) as u32),
                 rssi_dbm: None,
             };
-            let uplink = sim.uplink(device_id.clone(), uptime_s, interval_s, hardware);
+            let uplink = sim.uplink(
+                device_id.clone(),
+                uptime_s,
+                interval_s,
+                UPLINK_BURST,
+                hardware,
+            );
             let request = match post_request(HOST, &uplink, None) {
                 Ok(r) => r,
                 Err(e) => {

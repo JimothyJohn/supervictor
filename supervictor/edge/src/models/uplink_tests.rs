@@ -258,6 +258,7 @@ fn lambda_response_empty_fields() {
 // ── Optional telemetry fields (wire contract, docs/TELEMETRY.md) ─────
 
 use crate::models::sim::{seed_from, Hardware, Simulator};
+use crate::models::uplink::LEVELS_CAP;
 
 /// Field names are the contract with `supervictor_common::fields`; a typo
 /// here would silently drop a column on the endpoint.
@@ -283,7 +284,7 @@ fn minimal_uplink_omits_every_optional_field() {
 #[test]
 fn full_uplink_serializes_every_field_by_its_wire_name() {
     let mut sim = Simulator::new(seed_from("dev-1", 0));
-    let msg = sim.uplink("dev-1".try_into().unwrap(), 42, 5, Hardware::default());
+    let msg = sim.uplink("dev-1".try_into().unwrap(), 42, 5, 1, Hardware::default());
     let json: HString<256> = serde_json_core::to_string(&msg).unwrap();
     for key in OPTIONAL_KEYS {
         let mut quoted = HString::<32>::new();
@@ -299,16 +300,19 @@ fn full_uplink_serializes_every_field_by_its_wire_name() {
 #[test]
 fn full_uplink_round_trips_through_serde_json_core() {
     let mut sim = Simulator::new(seed_from("dev-1", 1));
-    let msg = sim.uplink("dev-1".try_into().unwrap(), 7, 5, Hardware::default());
-    let json: HString<256> = serde_json_core::to_string(&msg).unwrap();
+    let msg = sim.uplink("dev-1".try_into().unwrap(), 7, 5, 10, Hardware::default());
+    let json: HString<640> = serde_json_core::to_string(&msg).unwrap();
+    assert!(json.contains("\"levels\":["), "{json}");
+    assert!(json.contains("\"levels_ms\":500"), "{json}");
     let (back, _): (UplinkMessage, _) = serde_json_core::from_str(json.as_str()).unwrap();
     assert_eq!(back, msg);
 }
 
-/// The worst case — a 64-byte id, extreme values in every field — must fit
-/// the `post_request` JSON buffer (384) and the request buffer (512), or
-/// the firmware would silently stop uplinking after a rename. (It is 260
-/// bytes; the old 256 buffer was one field short.)
+/// The worst case — a 64-byte id, extreme values in every field, a full
+/// levels burst of three-digit bytes — must fit the `post_request` JSON
+/// buffer (640) and the request buffer (768), or the firmware would
+/// silently stop uplinking after a rename. (It is ~535 bytes; the
+/// pre-burst worst case was 260.)
 #[test]
 fn full_uplink_with_max_id_fits_the_request_buffers() {
     let id: HString<64> = core::iter::repeat_n('x', 64).collect();
@@ -321,10 +325,12 @@ fn full_uplink_with_max_id_fits_the_request_buffers() {
     msg.rssi_dbm = Some(i8::MIN);
     msg.temp_c = Some(-99.999_99);
     msg.humidity_pct = Some(100.000_01);
-    let json: HString<384> = serde_json_core::to_string(&msg).expect("fits 384");
-    assert!(json.len() <= 384, "{} bytes", json.len());
+    msg.levels = core::iter::repeat_n(255u8, LEVELS_CAP).collect();
+    msg.levels_ms = Some(u32::MAX);
+    let json: HString<640> = serde_json_core::to_string(&msg).expect("fits 640");
+    assert!(json.len() <= 640, "{} bytes", json.len());
     let request = crate::network::http::post_request("staging.supervictor.advin.io", &msg, None)
-        .expect("fits 512");
+        .expect("fits 768");
     assert!(request.ends_with(json.as_str()));
 }
 

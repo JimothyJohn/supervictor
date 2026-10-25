@@ -46,13 +46,17 @@ pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Timeout for reading an HTTP response from the server.
 pub const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Heapless buffer capacity for outgoing HTTP requests.
-pub const HTTP_REQUEST_BUFFER_CAPACITY: usize = 512;
+pub const HTTP_REQUEST_BUFFER_CAPACITY: usize = 768;
 /// Heapless buffer capacity for incoming HTTP responses.
 pub const HTTP_RESPONSE_BUFFER_CAPACITY: usize = 1024;
 
 // --- Application Logic ---
 /// Delay between iterations of the main uplink loop on success.
 pub const MAIN_LOOP_DELAY: Duration = Duration::from_millis(5000);
+/// Samples per uplink interval, shipped as an 8-bit `levels` burst (one
+/// byte per register per sample; `models::uplink::LEVELS_SAMPLES_MAX`
+/// caps it). 10 over a 5 s interval = a sample every 500 ms.
+pub const UPLINK_BURST: usize = 10;
 /// Initial backoff delay after a transient failure (DNS, TCP, TLS, HTTP).
 pub const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
 /// Maximum backoff delay — caps exponential growth.

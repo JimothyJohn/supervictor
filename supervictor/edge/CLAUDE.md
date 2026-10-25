@@ -17,6 +17,10 @@ this automatically). CERT_PATH is repo-root-relative.
 - Use `heapless::String<N>` (aliased as `HString<N>`) for strings
 - Use `serde-json-core` for JSON serialization (not `serde_json`)
 - Buffer sizes and capacities are defined in `src/config.rs` — check before changing message formats
+- The wire twin `models/uplink.rs` carries an optional `levels` burst: `UPLINK_BURST`
+  samples per interval, one byte per register, quantised with `supervictor_common::levels`
+  (the one shared dependency). `uplink_tests::full_uplink_with_max_id_fits_the_request_buffers`
+  pins the JSON (640) / request (768) buffers in `network/http.rs`.
 
 ## Key Patterns
 - **Async runtime**: Embassy — use `embassy_time::Timer`, never `std::thread::sleep`
