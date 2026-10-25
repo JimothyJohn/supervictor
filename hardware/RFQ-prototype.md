@@ -1,0 +1,215 @@
+# RFQ — Supervictor telemetry node, prototype design and build
+
+Request for quotation. Send this file plus the attachments listed in
+section 10 to a design/build vendor; it is written so the vendor can quote
+without a discovery call. Companion: `HARDWARE.md` (the dev kit this board
+productises) and `hardware/SOURCING.md` (vendor shortlist, budget and
+schedule). Issued 2026-10-25.
+
+## 1. Who we are and what we want
+
+Supervictor is a Rust firmware + endpoint stack that puts a small PoE-powered
+node on a factory machine and reports its supply current (one-leg clamp),
+temperature and humidity over mTLS every few seconds. The working dev kit is
+an Olimex ESP32-POE-ISO with a DFRobot SEN0211 clamp module on jumper wires.
+We want that turned into a board we can order in tens, then hundreds, with
+the same firmware and pin map.
+
+Two scopes are quoted separately; we may order either or both.
+
+| Scope | What it is | Qty for this RFQ |
+|-------|------------|------------------|
+| **B — Sensor hat (SV-HAT-A)** | A 2-layer daughterboard that plugs onto the Olimex ESP32-POE-ISO EXT1/EXT2 headers and carries the clamp conditioning chain, a 3.5 mm jack and an SHT41. No RF, no PoE, no MCU. **Design package supplied:** `hardware/hat/` (schematic, netlist, BOM with MPNs, placement, outline, test procedure); you do the layout, DFM and build. | 5 assembled, option for 25 |
+| **C — Integrated node** | One board: ESP32-WROOM-32E, 100 Mb Ethernet PHY, 802.3af isolated PoE PD, USB-UART for flashing, the clamp chain, the SHT40. Derived from the Olimex ESP32-POE-ISO open-hardware design (section 6). | 10 assembled, option for 25 |
+
+Both scopes: **design (schematic, layout, DFM) and build (fab, turnkey
+parts, assembly, basic test)**. If you only build, quote the build line and
+say so; we will source the design elsewhere.
+
+## 2. Fixed interface: the pin map the firmware already uses
+
+The firmware is pinned to these ESP32 GPIOs. They are not negotiable because
+they are the Olimex assignments our board-support code is verified on.
+
+| Function | ESP32 GPIO | Note |
+|----------|-----------|------|
+| Clamp signal (ADC) | **32** (ADC1_CH4) | 0–2.45 V DC, source is an op-amp output through 100 nF to GND at the pin |
+| I²C SDA | **13** | 2.2 kΩ pull-up to 3.3 V |
+| I²C SCL | **16** | 2.2 kΩ pull-up to 3.3 V (Scope C; Scope B inherits it from the Olimex board) |
+| RMII clock out | 17 | Scope C only; EMAC_CLK_OUT_180 to the PHY |
+| PHY power enable | 12 | Scope C only |
+| MDC / MDIO | 23 / 18 | Scope C only |
+| RMII TXD0, TX_EN, TXD1, RXD0, RXD1, CRS_DV | 19, 21, 22, 25, 26, 27 | Scope C only |
+| UART0 TX / RX | 1 / 3 | USB-UART bridge (Scope C) |
+| User button | 34 (input-only) | 10 kΩ pull-up |
+| Boot strap pins | 0, 2, 5, 12, 15 | Keep the Olimex strapping; no sensor on these |
+
+Scope B physical interface: two 10-pin 2.54 mm female headers on 1.000"
+(25.4 mm) centres mating with the ESP32-POE-ISO EXT1/EXT2 male headers.
+Signals used from them: EXT1 pin 2 (+3.3 V), pin 3 (GND); EXT2 pin 6
+(GPIO32), pin 7 (GPIO16, SCL), pin 10 (GPIO13, SDA). All other header pins
+are no-connect on the hat (do not short, do not pull).
+
+## 3. Clamp conditioning chain (both scopes)
+
+Reproduce the DFRobot SEN0211 module circuit (schematic V1.0, 2016-03-21,
+published on the DFRobot wiki; PDF attached). Function: a 3.5 mm 3-pole jack
+(PJ-342) takes 0–1 V AC RMS from the clamp probe; a 3.0 V LDO (RT9193-30)
+feeds an LMV321 non-inverting amplifier with 2× gain (47 kΩ / 47 kΩ), a
+1N5819W peak detector into 10 µF with a 1 MΩ bleed, output 0.2–2.8 V DC to
+the ADC. Approximately 15 components, all 0603/SOT-23 class.
+
+Acceptable substitutions: any 3.0 V 150 mA LDO in SOT-23-5, any rail-to-rail
+single op-amp with ≥1 MHz GBW (LMV321/TLV9001 class), any 1 A Schottky in
+SOD-123. Keep the 10 µF / 1 MΩ time constant: the firmware's power-off
+detection latency is sized to it. Add 100 nF from the ADC node to GND at
+the ESP32 side.
+
+Alternative accepted for Scope B only: a 3-pin PH2.0 header (DFRobot
+Gravity pinout: GND, VCC, signal) to mount the SEN0211 module unchanged.
+Quote both if easy.
+
+## 4. Temperature / humidity (both scopes)
+
+Sensirion SHT41-AD1B-R2 (I²C address 0x44; SHT40/SHT45 are drop-in), 3.3 V, with the manufacturer's
+recommended decoupling, placed at a board edge away from the LDO and the
+ESP32 with a thermal slot or at minimum 10 mm of copper-free clearance.
+Optional: a JST SH 4-pin STEMMA QT / Qwiic connector on the same bus for
+future sensors (IMU).
+
+## 5. Scope C electrical specification
+
+- **MCU module:** ESP32-WROOM-32E-N4 (4 MB) default; footprint-compatible
+  ESP32-WROOM-32UE with U.FL for the external-antenna variant. Module FCC/CE
+  modular approvals are relied on; keep the module's antenna keep-out.
+- **Ethernet:** 10/100, RMII, LAN8710A or LAN8720A (same register map and
+  PHY ID family 0x0007C0Fx; our driver supports both), PHY address 0, PHY
+  power gated by GPIO12, 50 MHz RMII clock generated by the ESP32 on GPIO17.
+  RJ45 with integrated magnetics rated for PoE (pairs 1-2/3-6 and 4-5/7-8
+  carry power).
+- **PoE:** IEEE 802.3af powered device, class 0 or class 3, isolated flyback
+  to 5 V, **≥1500 VRMS isolation** (Olimex uses 3000 VDC; match it), Si3402-B
+  or TPS2375-class PD controller, legacy/pre-standard detection welcome but
+  not required. Accept 37–57 V on the pairs. Board budget: ESP32 + PHY
+  peak ~2.5 W plus 0.5 W for sensors.
+- **Rails:** 5 V from the PoE converter, 3.3 V at ≥1 A for ESP32 + PHY,
+  3.0 V for the clamp chain (from the chain's own LDO).
+- **USB:** USB-C or micro-B to a CH340-class USB-UART with auto-reset /
+  auto-boot (DTR/RTS) so `espflash` works without buttons. USB 5 V may power
+  the board for bench work; USB and PoE simultaneously must be safe (the
+  isolation barrier makes it so on the Olimex design; keep that property).
+- **Buttons / LEDs:** reset, user (GPIO34), power LED, Ethernet link/activity
+  on the jack.
+- **Connectors:** RJ45, USB, 3.5 mm jack, optional STEMMA QT. No LiPo, no
+  microSD, no UEXT.
+- **Environment:** indoor industrial, 0–50 °C operating, non-condensing;
+  the clamp probe is the only thing near mains and it is galvanically
+  isolated by construction.
+- **Mechanical:** target the Olimex ESP32-POE-ISO outline (98 × 28 mm) and
+  hole pattern so the published 3D-printed case still fits, or propose a
+  DIN-rail-friendly outline; either is acceptable, say which you quote.
+- **Layer count:** your call from the reference; we expect 4.
+
+## 6. Reference design and licence (Scope C)
+
+The Olimex ESP32-POE-ISO is open hardware under **CERN OHL v1.2**; KiCad
+sources, schematic PDF, Gerbers and 3D models for every revision B through
+O are at `github.com/OLIMEX/ESP32-POE-ISO/HARDWARE`. Start from Rev O.
+Expected edits: delete UEXT, microSD, LiPo charger and battery connector;
+add the clamp chain, the jack and the SHT40; keep everything else.
+
+Licence consequences you must be able to live with: the modified design
+documentation will be published by us under CERN OHL v1.2 with attribution
+to Olimex, so your deliverable is KiCad source we can release, not just
+Gerbers. Confirm in your quote that this is acceptable.
+
+## 7. Deliverables
+
+1. Schematic and layout review packages at two gates (schematic freeze,
+   pre-release layout), each with a DFM report. We respond within 2
+   business days.
+2. KiCad 8+ project (source), schematic PDF, Gerbers/ODB++, drill, pick and
+   place, assembly drawings, 3D STEP.
+3. BOM with manufacturer part numbers, approved alternates, and DigiKey/
+   Mouser part numbers. Turnkey parts sourcing by you; we do not consign.
+4. Assembled, inspected boards: Scope B 5 (option 25), Scope C 10 (option
+   25). Lead-free, no conformal coat.
+5. Test report per board (section 8), serial numbers on a label.
+6. One unassembled bare board per scope for reference.
+
+## 8. Acceptance tests (we supply the firmware image)
+
+| # | Test | Pass |
+|---|------|------|
+| 1 | Visual / AOI | No defects; polarity of Schottky diodes and SHT40 verified |
+| 2 | Power-on current | Scope C on 5 V USB: < 300 mA idle after boot; no rail out of ±5 % |
+| 3 | PoE (Scope C) | Negotiates class on a TP-Link LS108GP, boots, 100 Mb full-duplex link LED |
+| 4 | Flash | `espflash` over USB succeeds on the first try with the supplied image |
+| 5 | Network | DHCP lease, then one HTTPS uplink to our staging endpoint with the per-board test certificate we supply (mTLS); HTTP 200 |
+| 6 | Clamp chain | 0.300 V RMS 60 Hz sine into the jack → firmware reports 5.5–6.5 A; no input → 0 A; 1.000 V RMS → ≥ 17 A (ADC saturation is expected above that) |
+| 7 | SHT40 | I²C ACK at 0x44 and a plausible reading (15–35 °C, 10–90 %RH) in the uplink |
+| 8 | Soak (2 units of 10) | 24 h on PoE: sequence numbers contiguous, free-heap flat, no watchdog reboot |
+
+We provide: firmware image per scope, a staging endpoint and device
+certificates, a 3.5 mm test lead and signal generator settings. Test 6 can
+be done with a function generator; no clamp needed.
+
+## 9. Commercial
+
+- Quote NRE (design, DFM, test development) separate from per-unit build
+  cost at 5/10/25, with tooling (stencil, fixtures) itemised.
+- State lead time from PO to schematic freeze, to layout release, to boards
+  shipped.
+- State whether design is in-house or a named partner; we want one
+  contract.
+- IP: we own the Scope B design outright; Scope C is CERN OHL v1.2 as
+  above. No exclusivity either way.
+- Payment terms: propose; 50/50 NRE is fine. Net 30 on builds.
+- Location: United States; shipping to a US address.
+
+## 10. Attachments
+
+- `HARDWARE.md` (dev kit spec: pin budget, wiring, ADC analysis).
+- `hardware/hat/` (Scope B design package: `DESIGN.md`, `schematic.svg`, `netlist.csv`, `bom.csv`, `placement.csv`, `outline.svg`).
+- `docs/TELEMETRY.md` (what the device reports; context only).
+- Olimex ESP32-POE-ISO Rev O schematic PDF and KiCad project (from the Olimex
+  GitHub, link above; include the files so the vendor is not asked to go
+  looking).
+- Olimex `ESP32-POE-ISO-PINOUT.png`.
+- DFRobot `SEN0211_ac-current-sensor_schematics_1.0.pdf` and layout PDF.
+- SHT40 datasheet (Sensirion); ESP32-WROOM-32E datasheet (Espressif);
+  LAN8710A datasheet (Microchip).
+- Test firmware images and certificates: supplied at PO.
+
+## 11. Questions we need answered in the quote
+
+1. Have you built an 802.3af PD with an isolated converter before? Name a
+   comparable board (NDA-safe description is fine).
+2. KiCad in-house, or will you convert to Altium? (We need KiCad back.)
+3. Will you accept starting from a CERN-OHL design and returning source?
+4. Who does firmware bring-up on your side, if anyone? (We expect none.)
+5. What is your quick-turn path for a respin of 5 boards after first
+   article?
+6. Any part on the reference BOM you consider at risk (EOL, allocation)?
+   The Si3402-B and the CH340T are the two we would ask about.
+
+## 12. Cover email (copy, edit the bracketed parts)
+
+> Subject: RFQ — PoE IoT sensor node, design + 10 prototypes (KiCad, ESP32, 802.3af)
+>
+> Hi [name],
+>
+> We are looking for a US shop to design and build prototypes of a small
+> PoE-powered ESP32 sensor node. The attached RFQ has the full
+> specification, a fixed pin map, the open-hardware reference design we
+> want to derive from (Olimex ESP32-POE-ISO, CERN OHL 1.2), acceptance
+> tests, and quantities (10 assembled, option 25; plus a separate 2-layer
+> sensor hat at 5). Firmware is ours and already runs on the reference
+> board, so no firmware work is expected from you.
+>
+> Could you quote NRE and per-unit separately, with lead times, and answer
+> the six questions in section 11? If a 30-minute call helps, I am
+> available [days/times, timezone].
+>
+> Thanks,
+> [Nick, company, phone]

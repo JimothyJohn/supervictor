@@ -1,0 +1,15 @@
+ref,qty,value,description,package,mpn,manufacturer,alternate,source_note
+J1 J2,2,1x10 female 2.54 mm,board-to-board socket mating POE-ISO EXT1/EXT2,TH 1x10,PPTC101LFBN-RC,Sullins,Samtec SSW-110-01-T-S or any 1x10 2.54 mm socket 8.5 mm height,stock conflicts between distributors on 2026-10-25; the alternate is interchangeable
+J3,1,3.5 mm TRS jack,right-angle through-hole 3-conductor audio jack for the SEN0211 probe plug,TH right angle,SJ1-3523N,Same Sky (formerly CUI Devices),PJ-342 class / SJ-3523-SMT-TR (SMT variant),DigiKey listing seen 2026-10-25; confirm sleeve/tip pin numbering from the drawing
+J4,1,STEMMA QT / Qwiic,JST SH 4-pin 1.0 mm right-angle SMT header,SMT side entry,SM04B-SRSS-TB(LF)(SN),JST,none (keep JST for the lock),right-angle part confirmed 2026-10-25; BM04B is the vertical variant
+U1,1,3.0 V LDO 250 mA,MCP1700 fixed 3.0 V (DFRobot used RT9193-30),SOT-23-3,MCP1700T-3002E/TT,Microchip,Richtek RT9193-30GB (SOT-23-5; different footprint),2.3-6 V in; 178 mV dropout; stable with 1 uF ceramic
+IC1,1,rail-to-rail op-amp,single op-amp 1 MHz GBW 2.7-5.5 V,SOT-23-5 (DBV),LMV321IDBVR,Texas Instruments,TLV9001IDBVR (same pinout),DBV pinout verified from TI SLOS263Y: 1 IN+ 2 GND 3 IN- 4 OUT 5 V+
+U2,1,SHT41,temperature + humidity I2C 0x44,DFN-4 1.5x1.5 mm,SHT41-AD1B-R2,Sensirion,SHT40-AD1B-R2 (looser spec) / SHT45-AD1B-R2 (tighter),not SHT41A (reduced RH range)
+D1 D2,2,1N5819 Schottky,40 V 1 A Schottky,SOD-123,1N5819HW-7-F,Diodes Inc,any 1 A 40 V Schottky in SOD-123 (e.g. B5819W),DFRobot reference uses 1N5819W
+R1 R2 R3,3,47k 1%,thick film,0603,,vendor choice,,
+R4,1,1M 1%,thick film,0603,,vendor choice,,bleed; sets the 10 s hold
+R5,1,1k 1%,thick film,0603,,vendor choice,,series into GPIO32
+C1 C3,2,4.7uF 10V X5R,MLCC,0603,,vendor choice,,LDO in/out
+C2 C4 C6 C8 C9,5,100nF 16V X7R,MLCC,0603,,vendor choice,,
+C7,1,10uF 10V X5R,MLCC peak-hold,0805,,vendor choice,0603 if the shop prefers,with R4 sets tau = 10 s
+TP1 TP2 TP3,3,test point,bare 1.5 mm pad,-,,none,,no part

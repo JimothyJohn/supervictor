@@ -7,7 +7,11 @@ that order. Performance and novelty are explicitly not goals.
 
 Companion documents: `docs/TELEMETRY.md` (wire schema and register ranges),
 `TESTRIG.md` (which board is on which port, gitignored), `TODO.md` P2 (the
-firmware items this kit unblocks). Written 2026-10-25 against `dev` b80f32d.
+firmware items this kit unblocks), `hardware/SOURCING.md` (where to buy
+each part, US design/build shops, budget and schedule per step),
+`hardware/bom-devkit.csv` (cart-ready BOM) and
+`hardware/RFQ-prototype.md` (the package a design/build vendor needs).
+Written 2026-10-25 against `dev` b80f32d.
 
 ## 1. The kit in one paragraph
 
@@ -195,7 +199,11 @@ does not need it). No LiPo. No microSD.
 ### 6.1 Clamp signal chain
 
 - Probe: 0–20 A RMS → 0–1 V AC, ±1 %, 50 Hz–1 kHz, 13 × 13 mm window.
-- Module: 0–1 V AC in → 0.2–2.8 V DC out, ±4 %, 3.3–5.5 V supply.
+- Module: 0–1 V AC in → 0.2–2.8 V DC out, ±4 %, 3.3–5.5 V supply. Inside
+  (DFRobot schematic V1.0): a 3.0 V LDO (RT9193-30), an LMV321 at 2× gain,
+  a 1N5819W peak detector into **10 µF with a 1 MΩ bleed**. That RC is a
+  10 s time constant: when the load switches off the output decays, it does
+  not drop. Expect ~30 s (3τ) before a reading falls below the floor.
 - DFRobot's reference conversion (the one in `uplink/lib/uplink/src/uplink.h`),
   rewritten in millivolts and milliamps:
 
@@ -297,8 +305,9 @@ Each step has a pass criterion; do not skip ahead on a fail.
 3. **Known resistive load.** Clamp one conductor of a heater/kettle of
    known wattage via the splitter. Pass: reading within ±10 % of P/V before
    calibration; set `CURRENT_GAIN_PPM` so it lands within ±3 %.
-4. **Zero-return.** Switch the load off. Pass: `current` returns to 0 mA
-   within two uplinks and the power badge flips (threshold per section 11).
+4. **Zero-return.** Switch the load off. Pass: `current` decays below the
+   floor within ~30 s (the module's 10 s peak-hold, section 6.1) and the
+   power badge flips (threshold per section 11).
 5. **Inductive load.** A motor (shop vac, drill press). Pass: steady-state
    value plausible against the nameplate; inrush visible in the levels
    burst and the register pins at 255 rather than wrapping.

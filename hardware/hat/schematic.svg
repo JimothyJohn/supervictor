@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" width="1000" height="560" font-family="IBM Plex Mono, monospace" font-size="11" fill="#e4e4e7">
+  <title>SV-HAT-A schematic — clamp conditioning chain, SHT41, STEMMA QT, EXT headers</title>
+  <rect width="1000" height="560" fill="#0e0e10"/>
+  <defs>
+    <marker id="dot" viewBox="0 0 4 4" refX="2" refY="2" markerWidth="4" markerHeight="4"><circle cx="2" cy="2" r="2" fill="#e4e4e7"/></marker>
+  </defs>
+  <style>
+    .w{stroke:#e4e4e7;stroke-width:1.4;fill:none}
+    .p{stroke:#fbbf24;stroke-width:1.4;fill:none}
+    .g{stroke:#8b8b93;stroke-width:1.2;fill:none}
+    .box{fill:#18181b;stroke:#3f3f46;stroke-width:1}
+    .lbl{fill:#8b8b93;font-size:10px}
+    .net{fill:#f97316;font-size:10px}
+    .t{font-size:12px;font-weight:600}
+  </style>
+  <text x="20" y="24" class="t" font-size="14">SV-HAT-A  rev A  —  sensor hat for Olimex ESP32-POE-ISO</text>
+  <text x="20" y="40" class="lbl">Conditioning chain per DFRobot SEN0211 V1.0 (3.0 V LDO, 2x non-inverting, Schottky peak detector, 10 s hold) + 1k/100n at the ESP32 pin. Pull-ups for SDA/SCL are on the host board.</text>
+
+  <!-- ===== Power: J1 +3V3 -> U1 -> +3V0 ===== -->
+  <g transform="translate(20,70)">
+    <rect x="0" y="0" width="120" height="110" class="box"/>
+    <text x="8" y="16" class="t">J1  EXT1 1x10</text>
+    <text x="8" y="34" class="lbl">1  +5V        NC</text>
+    <text x="8" y="50">2  +3.3V</text>
+    <text x="8" y="66">3  GND</text>
+    <text x="8" y="82" class="lbl">4  ESP_EN     NC</text>
+    <text x="8" y="98" class="lbl">5-10 GPIO0..5 NC</text>
+    <line x1="120" y1="46" x2="160" y2="46" class="p"/>
+    <line x1="120" y1="62" x2="160" y2="62" class="g"/>
+  </g>
+  <text x="185" y="110" class="net">+3V3</text>
+  <!-- C1 C2 to GND -->
+  <g class="p"><line x1="180" y1="116" x2="300" y2="116"/></g>
+  <g class="w"><line x1="205" y1="116" x2="205" y2="132"/><line x1="198" y1="132" x2="212" y2="132"/><line x1="198" y1="137" x2="212" y2="137"/><line x1="205" y1="137" x2="205" y2="150"/>
+    <line x1="260" y1="116" x2="260" y2="132"/><line x1="253" y1="132" x2="267" y2="132"/><line x1="253" y1="137" x2="267" y2="137"/><line x1="260" y1="137" x2="260" y2="150"/></g>
+  <text x="186" y="162" class="lbl">C1 4.7u</text><text x="244" y="162" class="lbl">C2 100n</text>
+  <!-- U1 -->
+  <rect x="300" y="98" width="90" height="40" class="box"/>
+  <text x="306" y="114" class="t">U1 MCP1700</text><text x="306" y="130" class="lbl">2 IN  3 OUT  1 GND</text>
+  <line x1="345" y1="138" x2="345" y2="150" class="g"/>
+  <g class="p"><line x1="390" y1="116" x2="520" y2="116"/></g>
+  <text x="470" y="110" class="net">+3V0</text>
+  <g class="w"><line x1="415" y1="116" x2="415" y2="132"/><line x1="408" y1="132" x2="422" y2="132"/><line x1="408" y1="137" x2="422" y2="137"/><line x1="415" y1="137" x2="415" y2="150"/>
+    <line x1="470" y1="116" x2="470" y2="132"/><line x1="463" y1="132" x2="477" y2="132"/><line x1="463" y1="137" x2="477" y2="137"/><line x1="470" y1="137" x2="470" y2="150"/></g>
+  <text x="396" y="162" class="lbl">C3 4.7u</text><text x="454" y="162" class="lbl">C4 100n</text>
+  <text x="528" y="120" class="lbl">→ IC1 pin 5 (V+), C6 100n</text>
+  <!-- ground rail symbol -->
+  <g class="g"><line x1="160" y1="150" x2="520" y2="150"/><line x1="340" y1="150" x2="340" y2="158"/><line x1="332" y1="158" x2="348" y2="158"/><line x1="335" y1="162" x2="345" y2="162"/><line x1="338" y1="166" x2="342" y2="166"/></g>
+  <text x="352" y="166" class="net">GND</text>
+
+  <!-- ===== Analog chain ===== -->
+  <!-- J3 jack -->
+  <g transform="translate(20,230)">
+    <rect x="0" y="0" width="120" height="74" class="box"/>
+    <text x="8" y="16" class="t">J3  3.5 mm TRS</text>
+    <text x="8" y="34">2  tip   = signal</text>
+    <text x="8" y="50">1  sleeve = GND</text>
+    <text x="8" y="66" class="lbl">3  ring   NC</text>
+    <line x1="120" y1="30" x2="160" y2="30" class="w"/>
+    <line x1="120" y1="46" x2="140" y2="46" class="g"/><line x1="140" y1="46" x2="140" y2="80" class="g"/>
+  </g>
+  <text x="165" y="254" class="net">AC_IN</text>
+  <!-- AC_IN node -->
+  <g class="w"><line x1="180" y1="260" x2="300" y2="260"/></g>
+  <!-- R3 to GND -->
+  <g class="w"><line x1="200" y1="260" x2="200" y2="276"/><rect x="194" y="276" width="12" height="26" fill="none"/><line x1="200" y1="302" x2="200" y2="312"/></g>
+  <text x="180" y="328" class="lbl">R3 47k</text>
+  <!-- D2 clamp: cathode at AC_IN, anode GND -->
+  <g class="w"><line x1="250" y1="260" x2="250" y2="276"/><polygon points="243,300 257,300 250,284" fill="none"/><line x1="243" y1="284" x2="257" y2="284"/><line x1="250" y1="300" x2="250" y2="312"/></g>
+  <text x="228" y="328" class="lbl">D2 1N5819 clamp</text>
+  <g class="g"><line x1="160" y1="312" x2="300" y2="312"/><line x1="290" y1="312" x2="290" y2="320"/><line x1="282" y1="320" x2="298" y2="320"/></g>
+  <!-- TP3 -->
+  <circle cx="290" cy="260" r="3" fill="#22c55e"/><text x="284" y="250" class="lbl" fill="#22c55e">TP3</text>
+  <!-- IC1 op-amp triangle -->
+  <g class="w"><polygon points="330,235 330,295 400,265" fill="#18181b"/></g>
+  <text x="338" y="252" class="lbl">+ 1</text><text x="338" y="284" class="lbl">− 3</text>
+  <text x="332" y="226" class="t">IC1 LMV321</text><text x="420" y="226" class="lbl">pin 5 V+ = +3V0 · pin 2 GND</text>
+  <line x1="300" y1="260" x2="330" y2="250" class="w"/>
+  <!-- feedback: OUT -> R1 -> IN-, R2 IN- -> GND -->
+  <g class="w"><line x1="400" y1="265" x2="440" y2="265"/><line x1="420" y1="265" x2="420" y2="330"/><line x1="420" y1="330" x2="340" y2="330"/><rect x="372" y="324" width="26" height="12" fill="none"/><line x1="340" y1="330" x2="310" y2="330"/><line x1="310" y1="330" x2="310" y2="280"/><line x1="310" y1="280" x2="330" y2="280"/>
+    <line x1="310" y1="330" x2="310" y2="352"/><rect x="304" y="352" width="12" height="24" fill="none"/><line x1="310" y1="376" x2="310" y2="386"/></g>
+  <text x="372" y="350" class="lbl">R1 47k</text><text x="322" y="372" class="lbl">R2 47k</text>
+  <g class="g"><line x1="300" y1="386" x2="320" y2="386"/><line x1="304" y1="390" x2="316" y2="390"/></g>
+  <text x="404" y="258" class="net">AMP_OUT</text>
+  <!-- D1 peak detector -->
+  <g class="w"><line x1="440" y1="265" x2="470" y2="265"/><polygon points="470,258 470,272 486,265" fill="none"/><line x1="486" y1="258" x2="486" y2="272"/><line x1="486" y1="265" x2="560" y2="265"/></g>
+  <text x="458" y="250" class="lbl">D1 1N5819</text>
+  <text x="520" y="258" class="net">ADC_RAW</text>
+  <!-- C7 and R4 to GND -->
+  <g class="w"><line x1="520" y1="265" x2="520" y2="290"/><line x1="512" y1="290" x2="528" y2="290"/><line x1="512" y1="296" x2="528" y2="296"/><line x1="520" y1="296" x2="520" y2="320"/>
+    <line x1="550" y1="265" x2="550" y2="282"/><rect x="544" y="282" width="12" height="26" fill="none"/><line x1="550" y1="308" x2="550" y2="320"/></g>
+  <text x="496" y="334" class="lbl">C7 10u</text><text x="556" y="300" class="lbl">R4 1M</text>
+  <g class="g"><line x1="505" y1="320" x2="565" y2="320"/><line x1="527" y1="324" x2="543" y2="324"/></g>
+  <!-- R5 series, C8 -->
+  <g class="w"><line x1="560" y1="265" x2="590" y2="265"/><rect x="590" y="259" width="26" height="12" fill="none"/><line x1="616" y1="265" x2="700" y2="265"/>
+    <line x1="660" y1="265" x2="660" y2="290"/><line x1="652" y1="290" x2="668" y2="290"/><line x1="652" y1="296" x2="668" y2="296"/><line x1="660" y1="296" x2="660" y2="312"/></g>
+  <text x="588" y="252" class="lbl">R5 1k</text><text x="640" y="326" class="lbl">C8 100n</text>
+  <g class="g"><line x1="650" y1="312" x2="670" y2="312"/><line x1="654" y1="316" x2="666" y2="316"/></g>
+  <text x="622" y="258" class="net">ADC_OUT</text>
+  <circle cx="690" cy="265" r="3" fill="#22c55e"/><text x="684" y="254" class="lbl" fill="#22c55e">TP1</text>
+
+  <!-- ===== J2 header ===== -->
+  <g transform="translate(760,180)">
+    <rect x="0" y="0" width="220" height="190" class="box"/>
+    <text x="8" y="16" class="t">J2  EXT2 1x10</text>
+    <text x="8" y="34" class="lbl">1  GPI39   NC    2  GPI36  NC</text>
+    <text x="8" y="50" class="lbl">3  GPI35   NC    4  GPI34  NC</text>
+    <text x="8" y="66" class="lbl">5  GPIO33  NC (POE2: SCL)</text>
+    <text x="8" y="85">6  GPIO32  ADC1_CH4 ← ADC_OUT</text>
+    <text x="8" y="104">7  GPIO16  SCL (host pull-up)</text>
+    <text x="8" y="120" class="lbl">8  GPIO15  NC    9  GPIO14  NC</text>
+    <text x="8" y="139">10 GPIO13  SDA (host pull-up)</text>
+    <text x="8" y="170" class="lbl">ESP32 reads 11 dB: 150–2450 mV linear</text>
+  </g>
+  <line x1="700" y1="265" x2="760" y2="265" class="w"/>
+
+  <!-- ===== I2C: U2 SHT41 + J4 ===== -->
+  <g transform="translate(20,420)">
+    <rect x="0" y="0" width="150" height="90" class="box"/>
+    <text x="8" y="16" class="t">U2 SHT41-AD1B</text>
+    <text x="8" y="34">2 VDD  ← +3V3  (C9 100n)</text>
+    <text x="8" y="50">3 VSS  → GND</text>
+    <text x="8" y="66">1 SDA</text>
+    <text x="8" y="82">4 SCL</text>
+    <text x="8" y="-6" class="lbl">I²C 0x44, 3.3 V bus</text>
+  </g>
+  <g transform="translate(200,420)">
+    <rect x="0" y="0" width="190" height="90" class="box"/>
+    <text x="8" y="16" class="t">J4 STEMMA QT (JST SH 4)</text>
+    <text x="8" y="34">1 GND   2 V+ = +3V3</text>
+    <text x="8" y="50">3 SDA   4 SCL</text>
+    <text x="8" y="72" class="lbl">side entry, for an IMU later</text>
+  </g>
+  <g class="w"><line x1="170" y1="482" x2="190" y2="482"/><line x1="170" y1="498" x2="190" y2="498"/></g>
+  <g class="w"><line x1="390" y1="470" x2="440" y2="470"/><line x1="390" y1="486" x2="440" y2="486"/></g>
+  <text x="446" y="474" class="net">SDA → J2.10 (GPIO13)</text>
+  <text x="446" y="490" class="net">SCL → J2.7  (GPIO16)</text>
+  <text x="20" y="545" class="lbl">Nets: +3V3, GND, +3V0, AC_IN, FB, AMP_OUT, ADC_RAW, ADC_OUT, SDA, SCL. Full pin-level connectivity is netlist.csv; this drawing is for reading, the CSV is for routing.</text>
+</svg>
