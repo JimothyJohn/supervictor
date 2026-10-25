@@ -17,6 +17,10 @@ if [[ -f ".env.${ENV}" ]]; then
     set +a
 fi
 
+# Xtensa build env (PATH to xtensa-esp32-elf-gcc, the edge linker) — written
+# by `espup install`; harmless to skip when only host-side work runs.
+[[ -f "$HOME/export-esp.sh" ]] && . "$HOME/export-esp.sh"
+
 [[ "${TRACE:-0}" == "1" ]] && set -o xtrace
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
@@ -40,9 +44,9 @@ help_function() {
 Usage: $(basename "$0") <command> [args]
 
 Pipeline:
-  install                  Check toolchains (nightly + rust-src) and fetch deps
+  install                  Check toolchains (esp via espup) and fetch deps
   lint                     cargo fmt --check + clippy --all-targets -D warnings
-  build                    Workspace + edge embedded (riscv32) + edge desktop
+  build                    Workspace + edge embedded (xtensa) + edge desktop
   unit                     Full workspace test suite on the host
   integration              SAM-local roundtrips (SAM_LOCAL_URL) + staging smoke
   -t, --test               Everything: lint -> build -> unit -> integration
@@ -51,7 +55,7 @@ Pipeline:
 Local dev & deploy:
   dev [--serve|--stop]     Tests + sam build + sam local (+integration); --serve
                            detaches sam local, --stop kills a detached one
-  edge                     Build + flash the ESP32-C3 (espflash via cargo run)
+  edge                     Build + flash the ESP32-POE-ISO (espflash via cargo run)
   staging                  dev gate + deploy dev stack + remote integration tests
   prod                     dev + staging gates + confirm + prod deploy + truststore
   deploy                   Self-hosted staging box (scripts/deploy-staging.sh)
@@ -75,11 +79,15 @@ check_dependencies() {
 
 install_deps() {
     log "checking toolchains"
-    if ! rustup toolchain list | grep -q nightly; then
-        log "installing nightly toolchain (required for edge embedded build)"
-        rustup toolchain install nightly
+    # Xtensa (original ESP32) builds need the esp-rs fork toolchain via espup
+    if ! rustup toolchain list | grep -q '^esp'; then
+        command_exists espup || {
+            log "installing espup (Xtensa toolchain manager)"
+            cargo install espup --locked
+        }
+        log "installing esp toolchain (Xtensa rustc for the edge build)"
+        espup install --targets esp32
     fi
-    rustup component add rust-src --toolchain nightly >/dev/null 2>&1 || true
     log "fetching workspace dependencies"
     cargo fetch
     log "install OK"
@@ -96,10 +104,18 @@ lint() {
 validate_and_build() {
     log "building workspace (host)"
     cargo build --workspace --target "$HOST_TARGET"
-    log "checking edge embedded (riscv32imc, ESP32-C3)"
-    (cd "$EDGE_DIR" && cargo +nightly check --features embedded)
+    log "checking edge embedded ethernet (xtensa, ESP32-POE-ISO primary uplink)"
+    (cd "$EDGE_DIR" && cargo check --features ethernet)
+    log "checking edge embedded wifi (fallback interface, ESP32)"
+    (cd "$EDGE_DIR" && cargo check --features wifi,chip-esp32)
+    log "checking edge embedded wifi (ESP32-C3, riscv)"
+    (cd "$EDGE_DIR" && cargo check --features wifi,chip-esp32c3 --target riscv32imc-unknown-none-elf)
+    # From the repo root, NOT $EDGE_DIR: edge/.cargo/config.toml's build-std
+    # applies to every target when cargo runs from that dir, and a host-target
+    # check with build-std poisons target/<host>/ with a second libcore
+    # (duplicate-lang-item failures for every later host build).
     log "checking edge desktop"
-    (cd "$EDGE_DIR" && cargo check --features desktop --target "$HOST_TARGET")
+    cargo check -p supervictor-edge --features desktop --target "$HOST_TARGET"
     log "build OK"
 }
 
@@ -166,7 +182,10 @@ cmd_dev() {
 
     local port="${SAM_LOCAL_PORT:-3000}"
     log "running edge library tests"
-    (cd "$EDGE_DIR" && cargo test --lib --target "$HOST_TARGET") \
+    # From the repo root so edge/.cargo/config.toml (xtensa default target +
+    # build-std) doesn't apply — build-std core/alloc conflicts with the
+    # prebuilt host std.
+    cargo test -p supervictor-edge --lib --target "$HOST_TARGET" \
         > "$LOG_DIR/rust_tests.log" 2>&1 || fail "edge tests failed (see $LOG_DIR/rust_tests.log)"
     log "running endpoint tests"
     (cd "$ENDPOINT_DIR" && cargo test --features sqlite) \
@@ -188,9 +207,11 @@ cmd_dev() {
         return 0
     fi
 
+    # Repo root, not $EDGE_DIR — see the desktop-check note in
+    # validate_and_build (build-std would poison target/<host>/).
     log "running local integration tests"
-    (cd "$EDGE_DIR" && SAM_LOCAL_URL="http://localhost:$port" \
-        cargo test --test sam_local_roundtrip --target "$HOST_TARGET") \
+    (SAM_LOCAL_URL="http://localhost:$port" \
+        cargo test -p supervictor-edge --test sam_local_roundtrip --target "$HOST_TARGET") \
         || { sam_local_stop; fail "integration tests failed"; }
     sam_local_stop
     log "dev OK"
@@ -199,7 +220,7 @@ cmd_dev() {
 cmd_edge() {
     log "building and flashing embedded firmware"
     [[ -n "${ESPFLASH_PORT:-}" ]] && log "using serial port $ESPFLASH_PORT"
-    (cd "$EDGE_DIR" && cargo run --bin supervictor-embedded --features embedded)
+    (cd "$EDGE_DIR" && cargo run --bin supervictor-embedded --features ethernet)
 }
 
 # ── Staging / prod pipelines (was: qs staging / qs prod) ─────────────
@@ -236,8 +257,9 @@ cmd_staging() {
     (cd "$ENDPOINT_DIR" && DEPLOYED_URL="$url" cargo test --features sqlite -- --ignored) \
         > "$LOG_DIR/staging_integration_tests.log" 2>&1 \
         || fail "staging integration tests failed (see $LOG_DIR/staging_integration_tests.log)"
+    # Repo root, not $EDGE_DIR — see the desktop-check note in validate_and_build.
     log "running device roundtrip tests against deployed stack"
-    (cd "$EDGE_DIR" && DEPLOYED_URL="$url" cargo test --test deployed_roundtrip --target "$HOST_TARGET") \
+    (DEPLOYED_URL="$url" cargo test -p supervictor-edge --test deployed_roundtrip --target "$HOST_TARGET") \
         > "$LOG_DIR/device_deployed_tests.log" 2>&1 \
         || fail "device roundtrip tests failed (see $LOG_DIR/device_deployed_tests.log)"
     log "staging OK"
@@ -329,7 +351,7 @@ cmd_onboard() { # <device-name> <owner-id> [host] [port]
     esac
 
     log "[3/4] flashing firmware (DEVICE_NAME=$device)"
-    (cd "$EDGE_DIR" && DEVICE_NAME="$device" cargo run --bin supervictor-embedded --features embedded)
+    (cd "$EDGE_DIR" && DEVICE_NAME="$device" cargo run --bin supervictor-embedded --features ethernet)
 
     log "[4/4] verifying with mTLS ping"
     PING_CERTS="$REPO_ROOT/certs/devices/$device" cmd_ping "$host" "$port"

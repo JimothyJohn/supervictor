@@ -1,5 +1,8 @@
 # --- Build stage ---
-FROM rust:1.91-bookworm AS build
+# Keep the rustc here ≥ what the lockfile's MSRV demands — Dependabot bumps
+# deps (libsqlite3-sys 0.38 needs cfg_select!, stable from 1.94) while this
+# pin sits still, and CI never exercises the Docker path.
+FROM rust:1.97-bookworm AS build
 
 WORKDIR /app
 

@@ -5,7 +5,7 @@ Adds device registry, data persistence, usage-based billing via Stripe.
 ## Architecture
 
 ```
-ESP32-C3 ──mTLS──► API Gateway ──► Lambda (ingest)
+ESP32 ───mTLS──► API Gateway ──► Lambda (ingest)
                                       ├──► DynamoDB (messages)
                                       └──► DynamoDB (devices) [validate]
 

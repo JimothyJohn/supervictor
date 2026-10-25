@@ -14,15 +14,38 @@ path = "./src/bin/desktop_main.rs"
 required-features = ["desktop"]
 
 [features]
-portal = ["embedded", "embassy-net/udp"]
-desktop = ["reqwest", "tokio", "rustls", "tokio-rustls", "rustls-pemfile"]
+portal = ["wifi", "embassy-net/udp"]
+desktop = ["tokio", "rustls", "tokio-rustls", "rustls-pemfile"]
+# Chip selection — embedded builds need exactly one, matched to the cargo
+# --target (chip-esp32 ↔ xtensa-esp32-none-elf, chip-esp32c3 ↔
+# riscv32imc-unknown-none-elf). Fans the choice out to every esp-rs crate;
+# the '?' forwards only when that optional dep is enabled, and esp-backtrace
+# forwards the chip on to esp-println. `ethernet` implies chip-esp32 — only
+# the classic ESP32 has an EMAC.
+chip-esp32 = [
+  "esp-hal?/esp32",
+  "esp-backtrace?/esp32",
+  "esp-rtos?/esp32",
+  "esp-radio?/esp32",
+  "esp-bootloader-esp-idf?/esp32",
+]
+chip-esp32c3 = [
+  "esp-hal?/esp32c3",
+  "esp-backtrace?/esp32c3",
+  "esp-rtos?/esp32c3",
+  "esp-radio?/esp32c3",
+  "esp-bootloader-esp-idf?/esp32c3",
+]
+# Base embedded runtime (no network interface). The supervictor-embedded bin
+# additionally needs exactly one interface feature: `ethernet` (primary — the
+# POE-ISO uplinks over wired PoE; implies chip-esp32) or `wifi` (pair with a
+# chip-* feature).
 embedded = [
   "esp-alloc",
   "esp-backtrace",
   "esp-hal",
   "esp-rtos",
   "esp-println",
-  "esp-radio",
   "embassy-net",
   "embassy-executor",
   "embassy-time",
@@ -31,6 +54,12 @@ embedded = [
   "esp-bootloader-esp-idf",
   "static_cell",
 ]
+wifi = ["embedded", "esp-radio", "esp-rtos/esp-radio"]
+ethernet = ["embedded", "ph-esp32-mac", "embassy-net-driver", "esp32", "chip-esp32"]
+# Board variant on top of `ethernet`. Default is the ESP32-POE-ISO (RMII clock
+# out GPIO17); `board-poe2` is the ESP32-POE2, whose WROVER-E keeps 16/17 for
+# PSRAM and takes the clock out of GPIO0 (see src/board/poe2.rs).
+board-poe2 = ["ethernet"]
 
 # Use custom libraries
 [lib]
@@ -45,11 +74,11 @@ required-features = ["embedded"]
 
 [[example]]
 name = "wifi_embassy_dhcp"
-required-features = ["embedded"]
+required-features = ["wifi"]
 
 [[example]]
 name = "tls_dns_dhcp_wifi"
-required-features = ["embedded"]
+required-features = ["wifi"]
 
 [dependencies]
 embassy-net = { version = "0.9.1", features = [
@@ -59,13 +88,11 @@ embassy-net = { version = "0.9.1", features = [
   "dns",
 ], optional = true }
 
-reqwest = { version = "0.12.15", optional = true, features = ["json", "rustls-tls"] }
 tokio = { version = "1.0", optional = true, features = ["full"] }
 
 embedded-io-async = { version = "0.7.0", optional = true }
 esp-alloc = { version = "0.9.0", optional = true }
 esp-backtrace = { version = "0.18.1", features = [
-  "esp32c3",
   "panic-handler",
   "println",
 ], optional = true }
@@ -73,7 +100,6 @@ esp-backtrace = { version = "0.18.1", features = [
 # still used by esp-rtos 0.2 / esp-radio 0.17; unpin when bumping those to 0.3/0.18
 esp-hal = { version = "=1.0.0", default-features = false, features = [
   "log-04",
-  "esp32c3",
   "unstable",
   "exception-handler",
 ], optional = true }
@@ -82,9 +108,8 @@ esp-println = { version = "0.16", features = [
 ], optional = true }
 embassy-executor = { version = "0.9.0", optional = true }
 embassy-time = { version = "0.5.0", features = ["generic-queue-8"], optional = true }
-esp-rtos = { version = "0.2", features = ["esp32c3", "esp-radio", "embassy"], optional = true }
+esp-rtos = { version = "0.2", features = ["embassy"], optional = true }
 esp-radio = { version = "0.17", features = [
-  "esp32c3",
   "wifi",
   "log-04",
   "unstable",
@@ -96,9 +121,39 @@ static_cell = { version = "2.1.0", optional = true, features = ["nightly"] }
 serde = { version = "1.0.219", default-features = false, features = ["alloc"] }
 serde-json-core = "0.7.0"
 mbedtls-rs = { git = "https://github.com/esp-rs/mbedtls-rs.git", rev = "4329f17", optional = true, features = ["log"] }
-esp-bootloader-esp-idf = { version = "0.5", optional = true, features = ["esp32c3"] }
-rustls = { version = "0.23.26", optional = true }
-tokio-rustls = { version = "0.26.2", optional = true }
+# ESP32 EMAC (wired Ethernet) driver. crates.io 0.1.1 cannot detect any PHY —
+# MDIO reads are broken (upstream photon-circus/ph-esp32-mac#4). Pinned to the
+# hardware-verified fix from that PR; switch to crates.io once #4 merges and a
+# release follows.
+ph-esp32-mac = { git = "https://github.com/cfbraun/ph-esp32-mac", rev = "4cdad7f0e1d0a6a384a380692bcee3ee2351f357", features = [
+  "esp-hal",
+  "embassy-net",
+  "log",
+], optional = true }
+# Driver-trait layer for ph-esp32-mac's embassy integration (its statics macro
+# names embassy_net_driver::LinkState in our namespace).
+embassy-net-driver = { version = "0.2", optional = true }
+# Raw PAC for the two ESP32 registers esp-hal doesn't expose (RTC ANA_CONF for
+# APLL power-up, IO_MUX GPIO17 for the RMII clock-out mux). Same version
+# esp-hal 1.0 already pulls — no new transitive weight.
+esp32 = { version = "0.39", optional = true }
+esp-bootloader-esp-idf = { version = "0.5", optional = true }
+# ring is the provider desktop_main installs; default features would compile
+# the aws-lc-rs provider (a large C build) alongside it for nothing. The ring
+# flag used to arrive via reqwest's feature unification (reqwest is now
+# dev-only — tests/deployed_roundtrip.rs).
+rustls = { version = "0.23.26", optional = true, default-features = false, features = [
+  "ring",
+  "logging",
+  "std",
+  "tls12",
+] }
+# default features would re-enable rustls/aws_lc_rs; mirror the rustls set.
+tokio-rustls = { version = "0.26.2", optional = true, default-features = false, features = [
+  "ring",
+  "logging",
+  "tls12",
+] }
 rustls-pemfile = { version = "2.2.0", optional = true }
 
 [dev-dependencies]

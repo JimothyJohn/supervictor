@@ -16,7 +16,7 @@ These are listed as explicit optional deps but never imported anywhere in `src/`
 ### Verification
 ```
 cargo test --lib --target aarch64-apple-darwin
-cargo check --features embedded --target riscv32imc-unknown-none-elf
+cargo check --features embedded --target xtensa-esp32-none-elf
 ```
 
 ---
@@ -63,7 +63,7 @@ Used in exactly one macro in `embedded_main.rs` (2 call sites). Both calls happe
 
 ### Verification
 ```
-cargo check --features embedded --target riscv32imc-unknown-none-elf
+cargo check --features embedded --target xtensa-esp32-none-elf
 ```
 Full verification requires on-device flash test (WiFi init + stack allocation).
 
@@ -138,6 +138,6 @@ Serde is used for `#[derive(Serialize, Deserialize)]` on 2 structs + `serde_json
 ### Verification
 ```
 cargo test --lib --target aarch64-apple-darwin
-cargo check --features embedded --target riscv32imc-unknown-none-elf
+cargo check --features embedded --target xtensa-esp32-none-elf
 HOST=supervictor.advin.io cargo run --bin supervictor-desktop --features desktop
 ```
