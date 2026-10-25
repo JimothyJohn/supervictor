@@ -419,6 +419,38 @@ MACHINE  (ESP32-POE over PoE Ethernet, ESP32-C3 over WiFi, or a simulated machin
       </p>
     </section>
 
+    <!-- SV-05 BUILT AS ONE PIECE -->
+    <section id="one-piece">
+      <div class="sechead rv">
+        <div class="sheetno">SV·04</div>
+        <h2>Built as one piece</h2>
+        <div class="dim"></div>
+      </div>
+      <table class="spec rv">
+        <tr><th>One language</th><td>Most connected-machine stacks are C on the board, a scripting
+            language in the cloud, and a web framework on top, held together by
+            contracts nobody checks. Supervictor is Rust from the microcontroller to
+            the database: the message a machine sends is one definition compiled into
+            both ends, so a change that would break the fleet fails to build instead
+            of failing at 2 AM.</td></tr>
+        <tr><th>Nothing else to run</th><td>The service is a single program that handles its own encryption,
+            its own identity checks, its own storage and its own dashboard. No proxy in
+            front, no database server beside it, no runtime underneath. It installs on
+            a plain Linux machine in one command, and upgrading is running that command
+            again.</td></tr>
+        <tr><th>Boards that stay honest</th><td>Each board carries its own certificate, baked in when it is
+            flashed, and reports the firmware it runs on every uplink. Wired PoE boards
+            take power and network from one cable; WiFi boards are supported for
+            places a cable cannot reach.</td></tr>
+        <tr><th>Rehearse the whole plant</th><td>Ten machine models — extruder, press brake, CNC mill, saw, oven,
+            compressor, conveyor, injection molder, welder, pump — each run a realistic
+            working day: heaters soaking, strokes and passes, breaks, shutdowns, the odd
+            jam. Point them at your endpoint and the dashboard is proven before a single
+            board is racked; swap one for a real machine and nothing about the dashboard
+            changes.</td></tr>
+      </table>
+    </section>
+
 
   </div>
 </main>
