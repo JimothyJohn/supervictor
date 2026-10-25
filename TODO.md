@@ -149,7 +149,40 @@ workflows) and `ROADMAP.md` (when Step Functions and each orchestration layer
 earn their keep — not before the enterprise features exist). Nothing here
 blocks P0–P4.
 
+## Switch day — LS108GP arrives (2026-10-26)
+
+TP-Link LS108GP: 8× 802.3af/at, 30 W/port, 62 W total, power managed by
+measured draw, unmanaged. Olimex boards pull a watt or two each.
+
+- [ ] Extend Mode switch OFF (it drops ports 1-4 to 10 Mbps; the ESP32 EMAC
+      wants 100 Mbps).
+- [ ] Port 8 → house router (DHCP 10.0.0.x). Ports 1-7 → boards.
+- [ ] POE2 first (`poe2-wifi-01`, MAC 10:97:bd:e5:9b:0c): it already runs the
+      wired `board-poe2` firmware. Unplug USB *before* cabling — the POE2 has
+      no galvanic isolation and Olimex says no Ethernet while USB is attached.
+      Expect `poe2-wifi-01` fresh on https://staging.supervictor.advin.io/fleet
+      with a new `last_uplink` and no `rssi_dbm`.
+- [ ] POE-ISO (`poe-iso-eth-01`): `./scratch/flash.sh poe-iso-eth-01 staging`
+      over USB (re-identify the port by MAC e0:5a:1b:66:50:40 — hub positions
+      moved), then rack it. Isolated board, USB + Ethernet together is fine.
+- [ ] Each additional board: `./Quickstart certs device <name>`, register
+      (`POST /devices` with device_id/owner_id/subject_dn — `onboard` bundles it
+      for Ethernet boards), add a `case` line to scratch/flash.sh (board →
+      port, `board-poe2` or `ethernet`), flash, rack. Names by board type and
+      position, e.g. `poe2-rack-01`.
+- [ ] Fault test: pull one cable, watch the fleet row go stale → dark, plug it
+      back, watch it recover. This is the baseline the mesh fallback has to beat.
+- [ ] Then the coexistence spike: esp-radio ESP-NOW + ph-esp32-mac EMAC on one
+      board (POE-ISO is the safest rig). Go/no-go for the mesh.
+
 ## Open questions for Nick
 
 - 2026-10-24: mTLS identity never reaches the Lambda. dev.supervictor.advin.io exists (PR 74) and API Gateway enforces the client cert, but the Lambda Web Adapter serializes `lambda_http`'s typed request context, whose REST v1 identity struct has no `clientCert` (aws_lambda_events 0.14 and 1.2; `catch-all-fields` off), and REST parameter mapping needs a non-proxy integration. After PR 75 (no fallback to the client-supplied `x-ssl-client-subject-dn`, which anyone could forge on dev and prod) every Lambda request is anonymous, so bound devices 403 there. Pick one: (a) drop the adapter and run axum under `lambda_http` with `catch-all-fields`, read `identity.other["clientCert"]["subjectDN"]`; (b) move to an HTTP API v2, whose typed context carries `authentication.clientCert` through the adapter; (c) a REQUEST Lambda authorizer that copies `$context.identity.clientCert.subjectDN` into the authorizer context. I'd take (a): Rust-native, no sidecar, REST stays. Bench boards sit on staging (in-binary TLS, unaffected) until then.
 - 2026-10-24: the edge telemetry simulator (`supervictor/edge/src/models/sim.rs`, PR 78 + esp32-poe-iso 2d9deec) is compiled in unconditionally and fills temp_c / humidity_pct / rssi_dbm with fake-but-plausible values; heap_free and uptime_s are real. When real sensors land, should the simulator move behind a cargo feature (`sim`, off by default) so a production board can never report invented readings, or stay as the fallback for fields a board lacks? I'd put it behind a feature once the first real sensor ships. Also: cut v0.2.0 so staging's hand-installed PR 78 build is reproducible (03-install.sh currently rolls it back to v0.1.0).
+- 2026-10-25: mesh identity model — my pick: the PoE gateway's cert vouches for
+  its ESP-NOW children (device record gains `gateway_id`), link encryption via
+  a shared ESP-NOW PMK baked at flash time like SSID. Bench-grade, not
+  per-leaf certs. Yes/no before the mesh protocol starts.
+- 2026-10-25: board inventory for the rack — how many ESP32-POE2 vs
+  ESP32-POE-ISO, and are any POE-ISO the WROVER variant (PSRAM → RMII clock on
+  GPIO0 like the POE2; needs its own feature or a PSRAM flag)?
