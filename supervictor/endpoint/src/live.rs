@@ -155,8 +155,8 @@ impl From<&Register> for RegisterInfo {
 pub struct LiveDevice {
     /// Device identifier.
     pub device_id: String,
-    /// Categorical colour slot (fleet order, same as the history views).
-    pub slot: usize,
+    /// How the device is drawn (same resolved style as the history views).
+    pub style: crate::style::Resolved,
     /// Samples inside the window, oldest first.
     pub samples: Vec<Sample>,
 }
@@ -185,11 +185,9 @@ pub struct Snapshot {
 /// last [`WINDOW_S`] seconds ending at `now_ms`.
 pub fn snapshot(store: &dyn DeviceStore, now_ms: u64) -> Result<Snapshot, AppError> {
     let since_ms = now_ms.saturating_sub(WINDOW_S * 1_000);
-    let mut ids: Vec<String> = store
-        .list_devices()?
-        .into_iter()
-        .map(|d| d.device_id)
-        .collect();
+    let registered = store.list_devices()?;
+    let mut styles = crate::style::resolve(&registered);
+    let mut ids: Vec<String> = registered.into_iter().map(|d| d.device_id).collect();
     ids.sort();
 
     // The oldest `MAX_ROWS` rows; a burst's earlier samples may predate
@@ -199,10 +197,11 @@ pub fn snapshot(store: &dyn DeviceStore, now_ms: u64) -> Result<Snapshot, AppErr
 
     let mut devices: Vec<LiveDevice> = ids
         .into_iter()
-        .enumerate()
-        .map(|(slot, device_id)| LiveDevice {
+        .map(|device_id| LiveDevice {
+            style: styles
+                .remove(&device_id)
+                .unwrap_or_else(|| crate::style::Resolved::slot(crate::style::SLOTS as usize)),
             device_id,
-            slot,
             samples: Vec::new(),
         })
         .collect();
