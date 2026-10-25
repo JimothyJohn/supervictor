@@ -437,3 +437,131 @@ fn uplink_rejects_malformed_levels_bursts() {
     )
     .unwrap();
 }
+
+// ── Per-device chart style ────────────────────────────────────────────
+
+#[test]
+fn set_style_parses_every_body_shape_and_normalises_colour() {
+    use supervictor_common::models::{LineStyle, Marker};
+    let store = common::test_store();
+    registered(store.as_ref(), "dev-1");
+
+    let resp = handlers::handle_set_device_style(
+        "dev-1",
+        Some(r##"{"color": "#ABCDEF", "line_style": "dashed", "marker": "circle"}"##),
+        store.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(resp.color.as_deref(), Some("#abcdef"), "normalised");
+    assert_eq!(resp.line_style, Some(LineStyle::Dashed));
+    assert_eq!(resp.marker, Some(Marker::Circle));
+
+    // A partial body replaces the whole style: the parts it omits clear.
+    let resp =
+        handlers::handle_set_device_style("dev-1", Some(r#"{"color": "s4"}"#), store.as_ref())
+            .unwrap();
+    assert_eq!(resp.color.as_deref(), Some("s4"));
+    assert_eq!(resp.line_style, None);
+    assert_eq!(resp.marker, None);
+
+    for clear in [None, Some(""), Some("  \n"), Some("null"), Some("{}")] {
+        handlers::handle_set_device_style("dev-1", Some(r#"{"color": "s1"}"#), store.as_ref())
+            .unwrap();
+        let resp = handlers::handle_set_device_style("dev-1", clear, store.as_ref())
+            .unwrap_or_else(|e| panic!("{clear:?}: {e}"));
+        assert_eq!(resp.color, None, "{clear:?}");
+        assert!(
+            store
+                .get_device("dev-1")
+                .unwrap()
+                .unwrap()
+                .style
+                .is_default(),
+            "{clear:?}"
+        );
+    }
+}
+
+#[test]
+fn set_style_rejects_bad_bodies_without_writing() {
+    use supervictor_endpoint::error::AppError;
+    let store = common::test_store();
+    registered(store.as_ref(), "dev-1");
+    handlers::handle_set_device_style("dev-1", Some(r#"{"color": "s6"}"#), store.as_ref()).unwrap();
+    for bad in [
+        "[]",
+        "42",
+        "\"s1\"",
+        r#"{"colour": "s1"}"#,
+        r#"{"color": "s8"}"#,
+        r#"{"color": "red"}"#,
+        r##"{"color": "#abc"}"##,
+        r#"{"color": 3}"#,
+        r#"{"line_style": "wavy"}"#,
+        r#"{"marker": "star"}"#,
+        r#"{"marker": null, "extra": true}"#,
+        "{",
+    ] {
+        let err =
+            handlers::handle_set_device_style("dev-1", Some(bad), store.as_ref()).unwrap_err();
+        assert!(
+            matches!(err, AppError::InvalidPayload { .. }),
+            "{bad}: {err:?}"
+        );
+        assert_eq!(
+            store
+                .get_device("dev-1")
+                .unwrap()
+                .unwrap()
+                .style
+                .color
+                .as_deref(),
+            Some("s6"),
+            "{bad} must not write"
+        );
+    }
+    let err = handlers::handle_set_device_style("ghost", Some("{}"), store.as_ref()).unwrap_err();
+    assert!(matches!(err, AppError::DeviceNotFound { .. }), "{err:?}");
+    let err = handlers::handle_set_device_style("", Some("{}"), store.as_ref()).unwrap_err();
+    assert!(matches!(err, AppError::InvalidPayload { .. }), "{err:?}");
+}
+
+/// Registration without a colour stores the first palette slot the fleet
+/// is not wearing; with one, it is validated and kept.
+#[test]
+fn register_assigns_an_unworn_palette_colour() {
+    use supervictor_endpoint::error::AppError;
+    let store = common::test_store();
+    let first = handlers::handle_register_device(
+        Some(r#"{"device_id":"one","owner_id":"o"}"#),
+        store.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(first.color.as_deref(), Some("s0"));
+    let picked = handlers::handle_register_device(
+        Some(r#"{"device_id":"two","owner_id":"o","color":"s1","line_style":"dotted"}"#),
+        store.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(picked.color.as_deref(), Some("s1"));
+    assert_eq!(
+        picked.line_style,
+        Some(supervictor_common::models::LineStyle::Dotted)
+    );
+    let third = handlers::handle_register_device(
+        Some(r#"{"device_id":"three","owner_id":"o"}"#),
+        store.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(third.color.as_deref(), Some("s2"), "s0 and s1 are worn");
+    let err = handlers::handle_register_device(
+        Some(r#"{"device_id":"four","owner_id":"o","color":"orange"}"#),
+        store.as_ref(),
+    )
+    .unwrap_err();
+    assert!(matches!(err, AppError::InvalidPayload { .. }), "{err:?}");
+    assert!(
+        store.get_device("four").unwrap().is_none(),
+        "rejected, not stored"
+    );
+}

@@ -43,8 +43,26 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   Store support: `uplinks_since` / `device_uplinks_since` (SQLite range on
   `received_at`, DynamoDB sort-key range). Charts are server-rendered SVG
   (no JS chart lib); the inline script only adds hover/keyboard tooltips
-  and a visible-tab reload. Colours by fleet slot (`.s0`–`.s7`), validated
-  against the dark surface — don't hand-pick new ones.
+  and a visible-tab reload. The history page plots only the devices in the
+  `device=` query keys (repeated, never comma-joined: ids may contain
+  commas); no key plots nothing, and the chips' hrefs toggle membership so
+  the page works without script. The script mirrors the selection into
+  `localStorage` and restores it when the URL has no `device` key.
+- Device style (`src/style.rs`, wire types in `supervictor_common::models`):
+  `DeviceRecord.style` holds an optional colour (`s0`–`s7` palette slot or
+  `#rrggbb`), `LineStyle` and `Marker`. `style::resolve` fills gaps —
+  devices without a stored colour take palette slots in registration order
+  among themselves — and `style::auto_color` gives a new registration the
+  first unworn slot. `PUT /devices/{id}/style` and the device-page form
+  replace the whole style (omitted parts clear). Charts stroke by colour
+  class (`.sN` or `.custom` + inline `--c`), dash class, and per-point
+  glyphs; legend/chip/table keys are the same line sample. The palette
+  slots are validated for both surfaces — don't hand-pick new ones.
+- Bucket grid (`history::Window::grid`): anchored to multiples of the step,
+  so a reading never changes bucket between renders; the last bucket is the
+  partial one `now` falls in and `until` is its end. Live windows bridge one
+  missing bucket in a trace (`charts::LIVE_BRIDGE_BUCKETS`) — jitter at the
+  5 s uplink period, not an outage; longer windows bridge nothing.
 - Power state: `fleet::power_state` — last `current` ≥ the device's
   threshold is `on`, below is `off`, no reading or a dark / never device is
   `unknown`. The threshold is the device's own `power_threshold_ma`

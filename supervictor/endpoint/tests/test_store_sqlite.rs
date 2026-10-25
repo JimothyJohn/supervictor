@@ -265,3 +265,135 @@ fn device_with_subject_dn() {
         Some("CN=device1,O=supervictor")
     );
 }
+
+// ── Per-device chart style ────────────────────────────────────────────
+
+#[test]
+fn style_round_trips_and_set_replaces_the_whole_style() {
+    use supervictor_common::models::{DeviceStyle, LineStyle, Marker};
+    use supervictor_endpoint::error::AppError;
+    let store = common::test_store();
+    let mut styled = make_device("styled");
+    styled.style = DeviceStyle {
+        color: Some("#ff8800".into()),
+        line_style: Some(LineStyle::DashDot),
+        marker: Some(Marker::Triangle),
+    };
+    store.put_device(styled.clone()).unwrap();
+    store.put_device(make_device("plain")).unwrap();
+
+    let got = store.get_device("styled").unwrap().unwrap();
+    assert_eq!(got.style, styled.style);
+    assert!(store
+        .get_device("plain")
+        .unwrap()
+        .unwrap()
+        .style
+        .is_default());
+    let listed = store.list_devices().unwrap();
+    assert_eq!(
+        listed.iter().filter(|d| d.style.is_default()).count(),
+        1,
+        "list carries the style too"
+    );
+
+    let updated = store
+        .set_device_style(
+            "styled",
+            DeviceStyle {
+                color: Some("s5".into()),
+                line_style: None,
+                marker: Some(Marker::Square),
+            },
+        )
+        .unwrap();
+    assert_eq!(updated.style.color.as_deref(), Some("s5"));
+    assert_eq!(updated.style.line_style, None, "omitted part cleared");
+    assert_eq!(updated.style.marker, Some(Marker::Square));
+    assert_eq!(updated.owner_id, "owner-1", "other columns untouched");
+    let cleared = store
+        .set_device_style("styled", DeviceStyle::default())
+        .unwrap();
+    assert!(cleared.style.is_default());
+
+    let err = store
+        .set_device_style("ghost", DeviceStyle::default())
+        .unwrap_err();
+    assert!(matches!(err, AppError::DeviceNotFound { .. }), "{err:?}");
+}
+
+/// A database from before the style columns (threshold era) gains them on
+/// open; rows read as unstyled; an unknown token written by a newer binary
+/// reads as unset rather than failing the row.
+#[test]
+fn opening_a_pre_style_database_migrates_it_in_place() {
+    use supervictor_common::models::{DeviceStyle, LineStyle, Marker};
+    use supervictor_endpoint::store::sqlite::SqliteDeviceStore;
+    use supervictor_endpoint::store::DeviceStore;
+
+    let path = std::env::temp_dir().join(format!(
+        "supervictor-style-migration-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let path_str = path.to_str().unwrap().to_string();
+    {
+        let conn = rusqlite::Connection::open(&path_str).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE devices (
+                device_id   TEXT PRIMARY KEY,
+                owner_id    TEXT NOT NULL,
+                subject_dn  TEXT,
+                status      TEXT NOT NULL DEFAULT 'active',
+                created_at  TEXT NOT NULL,
+                power_threshold_ma INTEGER
+            );
+            INSERT INTO devices VALUES ('legacy-1', 'owner-1', NULL, 'active', '2025-01-01T00:00:00Z', 9000);",
+        )
+        .unwrap();
+    }
+
+    let store = SqliteDeviceStore::new(&path_str).expect("open + migrate");
+    let legacy = store.get_device("legacy-1").unwrap().unwrap();
+    assert!(legacy.style.is_default());
+    assert_eq!(legacy.power_threshold_ma, Some(9_000));
+    store
+        .set_device_style(
+            "legacy-1",
+            DeviceStyle {
+                color: Some("s2".into()),
+                line_style: Some(LineStyle::Dotted),
+                marker: Some(Marker::Circle),
+            },
+        )
+        .unwrap();
+    drop(store);
+
+    {
+        let conn = rusqlite::Connection::open(&path_str).unwrap();
+        // A token from the future.
+        conn.execute_batch("UPDATE devices SET marker = 'hexagon' WHERE device_id = 'legacy-1'")
+            .unwrap();
+    }
+    let store = SqliteDeviceStore::new(&path_str).expect("reopen");
+    let legacy = store.get_device("legacy-1").unwrap().unwrap();
+    assert_eq!(legacy.style.color.as_deref(), Some("s2"));
+    assert_eq!(legacy.style.line_style, Some(LineStyle::Dotted));
+    assert_eq!(legacy.style.marker, None, "unknown token reads as unset");
+    drop(store);
+    {
+        let conn = rusqlite::Connection::open(&path_str).unwrap();
+        let cols: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name IN ('color', 'line_style', 'marker')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cols, 3, "each column added exactly once");
+    }
+    let _ = std::fs::remove_file(&path);
+}

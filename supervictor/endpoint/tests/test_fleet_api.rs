@@ -256,6 +256,102 @@ async fn threshold_route_sets_clears_and_validates() {
     assert!(store.get_device("ghost").unwrap().is_none(), "no upsert");
 }
 
+/// `PUT /devices/{id}/style`: admin-only, replaces the whole style, 422s
+/// anything off the whitelist without writing, 404s an unknown device.
+#[tokio::test]
+async fn style_route_requires_admin_sets_clears_and_validates() {
+    let (server, store) = server_with_store();
+    seed(store.as_ref(), "factory-01", "active");
+    let put = |path: &'static str, body: &'static str, who: &'static str| {
+        let (name, value) = dn(who);
+        server
+            .put(path)
+            .add_header(name, value)
+            .add_header(
+                HeaderName::from_static("content-type"),
+                HeaderValue::from_static("application/json"),
+            )
+            .text(body)
+    };
+
+    // Gates.
+    let resp = server
+        .put("/devices/factory-01/style")
+        .text(r#"{"color":"s1"}"#)
+        .await;
+    assert_eq!(resp.status_code(), 403, "no certificate");
+    let resp = put("/devices/factory-01/style", r#"{"color":"s1"}"#, DEVICE_DN).await;
+    assert_eq!(resp.status_code(), 403, "device certificate");
+    assert!(store
+        .get_device("factory-01")
+        .unwrap()
+        .unwrap()
+        .style
+        .is_default());
+
+    let resp = put(
+        "/devices/factory-01/style",
+        r##"{"color":"#FF8800","line_style":"dashed","marker":"circle"}"##,
+        ADMIN_DN,
+    )
+    .await;
+    assert_eq!(resp.status_code(), 200, "{}", resp.text());
+    let body: serde_json::Value = resp.json();
+    assert_eq!(body["color"], "#ff8800", "normalised");
+    assert_eq!(body["line_style"], "dashed");
+    assert_eq!(body["marker"], "circle");
+    // The device document and the listing report it too.
+    let (name, value) = dn(ADMIN_DN);
+    let device: serde_json::Value = server
+        .get("/devices/factory-01")
+        .add_header(name, value)
+        .await
+        .json();
+    assert_eq!(device["color"], "#ff8800");
+    assert_eq!(device["marker"], "circle");
+
+    // Partial replaces: omitted parts clear.
+    let resp = put("/devices/factory-01/style", r#"{"color":"s3"}"#, ADMIN_DN).await;
+    assert_eq!(resp.status_code(), 200);
+    let body: serde_json::Value = resp.json();
+    assert_eq!(body["color"], "s3");
+    assert!(body.get("line_style").is_none(), "{body}");
+    assert!(body.get("marker").is_none(), "{body}");
+
+    // Rejections leave it alone.
+    for bad in [
+        r#"{"color":"s8"}"#,
+        r#"{"color":"orange"}"#,
+        r#"{"colour":"s1"}"#,
+        r#"{"line_style":"wavy"}"#,
+        r#"{"marker":"star"}"#,
+        "[]",
+        "7",
+    ] {
+        let resp = put("/devices/factory-01/style", bad, ADMIN_DN).await;
+        assert_eq!(resp.status_code(), 422, "{bad}: {}", resp.text());
+    }
+    assert_eq!(
+        store
+            .get_device("factory-01")
+            .unwrap()
+            .unwrap()
+            .style
+            .color
+            .as_deref(),
+        Some("s3")
+    );
+    // Every spelling of "clear".
+    for clear in ["{}", "null", ""] {
+        let resp = put("/devices/factory-01/style", clear, ADMIN_DN).await;
+        assert_eq!(resp.status_code(), 200, "{clear:?}: {}", resp.text());
+        let body: serde_json::Value = resp.json();
+        assert!(body.get("color").is_none(), "{clear:?}: {body}");
+    }
+    let resp = put("/devices/ghost/style", r#"{"color":"s1"}"#, ADMIN_DN).await;
+    assert_eq!(resp.status_code(), 404);
+}
+
 #[tokio::test]
 async fn registration_accepts_an_initial_threshold() {
     let (server, store) = server_with_store();

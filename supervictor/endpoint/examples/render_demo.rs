@@ -14,8 +14,11 @@ use supervictor_endpoint::history::{
 };
 use supervictor_endpoint::live::{self, LiveDevice, RegisterInfo};
 use supervictor_endpoint::models::{DeviceRecord, UplinkRecord};
+use supervictor_endpoint::style::{self, Resolved};
 use supervictor_endpoint::time::{format_rfc3339, parse_rfc3339_unix_ms};
-use supervictor_endpoint::ui::views::{self, DeviceHistory, FleetRow, PowerState, Staleness};
+use supervictor_endpoint::ui::views::{
+    self, DeviceHistory, FleetRow, PowerState, Selection, Staleness,
+};
 use supervictor_endpoint::ui::{assets, views::LIVE_SCRIPT};
 
 /// "Now" for the seeded history: 2026-07-11T04:00:00Z, just after the
@@ -125,6 +128,9 @@ fn staticize(html: String, devices: &[&str]) -> String {
         );
     }
     out = out.replace("href=\"/ui/history\"", "href=\"history.html\"");
+    // Device chips: the query is ignored on a static site, so every
+    // selection link is the one rendered page.
+    out = out.replace("href=\"/ui/history?", "href=\"history.html?");
     out = out
         .replace("href=\"/ui/live\"", "href=\"live.html\"")
         .replace(" data-poll=\"/ui/live.json\"", "");
@@ -142,6 +148,14 @@ fn staticize(html: String, devices: &[&str]) -> String {
             )
             .replace(
                 &format!("action=\"/ui/devices/{id}/status\""),
+                "action=\"#\"",
+            )
+            .replace(
+                &format!("action=\"/ui/devices/{id}/threshold\""),
+                "action=\"#\"",
+            )
+            .replace(
+                &format!("action=\"/ui/devices/{id}/style\""),
                 "action=\"#\"",
             );
     }
@@ -287,10 +301,13 @@ fn main() {
         device("lab-bench-3", "active", None, "2026-07-09T21:47:00+00:00"),
     ];
     let ids: Vec<&str> = devices.iter().map(|d| d.device_id.as_str()).collect();
+    let styles = style::resolve(&devices);
+    let style_of = |id: &str| -> Resolved { styles[id].clone() };
 
     let rows = vec![
         FleetRow {
             device: devices[0].clone(),
+            style: style_of(&devices[0].device_id),
             last_uplink: Some("2026-07-11T03:58:12+00:00".into()),
             staleness: Staleness::Fresh,
             current: Some(1_124),
@@ -299,6 +316,7 @@ fn main() {
         },
         FleetRow {
             device: devices[1].clone(),
+            style: style_of(&devices[1].device_id),
             last_uplink: Some("2026-07-11T02:31:55+00:00".into()),
             staleness: Staleness::Stale,
             current: Some(12),
@@ -307,6 +325,7 @@ fn main() {
         },
         FleetRow {
             device: devices[2].clone(),
+            style: style_of(&devices[2].device_id),
             last_uplink: Some("2026-06-28T17:04:40+00:00".into()),
             staleness: Staleness::Dark,
             current: Some(640),
@@ -315,6 +334,7 @@ fn main() {
         },
         FleetRow {
             device: devices[3].clone(),
+            style: style_of(&devices[3].device_id),
             last_uplink: None,
             staleness: Staleness::Unknown,
             current: None,
@@ -372,8 +392,19 @@ fn main() {
         on: 2,
         off: 0,
     };
-    let history_html =
-        views::history_page(&fleet_history, &summary, DEMO_WINDOW, DEMO_SUBJECT).into_string();
+    // The two reporting devices start selected so the demo has traces.
+    let selected: Vec<String> = vec!["factory-01".into(), "factory-02".into()];
+    let history_html = views::history_page(
+        &fleet_history,
+        &summary,
+        DEMO_WINDOW,
+        DEMO_SUBJECT,
+        &Selection {
+            styles: &styles,
+            selected: &selected,
+        },
+    )
+    .into_string();
     fs::write(outdir.join("history.html"), staticize(history_html, &ids))
         .expect("write history page");
     assert_eq!(METRICS.len(), series[0].points[0].values.len());
@@ -404,7 +435,7 @@ fn main() {
             series: &series[slot],
             window: DEMO_WINDOW,
             truncated: false,
-            slot,
+            style: style_of(&record.device_id),
             power: demo_power(slot),
             current: demo_current(slot),
             threshold_ma: record.effective_threshold_ma(DEFAULT_POWER_THRESHOLD_MA),

@@ -145,10 +145,16 @@ async fn live_windows_use_uplink_period_buckets() {
         assert_eq!(h["devices"][0]["uplinks"], expected_in_window, "{w}");
         if w != "15m" {
             assert_eq!(occupied.len(), expected_in_window, "{w}: {occupied:?}");
+            // Buckets start on multiples of the step, so the 3 s old
+            // reading is in the last bucket or the one before it.
+            assert!(
+                *occupied.last().unwrap() >= buckets - 2,
+                "{w}: newest reading at the recent end: {occupied:?}"
+            );
             assert_eq!(
-                *occupied.last().unwrap(),
-                buckets - 1,
-                "{w}: newest reading in the last bucket"
+                until % step,
+                0,
+                "{w}: the grid is anchored to the clock, not the request"
             );
         }
     }

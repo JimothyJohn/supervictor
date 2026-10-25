@@ -393,6 +393,91 @@ async fn set_device_threshold_sets_clears_and_rejects_unknown() {
 // ── Uplinks ──────────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_device_style_sets_clears_and_rejects_unknown() {
+    use supervictor_common::models::{DeviceStyle, LineStyle, Marker};
+    let fx = Fixture::new("style", TTL_DAYS).await;
+    let mut styled = device("dev-1", Some("CN=dev-1"));
+    styled.style = DeviceStyle {
+        color: Some("#ff8800".into()),
+        line_style: Some(LineStyle::Dashed),
+        marker: None,
+    };
+    fx.store.put_device(styled.clone()).unwrap();
+    fx.store.put_device(device("dev-2", None)).unwrap();
+    assert_eq!(
+        fx.store.get_device("dev-1").unwrap().unwrap().style,
+        styled.style,
+        "style given at registration is stored with the item"
+    );
+    assert!(fx
+        .store
+        .get_device("dev-2")
+        .unwrap()
+        .unwrap()
+        .style
+        .is_default());
+
+    // SET the present parts, REMOVE the absent ones, in one update.
+    let updated = fx
+        .store
+        .set_device_style(
+            "dev-1",
+            DeviceStyle {
+                color: None,
+                line_style: Some(LineStyle::Dotted),
+                marker: Some(Marker::Diamond),
+            },
+        )
+        .unwrap();
+    assert_eq!(updated.style.color, None, "REMOVEd");
+    assert_eq!(updated.style.line_style, Some(LineStyle::Dotted));
+    assert_eq!(updated.style.marker, Some(Marker::Diamond));
+    assert_eq!(
+        updated.subject_dn.as_deref(),
+        Some("CN=dev-1"),
+        "ALL_NEW carries the untouched fields"
+    );
+    let listed = fx.store.list_devices().unwrap();
+    let dev1 = listed.iter().find(|d| d.device_id == "dev-1").unwrap();
+    assert_eq!(dev1.style, updated.style);
+
+    // All-absent is a pure REMOVE expression.
+    let cleared = fx
+        .store
+        .set_device_style("dev-1", DeviceStyle::default())
+        .unwrap();
+    assert!(cleared.style.is_default());
+    // All-present is a pure SET expression.
+    let full = fx
+        .store
+        .set_device_style(
+            "dev-1",
+            DeviceStyle {
+                color: Some("s7".into()),
+                line_style: Some(LineStyle::DashDot),
+                marker: Some(Marker::Triangle),
+            },
+        )
+        .unwrap();
+    assert_eq!(full.style.color.as_deref(), Some("s7"));
+    assert_eq!(full.style.marker, Some(Marker::Triangle));
+
+    let err = fx
+        .store
+        .set_device_style("ghost", DeviceStyle::default())
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::DeviceNotFound { .. }),
+        "got {err:?}"
+    );
+    assert!(
+        fx.store.get_device("ghost").unwrap().is_none(),
+        "a failed conditional update must not upsert"
+    );
+    fx.teardown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn uplinks_are_newest_first_with_limit() {
     let fx = Fixture::new("uplinks", TTL_DAYS).await;
     assert!(fx.store.get_uplinks("dev-1", 10).unwrap().is_empty());

@@ -95,9 +95,10 @@ supervictor/
 
 - **Fleet table** — every registered device with its status, freshness (fresh / stale / dark), last current and power badge. Rows update in place as uplinks arrive.
 - **Power state** — a device is *on* when its last current is at or above its threshold. The fleet default is `POWER_THRESHOLD_MA`; any device can carry its own bar (set from its page or `PUT /devices/{id}/threshold`), so "on" can mean *producing* for a press whose idle pump draws 9 A and *powered* for a bench board.
-- **History** — `/ui/history?window=` charts current, temperature, humidity, RSSI and heap for the whole fleet, plus status-over-time and power-over-time timelines. Windows: `1m`, `5m`, `15m`, `1h`, `6h`, `24h`, `7d`.
+- **History** — `/ui/history?window=` charts current, temperature, humidity, RSSI and heap for the devices you pick, plus fleet-wide status-over-time and power-over-time timelines. Windows: `1m`, `5m`, `15m`, `1h`, `6h`, `24h`, `7d`. Nothing is plotted until you click a device chip; the selection lives in the URL (`&device=`) and is remembered per browser.
+- **Device styles** — every device has a colour (auto-assigned from the palette at registration, or any `#rrggbb`), a line pattern (solid, dashed, dotted, dash-dot) and a point marker (circle, square, diamond, triangle), set from its page or `PUT /devices/{id}/style`, so two machines never have to look alike.
 - **Live windows** — at 5 minutes or shorter the page re-renders on every uplink instead of polling: 5-second buckets, one reading per bucket, charts that move as the plant does. Longer windows reload once a minute.
-- **Device pages** — the same charts for one machine, its recent raw uplinks, status revoke/reactivate and the threshold form.
+- **Device pages** — the same charts for one machine, its recent raw uplinks, status revoke/reactivate, the threshold form and the chart-style form.
 - **JSON twins** — `/fleet`, `/fleet/summary` and `/fleet/history` serve the same data to your alerting and scripts; a watchdog logs devices that go dark.
 
 ## Simulated machines
@@ -130,10 +131,11 @@ Every profile runs a working day of production runs, breaks and shutdowns (shutd
 | `GET` | `/` | Greeting + mTLS subject (if present) |
 | `POST` | `/` | Device uplink — `{ id, current, ...telemetry }` ([schema](docs/TELEMETRY.md)); identity bound to the client certificate |
 | `GET` | `/devices` | List registered devices |
-| `POST` | `/devices` | Register a device (`device_id`, `owner_id`, `subject_dn`, optional `power_threshold_ma`) |
+| `POST` | `/devices` | Register a device (`device_id`, `owner_id`, `subject_dn`, optional `power_threshold_ma`, `color`, `line_style`, `marker`) |
 | `GET` | `/devices/{id}` | Device details |
 | `GET` | `/devices/{id}/uplinks` | Recent uplinks |
 | `PUT` | `/devices/{id}/threshold` | Set or clear the device's power threshold (admin) |
+| `PUT` | `/devices/{id}/style` | Replace the device's chart style: `color` (`s0`–`s7` or `#rrggbb`), `line_style`, `marker` (admin) |
 | `GET` | `/fleet` | Per-device health: staleness, firmware, current, power, threshold (admin) |
 | `GET` | `/fleet/summary` | Aggregate counts for alerting (admin) |
 | `GET` | `/fleet/history?window=` | Bucketed telemetry + status and power timelines (admin) |

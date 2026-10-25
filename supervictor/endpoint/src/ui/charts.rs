@@ -3,15 +3,17 @@
 //!
 //! Conventions (shared with `style.css` and the hover script in
 //! `views.rs`): one y axis per chart, hairline grid, 2 px lines, ≥ 8 px end
-//! markers ringed in the surface colour, categorical colour by *slot*
-//! (`.s0`–`.s7`, assigned by fleet order so a device keeps its colour when
-//! others drop out), direct end labels for up to four series, a legend
-//! whenever there are two or more, and a collapsed table twin under every
-//! chart so no value is reachable by hover alone.
+//! markers ringed in the surface colour, categorical colour per device
+//! (`crate::style`: a palette slot `.s0`–`.s7` or a custom hex through
+//! `--c`), optional dash pattern and per-point glyph so two devices that
+//! share a colour still read apart, direct end labels for up to four
+//! series, a legend whenever there are two or more, and a collapsed table
+//! twin under every chart so no value is reachable by hover alone.
 
 use maud::{html, Markup};
 
 use crate::history::{PowerPoint, TimelinePoint, Window};
+use crate::style::{Marker, Resolved};
 use crate::time::format_rfc3339;
 
 /// Drawing surface in viewBox units.
@@ -50,18 +52,69 @@ pub struct Segment<'a> {
     pub values: Vec<usize>,
 }
 
+/// Missing buckets a live-window line is drawn straight across. The live
+/// presets bucket at the uplink period, so timing jitter alone puts two
+/// readings in one bucket and none in the next; one empty bucket there is
+/// jitter, not an outage. Longer windows have ≥ 10 s buckets and bridge
+/// nothing — a gap is a gap.
+pub const LIVE_BRIDGE_BUCKETS: usize = 1;
+/// Radius of the per-point marker glyph.
+const MARK_R: f64 = 3.0;
+
 /// One line on a chart.
 pub struct Series<'a> {
     /// Legend / end label (escaped by maud).
     pub label: &'a str,
-    /// Colour slot; `>= SLOTS` renders as the "other" grey.
-    pub slot: usize,
+    /// Colour, dash pattern, marker.
+    pub style: Resolved,
     /// One value per bucket; `None` breaks the line.
     pub values: &'a [Option<f64>],
 }
 
-/// One rendered line: slot class, SVG path data, last plotted point.
-type Trace = (String, String, Option<(f64, f64)>);
+/// One rendered line: SVG path data, every plotted point, the last one.
+struct Trace {
+    d: String,
+    points: Vec<(f64, f64)>,
+    end: Option<(f64, f64)>,
+}
+
+/// Inline `style` attribute carrying a custom colour (`--c:#rrggbb`), or
+/// nothing for a palette slot (the class does the work).
+fn inline_color(style: &Resolved) -> Option<String> {
+    style.color.custom_hex().map(|hex| format!("--c:{hex}"))
+}
+
+/// The per-point glyph for `marker` centred on (`cx`, `cy`); nothing for
+/// [`Marker::None`].
+pub fn glyph(marker: Marker, cx: f64, cy: f64, r: f64, style: &Resolved) -> Markup {
+    let class = style.color.class();
+    let inline = inline_color(style);
+    html! {
+        @match marker {
+            Marker::None => {},
+            Marker::Circle => circle .mark.(class) style=[inline] cx=(fmt1(cx)) cy=(fmt1(cy)) r=(fmt1(r)) {},
+            Marker::Square => rect .mark.(class) style=[inline] x=(fmt1(cx - r)) y=(fmt1(cy - r)) width=(fmt1(2.0 * r)) height=(fmt1(2.0 * r)) {},
+            Marker::Diamond => path .mark.(class) style=[inline]
+                d={ "M" (fmt1(cx)) "," (fmt1(cy - r)) " L" (fmt1(cx + r)) "," (fmt1(cy)) " L" (fmt1(cx)) "," (fmt1(cy + r)) " L" (fmt1(cx - r)) "," (fmt1(cy)) " Z" } {},
+            Marker::Triangle => path .mark.(class) style=[inline]
+                d={ "M" (fmt1(cx)) "," (fmt1(cy - r)) " L" (fmt1(cx + r)) "," (fmt1(cy + r)) " L" (fmt1(cx - r)) "," (fmt1(cy + r)) " Z" } {},
+        }
+    }
+}
+
+/// Legend / chip / table key for a style: a short line sample with its
+/// dash pattern and marker, in its colour. Replaces a flat colour square so
+/// two devices sharing a colour are told apart in the key too.
+pub fn key(style: &Resolved) -> Markup {
+    let class = style.color.class();
+    let inline = inline_color(style);
+    html! {
+        svg .key-svg viewBox="0 0 28 10" aria-hidden="true" {
+            line .line.(class).(style.line.label()) style=[inline.clone()] x1="1" y1="5" x2="27" y2="5" {}
+            (glyph(style.marker, 14.0, 5.0, MARK_R, style))
+        }
+    }
+}
 
 /// CSS class for a slot.
 pub fn slot_class(slot: usize) -> String {
@@ -236,26 +289,40 @@ pub fn line_chart(
         Axis::nice(0.0, 1.0)
     };
 
+    let bridge = if window.is_live() {
+        LIVE_BRIDGE_BUCKETS
+    } else {
+        0
+    };
     let paths: Vec<Trace> = series
         .iter()
         .map(|s| {
             let mut d = String::new();
-            let mut pen_up = true;
+            // Missing buckets since the last plotted point; `None` before
+            // the first. Up to `bridge` of them are drawn across.
+            let mut gap: Option<usize> = None;
+            let mut points = Vec::new();
             let mut end = None;
             for (i, v) in s.values.iter().enumerate().take(n) {
                 match v {
                     Some(v) if v.is_finite() => {
                         let x = x_of(i, n, ML, pw);
                         let y = axis.y(*v, ph);
-                        d.push_str(if pen_up { "M" } else { "L" });
+                        let joined = matches!(gap, Some(g) if g <= bridge);
+                        d.push_str(if joined { "L" } else { "M" });
                         d.push_str(&format!("{x:.1},{y:.1} "));
-                        pen_up = false;
+                        gap = Some(0);
+                        points.push((x, y));
                         end = Some((x, y));
                     }
-                    _ => pen_up = true,
+                    _ => {
+                        if let Some(g) = gap.as_mut() {
+                            *g += 1;
+                        }
+                    }
                 }
             }
-            (slot_class(s.slot), d, end)
+            Trace { d, points, end }
         })
         .collect();
 
@@ -263,7 +330,14 @@ pub fn line_chart(
         .iter()
         .map(|s| {
             let values: Vec<Option<f64>> = s.values.iter().take(n).copied().collect();
-            serde_json::json!({ "label": s.label, "slot": slot_class(s.slot), "values": values })
+            serde_json::json!({
+                "label": s.label,
+                "slot": s.style.color.class(),
+                "color": s.style.color.css(),
+                "dash": s.style.dash(),
+                "marker": s.style.marker.label(),
+                "values": values,
+            })
         })
         .collect();
     let data = serde_json::json!({
@@ -292,14 +366,21 @@ pub fn line_chart(
                     line .threshold x1=(ML) x2=(W - mr) y1=(fmt1(axis.y(r.value, ph))) y2=(fmt1(axis.y(r.value, ph))) {}
                     text .threshold-label x=(ML + 4.0) y=(fmt1(axis.y(r.value, ph) - 4.0)) { (r.label) }
                 }
-                @for (class, d, _) in &paths {
-                    @if !d.is_empty() {
-                        path .line.(class) d=(d) {}
+                @for (idx, trace) in paths.iter().enumerate() {
+                    @let style = &series[idx].style;
+                    @if !trace.d.is_empty() {
+                        path .line.(style.color.class()).(style.line.label()) style=[inline_color(style)] d=(trace.d) {}
+                    }
+                    @if style.marker != Marker::None {
+                        @for (x, y) in &trace.points {
+                            (glyph(style.marker, *x, *y, MARK_R, style))
+                        }
                     }
                 }
-                @for (idx, (class, _, end)) in paths.iter().enumerate() {
-                    @if let Some((x, y)) = end {
-                        circle .dot.(class) cx=(fmt1(*x)) cy=(fmt1(*y)) r="4" {}
+                @for (idx, trace) in paths.iter().enumerate() {
+                    @let style = &series[idx].style;
+                    @if let Some((x, y)) = trace.end {
+                        circle .dot.(style.color.class()) style=[inline_color(style)] cx=(fmt1(x)) cy=(fmt1(y)) r="4" {}
                         @if labeled {
                             text .end-label x=(fmt1(x + 8.0)) y=(fmt1(y + 3.5)) { (series[idx].label) }
                         }
@@ -311,7 +392,7 @@ pub fn line_chart(
             @if series.len() >= 2 {
                 ul .legend {
                     @for s in series {
-                        li { span .key.line-key.(slot_class(s.slot)) {} (s.label) }
+                        li { (key(&s.style)) (s.label) }
                     }
                 }
             }
@@ -593,12 +674,12 @@ mod tests {
             &[
                 Series {
                     label: "<dev&1>",
-                    slot: 0,
+                    style: Resolved::slot(0),
                     values: &a,
                 },
                 Series {
                     label: "dev-2",
-                    slot: 9,
+                    style: Resolved::slot(9),
                     values: &b,
                 },
             ],
@@ -611,8 +692,9 @@ mod tests {
         .into_string();
         assert!(html.contains("class=\"threshold\""), "reference line drawn");
         assert!(html.contains("on ≥ 3 mA"));
-        // Two path segments for `a` (gap at index 2) => two "M" commands.
-        let a_path = html.split("class=\"line s0\"").nth(1).unwrap();
+        // Two path segments for `a` (gap at index 2) => two "M" commands:
+        // a standard window bridges nothing.
+        let a_path = html.split("class=\"line s0 solid\"").nth(1).unwrap();
         let d = a_path
             .split("d=\"")
             .nth(1)
@@ -622,7 +704,7 @@ mod tests {
             .unwrap();
         assert_eq!(d.matches('M').count(), 2, "{d}");
         assert!(
-            html.contains("class=\"line s-other\""),
+            html.contains("class=\"line s-other solid\""),
             "9th slot folds to other"
         );
         assert!(html.contains("&lt;dev&amp;1&gt;"), "labels escaped");
@@ -650,7 +732,7 @@ mod tests {
             &times,
             &[Series {
                 label: "only",
-                slot: 0,
+                style: Resolved::slot(0),
                 values: &v,
             }],
             Window::H1,
@@ -667,7 +749,7 @@ mod tests {
             &times,
             &[Series {
                 label: "only",
-                slot: 0,
+                style: Resolved::slot(0),
                 values: &none,
             }],
             Window::H1,
@@ -676,6 +758,133 @@ mod tests {
         .into_string();
         assert!(html.contains("no data in window"));
         assert!(!html.contains("<path"));
+    }
+
+    /// Live windows bucket at the uplink period, where timing jitter alone
+    /// empties a bucket now and then: one missing bucket is drawn across,
+    /// two break the line. Standard windows bridge nothing.
+    #[test]
+    fn live_windows_bridge_a_single_missing_bucket() {
+        let times: Vec<u64> = (0..7).map(|i| 1_800_000_000 + i * 5).collect();
+        let v = [Some(1.0), None, Some(2.0), None, None, Some(3.0), Some(4.0)];
+        let path_of = |window: Window| {
+            let html = line_chart(
+                "c",
+                "current",
+                "mA",
+                &times,
+                &[Series {
+                    label: "d",
+                    style: Resolved::slot(0),
+                    values: &v,
+                }],
+                window,
+                None,
+            )
+            .into_string();
+            html.split("class=\"line s0 solid\"")
+                .nth(1)
+                .unwrap()
+                .split("d=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        let live = path_of(Window::M1);
+        assert_eq!(
+            live.matches('M').count(),
+            2,
+            "1-bucket gap bridged, 2-bucket gap kept: {live}"
+        );
+        let standard = path_of(Window::H1);
+        assert_eq!(standard.matches('M').count(), 3, "{standard}");
+    }
+
+    /// Dash pattern and marker glyphs follow the series style; a custom
+    /// colour rides on `--c`; the legend key shows the same line sample.
+    #[test]
+    fn series_style_draws_dashes_markers_and_custom_colours() {
+        use crate::style::{Color, LineStyle};
+        let times = [1_800_000_000u64, 1_800_000_060, 1_800_000_120];
+        let a = [Some(1.0), Some(2.0), Some(3.0)];
+        let b = [Some(3.0), None, Some(1.0)];
+        let html = line_chart(
+            "c",
+            "t",
+            "°C",
+            &times,
+            &[
+                Series {
+                    label: "dashed-circles",
+                    style: Resolved {
+                        color: Color::Slot(2),
+                        line: LineStyle::Dashed,
+                        marker: Marker::Circle,
+                    },
+                    values: &a,
+                },
+                Series {
+                    label: "hex-diamonds",
+                    style: Resolved {
+                        color: Color::Hex("#123abc".into()),
+                        line: LineStyle::Dotted,
+                        marker: Marker::Diamond,
+                    },
+                    values: &b,
+                },
+            ],
+            Window::H1,
+            None,
+        )
+        .into_string();
+        assert!(
+            html.contains("<path class=\"line s2 dashed\" d=\""),
+            "{html}"
+        );
+        assert_eq!(
+            html.matches("<circle class=\"mark s2\"").count(),
+            4,
+            "one per point plus the legend key"
+        );
+        assert!(
+            html.contains("<path class=\"line custom dotted\" style=\"--c:#123abc\""),
+            "{html}"
+        );
+        assert_eq!(
+            html.matches("<path class=\"mark custom\" style=\"--c:#123abc\"")
+                .count(),
+            3,
+            "diamonds only where there is a value, plus the legend key"
+        );
+        assert!(
+            html.contains("<circle class=\"dot custom\" style=\"--c:#123abc\""),
+            "end dot in the custom colour"
+        );
+        // Legend keys are line samples with the pattern + glyph.
+        let legend = html.split("class=\"legend\"").nth(1).unwrap();
+        assert_eq!(legend.matches("class=\"key-svg\"").count(), 2);
+        assert!(legend.contains("class=\"line s2 dashed\""));
+        assert!(legend.contains("class=\"line custom dotted\" style=\"--c:#123abc\""));
+        // Hover data carries the style for the tooltip key.
+        assert!(html.contains("&quot;dash&quot;:&quot;8 5&quot;"));
+        assert!(html.contains("&quot;dash&quot;:&quot;1.5 4&quot;"));
+        assert!(html.contains("&quot;color&quot;:&quot;var(--s2)&quot;"));
+        assert!(html.contains("&quot;marker&quot;:&quot;diamond&quot;"));
+        // No glyphs for the default marker.
+        let plain = key(&Resolved::slot(1)).into_string();
+        assert!(!plain.contains("mark"), "{plain}");
+        assert!(plain.contains("class=\"line s1 solid\""));
+        for marker in [Marker::Square, Marker::Triangle] {
+            let k = key(&Resolved {
+                marker,
+                ..Resolved::slot(1)
+            })
+            .into_string();
+            assert!(k.contains("class=\"mark s1\""), "{marker:?}: {k}");
+        }
     }
 
     #[test]

@@ -32,8 +32,10 @@ use crate::live;
 use crate::middleware::{extract_client_subject, forbidden, require_admin, sanitize_for_log};
 use crate::routes::{AppState, HistoryQuery};
 use crate::store::DeviceStore;
+use crate::style;
+use supervictor_common::models::{DeviceStyle, LineStyle, Marker};
 use supervictor_common::status;
-use views::FleetRow;
+use views::{FleetRow, Selection};
 
 const CSRF_COOKIE: &str = "sv_csrf";
 
@@ -54,6 +56,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/ui/devices/{device_id}/threshold",
             axum::routing::post(set_threshold),
+        )
+        .route(
+            "/ui/devices/{device_id}/style",
+            axum::routing::post(set_style),
         )
         .route("/ui/events", get(sse::events))
         .route("/ui/assets/style.css", get(assets::stylesheet))
@@ -135,6 +141,7 @@ fn csrf_ok(headers: &HeaderMap, submitted: &str) -> bool {
 pub fn fleet_rows(store: &dyn DeviceStore, threshold_ma: i64) -> Result<Vec<FleetRow>, AppError> {
     // Re-fetch devices for full records; snapshot carries the health fields.
     let devices = store.list_devices()?;
+    let mut styles = style::resolve(&devices);
     let health = fleet::snapshot_now(store, threshold_ma)?;
     let by_id: std::collections::HashMap<String, fleet::FleetDevice> = health
         .into_iter()
@@ -143,23 +150,30 @@ pub fn fleet_rows(store: &dyn DeviceStore, threshold_ma: i64) -> Result<Vec<Flee
 
     Ok(devices
         .into_iter()
-        .map(|device| match by_id.get(&device.device_id) {
-            Some(h) => FleetRow {
-                last_uplink: h.last_uplink.clone(),
-                staleness: h.staleness,
-                current: h.current,
-                power: h.power,
-                threshold_ma: h.threshold_ma,
-                device,
-            },
-            None => FleetRow {
-                threshold_ma: device.effective_threshold_ma(threshold_ma),
-                device,
-                last_uplink: None,
-                staleness: fleet::Staleness::Unknown,
-                current: None,
-                power: fleet::PowerState::Unknown,
-            },
+        .map(|device| {
+            let style = styles
+                .remove(&device.device_id)
+                .unwrap_or_else(|| style::Resolved::slot(style::SLOTS as usize));
+            match by_id.get(&device.device_id) {
+                Some(h) => FleetRow {
+                    last_uplink: h.last_uplink.clone(),
+                    staleness: h.staleness,
+                    current: h.current,
+                    power: h.power,
+                    threshold_ma: h.threshold_ma,
+                    device,
+                    style,
+                },
+                None => FleetRow {
+                    threshold_ma: device.effective_threshold_ma(threshold_ma),
+                    device,
+                    last_uplink: None,
+                    staleness: fleet::Staleness::Unknown,
+                    current: None,
+                    power: fleet::PowerState::Unknown,
+                    style,
+                },
+            }
         })
         .collect())
 }
@@ -182,18 +196,58 @@ fn now_unix() -> u64 {
     crate::time::parse_rfc3339_unix(&crate::time::now_rfc3339()).unwrap_or(0)
 }
 
-/// `GET /ui/history?window=` — fleet status timeline + per-metric charts.
+/// The history page's query: `window=` (one preset) and any number of
+/// `device=` keys naming the devices to plot. Parsed as raw pairs because
+/// a device id may contain any non-control byte, commas included, so a
+/// repeated key is the only unambiguous list encoding.
+fn history_query(pairs: &[(String, String)]) -> Result<(Window, Vec<String>), AppError> {
+    let window = pairs
+        .iter()
+        .rev()
+        .find(|(k, _)| k == "window")
+        .map(|(_, v)| v.as_str());
+    let window = Window::parse(window)?;
+    let mut devices: Vec<String> = Vec::new();
+    for (_, v) in pairs.iter().filter(|(k, _)| k == "device") {
+        if !v.is_empty() && !devices.contains(v) {
+            devices.push(v.clone());
+        }
+    }
+    Ok((window, devices))
+}
+
+/// `GET /ui/history?window=&device=&device=` — fleet status timeline,
+/// power stack, and per-metric charts for the selected devices. Unknown
+/// device ids in the selection are ignored (a bookmark outlives a device);
+/// no selection plots no traces.
 async fn history_view(
     State(state): State<AppState>,
-    Query(query): Query<HistoryQuery>,
+    Query(pairs): Query<Vec<(String, String)>>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
-    let window = Window::parse(query.window.as_deref())?;
+    let (window, wanted) = history_query(&pairs)?;
     let store = state.store.as_ref();
     let now = now_unix();
     let history = history::fleet_history(store, window, now, state.power_threshold_ma)?;
     let summary = fleet::summarize(&fleet::snapshot(store, now, state.power_threshold_ma)?);
-    let page = views::history_page(&history, &summary, window, &subject_of(&headers));
+    let styles = style::resolve(&store.list_devices()?);
+    // Fleet order, known ids only.
+    let selected: Vec<String> = history
+        .devices
+        .iter()
+        .filter(|d| wanted.contains(&d.device_id))
+        .map(|d| d.device_id.clone())
+        .collect();
+    let page = views::history_page(
+        &history,
+        &summary,
+        window,
+        &subject_of(&headers),
+        &Selection {
+            styles: &styles,
+            selected: &selected,
+        },
+    );
     Ok(page.into_response())
 }
 
@@ -229,16 +283,11 @@ async fn device_detail(
         .ok_or(AppError::DeviceNotFound {
             device_id: device_id.clone(),
         })?;
-    // Colour slot = position in the fleet, so the device wears the same
-    // colour here as on the fleet history page.
-    let mut ids: Vec<String> = state
-        .store
-        .list_devices()?
-        .into_iter()
-        .map(|d| d.device_id)
-        .collect();
-    ids.sort();
-    let slot = ids.iter().position(|id| *id == device_id).unwrap_or(0);
+    // Same resolved style as the fleet pages, so the device wears the same
+    // colour everywhere.
+    let style = style::resolve(&state.store.list_devices()?)
+        .remove(&device_id)
+        .unwrap_or_else(|| style::Resolved::slot(style::SLOTS as usize));
     let now = now_unix();
     let (series, truncated) =
         history::device_history(state.store.as_ref(), &device_id, window, now)?;
@@ -256,7 +305,7 @@ async fn device_detail(
             series: &series,
             window,
             truncated,
-            slot,
+            style,
             power,
             current,
             threshold_ma: device.effective_threshold_ma(state.power_threshold_ma),
@@ -385,4 +434,103 @@ async fn set_threshold(
         "fleet action"
     );
     Ok(Redirect::to(&format!("/ui/devices/{device_id}")).into_response())
+}
+
+#[derive(Deserialize)]
+struct StyleForm {
+    csrf: String,
+    /// Palette slot token, `custom` (read `custom_color`), or empty for
+    /// no stored colour.
+    #[serde(default)]
+    color: String,
+    #[serde(default)]
+    custom_color: String,
+    #[serde(default)]
+    line_style: String,
+    #[serde(default)]
+    marker: String,
+}
+
+async fn set_style(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    headers: HeaderMap,
+    Form(form): Form<StyleForm>,
+) -> Result<Response, AppError> {
+    if !csrf_ok(&headers, &form.csrf) {
+        return Ok(forbidden("invalid CSRF token"));
+    }
+    let bad = |what: &str| AppError::InvalidPayload {
+        detail: format!("{what}: not an option"),
+        structured: None,
+    };
+    let color = match form.color.trim() {
+        "" => None,
+        "custom" => Some(form.custom_color.trim().to_string()),
+        slot => Some(slot.to_string()),
+    };
+    // Default options submit as their own token; `solid` / `none` store as
+    // unset so the record carries only what differs from the default.
+    let line_style = match form.line_style.trim() {
+        "" => None,
+        t => Some(LineStyle::parse(t).ok_or_else(|| bad("line_style"))?),
+    }
+    .filter(|l| *l != LineStyle::Solid);
+    let marker = match form.marker.trim() {
+        "" => None,
+        t => Some(Marker::parse(t).ok_or_else(|| bad("marker"))?),
+    }
+    .filter(|m| *m != Marker::None);
+    // Same validation and store path as the JSON API.
+    let body = serde_json::to_string(&DeviceStyle {
+        color,
+        line_style,
+        marker,
+    })
+    .map_err(|e| AppError::InvalidPayload {
+        detail: e.to_string(),
+        structured: None,
+    })?;
+    let saved =
+        crate::handlers::handle_set_device_style(&device_id, Some(&body), state.store.as_ref())?;
+    tracing::info!(
+        admin = %sanitize_for_log(&subject_of(&headers)),
+        device_id = %sanitize_for_log(&device_id),
+        action = "style",
+        color = ?saved.color,
+        line_style = ?saved.line_style,
+        marker = ?saved.marker,
+        "fleet action"
+    );
+    Ok(Redirect::to(&format!("/ui/devices/{device_id}")).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pairs(q: &[(&str, &str)]) -> Vec<(String, String)> {
+        q.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn history_query_takes_repeated_device_keys_in_order_without_dupes() {
+        let (w, d) = history_query(&pairs(&[])).unwrap();
+        assert_eq!(w, Window::DEFAULT);
+        assert!(d.is_empty());
+        let (w, d) = history_query(&pairs(&[
+            ("device", "b,2"),
+            ("window", "5m"),
+            ("device", ""),
+            ("device", "a"),
+            ("device", "b,2"),
+            ("other", "x"),
+        ]))
+        .unwrap();
+        assert_eq!(w, Window::M5);
+        assert_eq!(d, ["b,2", "a"], "commas are id bytes, empties drop");
+        assert!(history_query(&pairs(&[("window", "2m")])).is_err());
+    }
 }

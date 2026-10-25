@@ -673,7 +673,11 @@ mod tests {
             let b = w.grid(base + step - 1);
             assert_eq!(a, b, "{w:?}: same step, same grid");
             let c = w.grid(base + step);
-            assert_eq!(c.since, a.since + step, "{w:?}: next step shifts one bucket");
+            assert_eq!(
+                c.since,
+                a.since + step,
+                "{w:?}: next step shifts one bucket"
+            );
             let t = base - 3 * step + 1;
             let (Some(ia), Some(ic)) = (a.bucket_of(t), c.bucket_of(t)) else {
                 panic!("{w:?}: reading inside both grids");
