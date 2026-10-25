@@ -1,0 +1,149 @@
+# A fleet of simulated industrial machines, one container each, posting mTLS
+# telemetry like real boards. Each service is the desktop client with a
+# SIM_PROFILE (supervictor/edge/src/models/profile.rs).
+#
+# Certs and registration first (issues missing device certs, registers them,
+# then brings the fleet up):
+#   ./scripts/sim-fleet.sh up [staging|prod]
+# or by hand, from the repo root:
+#   docker compose -f supervictor/edge/docker-compose.sim.yml up -d --build
+#
+# Knobs (environment or a .env next to this file):
+#   SIM_HOST        endpoint host (default staging.supervictor.advin.io)
+#   SIM_CA          CA bundle path under certs/ (default ca/staging-bundle.pem;
+#                   prod: ca/AmazonRootCA1.pem)
+#   SIM_INTERVAL_S  seconds between uplinks (default 5)
+#   SIM_SPEED       simulated seconds per real second (default 12: a working
+#                   day of runs, breaks and shutdowns passes in ~2 hours)
+
+x-device: &device
+  image: supervictor-device:local
+  restart: unless-stopped
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  mem_limit: 64m
+  cpus: 0.25
+  logging:
+    driver: json-file
+    options: { max-size: "5m", max-file: "2" }
+
+x-env: &env
+  HOST: ${SIM_HOST:-staging.supervictor.advin.io}
+  INTERVAL_S: ${SIM_INTERVAL_S:-5}
+  SIM_SPEED: ${SIM_SPEED:-12}
+
+services:
+  sim-extruder-01:
+    <<: *device
+    build:
+      context: ../../
+      dockerfile: supervictor/edge/Dockerfile.desktop
+    environment:
+      <<: *env
+      DEVICE_ID: sim-extruder-01
+      SIM_PROFILE: extruder
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-extruder-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-extruder-01/client.key:/certs/client.key:ro
+
+  sim-press-01:
+    <<: *device
+    environment:
+      <<: *env
+      DEVICE_ID: sim-press-01
+      SIM_PROFILE: press-brake
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-press-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-press-01/client.key:/certs/client.key:ro
+
+  sim-cnc-01:
+    <<: *device
+    environment:
+      <<: *env
+      DEVICE_ID: sim-cnc-01
+      SIM_PROFILE: cnc
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-cnc-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-cnc-01/client.key:/certs/client.key:ro
+
+  sim-saw-01:
+    <<: *device
+    environment:
+      <<: *env
+      DEVICE_ID: sim-saw-01
+      SIM_PROFILE: saw
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-saw-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-saw-01/client.key:/certs/client.key:ro
+
+  sim-oven-01:
+    <<: *device
+    environment:
+      <<: *env
+      DEVICE_ID: sim-oven-01
+      SIM_PROFILE: oven
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-oven-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-oven-01/client.key:/certs/client.key:ro
+
+  sim-compressor-01:
+    <<: *device
+    environment:
+      <<: *env
+      DEVICE_ID: sim-compressor-01
+      SIM_PROFILE: compressor
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-compressor-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-compressor-01/client.key:/certs/client.key:ro
+
+  sim-conveyor-01:
+    <<: *device
+    environment:
+      <<: *env
+      DEVICE_ID: sim-conveyor-01
+      SIM_PROFILE: conveyor
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-conveyor-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-conveyor-01/client.key:/certs/client.key:ro
+
+  sim-molder-01:
+    <<: *device
+    environment:
+      <<: *env
+      DEVICE_ID: sim-molder-01
+      SIM_PROFILE: molder
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-molder-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-molder-01/client.key:/certs/client.key:ro
+
+  sim-welder-01:
+    <<: *device
+    environment:
+      <<: *env
+      DEVICE_ID: sim-welder-01
+      SIM_PROFILE: welder
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-welder-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-welder-01/client.key:/certs/client.key:ro
+
+  sim-pump-01:
+    <<: *device
+    environment:
+      <<: *env
+      DEVICE_ID: sim-pump-01
+      SIM_PROFILE: pump
+    volumes:
+      - ../../certs/${SIM_CA:-ca/staging-bundle.pem}:/certs/ca.pem:ro
+      - ../../certs/devices/sim-pump-01/client.pem:/certs/client.pem:ro
+      - ../../certs/devices/sim-pump-01/client.key:/certs/client.key:ro
