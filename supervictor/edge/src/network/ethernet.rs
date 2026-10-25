@@ -1,9 +1,10 @@
-//! Wired Ethernet uplink for the ESP32-POE-ISO (EMAC + LAN8710A over RMII).
+//! Wired Ethernet uplink for the Olimex PoE boards (EMAC + LAN87x0 over RMII).
+//! Board specifics (clock pin, PHY address) come from [`crate::board::active`].
 //!
 //! Bring-up sequence (order matters — the PHY needs the 50 MHz reference
 //! clock and power before it will answer on MDIO):
 //!
-//! 1. APLL → 50 MHz → GPIO17 mux ([`crate::board::poe_iso::enable_rmii_clk_out`])
+//! 1. APLL → 50 MHz → clock-out pad mux ([`crate::board::active::enable_rmii_clk_out`])
 //! 2. PHY power on GPIO12, then a stabilization delay
 //! 3. EMAC init (also enables the internal-clock selector, so the reference
 //!    clock actually reaches the pin here)
@@ -23,7 +24,7 @@ use ph_esp32_mac::esp_hal::{EmacBuilder, EmacExt, EmacPhyBundle, Priority};
 use ph_esp32_mac::hal::MdioController;
 use ph_esp32_mac::{Emac, EmacConfig, EmbassyEmac, Lan8720a, PhyInterface, RmiiClockMode};
 
-use crate::board::poe_iso;
+use crate::board::active as board;
 use crate::config::{
     EMAC_FRAME_BUF_SIZE, EMAC_RX_FRAMES, EMAC_TX_FRAMES, ETH_LINK_POLL_INTERVAL,
     PHY_POWER_STABLE_DELAY_MS,
@@ -71,8 +72,8 @@ pub fn init(
 ) -> Result<(Stack<'static>, Runner<'static, EthDriver>, *mut EthEmac), ph_esp32_mac::Error> {
     let mut delay = Delay::new();
 
-    // 1. 50 MHz reference clock plumbing (APLL + GPIO17 mux).
-    poe_iso::enable_rmii_clk_out(&mut delay);
+    // 1. 50 MHz reference clock plumbing (APLL + the board's clock-out pad).
+    board::enable_rmii_clk_out(&mut delay);
 
     // 2. PHY power. The LAN8710A latches its configuration straps on power-on
     //    and needs a settle window before MDIO responds.
@@ -81,11 +82,11 @@ pub fn init(
 
     // 3. EMAC init. Locally-administered fallback never happens: the efuse
     //    base MAC is factory-programmed on every ESP32.
-    let mac = poe_iso::ethernet_mac(esp_hal::efuse::Efuse::mac_address());
+    let mac = board::ethernet_mac(esp_hal::efuse::Efuse::mac_address());
     let config = EmacConfig::rmii_esp32_default()
         .with_phy_interface(PhyInterface::Rmii)
         .with_rmii_clock(RmiiClockMode::InternalOutput {
-            gpio: poe_iso::RMII_CLK_OUT_GPIO,
+            gpio: board::RMII_CLK_OUT_GPIO,
         })
         .with_mac_address(mac);
 
@@ -103,7 +104,7 @@ pub fn init(
         let emac = unsafe { &mut *emac_ptr };
         let mut bundle = EmacPhyBundle::new(
             emac,
-            Lan8720a::new(poe_iso::PHY_ADDR),
+            Lan8720a::new(board::PHY_ADDR),
             MdioController::new(Delay::new()),
         );
         bundle.init_phy()?;
@@ -111,11 +112,7 @@ pub fn init(
         use ph_esp32_mac::PhyDriver;
         match phy.phy_id(&mut mdio) {
             // LAN8710A/LAN8720A family reads 0x0007C0Fx.
-            Ok(id) => println!(
-                "Ethernet PHY at addr {}: id {:#010x}",
-                poe_iso::PHY_ADDR,
-                id
-            ),
+            Ok(id) => println!("Ethernet PHY at addr {}: id {:#010x}", board::PHY_ADDR, id),
             Err(e) => println!("Ethernet PHY id read failed: {:?}", e),
         }
     }
@@ -146,7 +143,7 @@ pub async fn eth_net_task(mut runner: Runner<'static, EthDriver>) -> ! {
 #[embassy_executor::task]
 pub async fn eth_link_task(emac_ptr: *mut EthEmac) -> ! {
     let mut mdio = MdioController::new(Delay::new());
-    let mut phy = Lan8720a::new(poe_iso::PHY_ADDR);
+    let mut phy = Lan8720a::new(board::PHY_ADDR);
     let mut was_up = false;
 
     loop {

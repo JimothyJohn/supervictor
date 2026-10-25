@@ -56,6 +56,10 @@ embedded = [
 ]
 wifi = ["embedded", "esp-radio", "esp-rtos/esp-radio"]
 ethernet = ["embedded", "ph-esp32-mac", "embassy-net-driver", "esp32", "chip-esp32"]
+# Board variant on top of `ethernet`. Default is the ESP32-POE-ISO (RMII clock
+# out GPIO17); `board-poe2` is the ESP32-POE2, whose WROVER-E keeps 16/17 for
+# PSRAM and takes the clock out of GPIO0 (see src/board/poe2.rs).
+board-poe2 = ["ethernet"]
 
 # Use custom libraries
 [lib]

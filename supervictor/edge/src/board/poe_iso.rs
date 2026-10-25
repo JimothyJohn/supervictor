@@ -120,8 +120,11 @@ pub fn ethernet_mac(base: [u8; 6]) -> [u8; 6] {
 // =============================================================================
 
 /// APLL power-up and 50 MHz RMII clock routing to GPIO17.
+///
+/// `pub(super)` so sibling boards (ESP32-POE2) reuse the APLL half and only
+/// swap the pin routing.
 #[cfg(feature = "ethernet")]
-mod bringup {
+pub(super) mod bringup {
     use super::{apll_coeffs, ApllCoeffs, RMII_CLK_HZ, XTAL_FREQ_MHZ};
 
     // ROM regi2c accessors for the APLL's internal-I2C register file. The
@@ -162,6 +165,13 @@ mod bringup {
     /// clock only reaches the pin once the EMAC's internal-clock selector is
     /// set (ph-esp32-mac does that during `Emac::init`).
     pub fn enable_rmii_clk_out(delay: &mut esp_hal::delay::Delay) {
+        enable_apll_50mhz(delay);
+        route_clk_out_gpio17();
+    }
+
+    /// Power up the APLL and tune it to 50 MHz. Board-agnostic: which pad the
+    /// clock leaves on is the caller's business.
+    pub fn enable_apll_50mhz(delay: &mut esp_hal::delay::Delay) {
         let ApllCoeffs {
             o_div,
             mut sdm0,
@@ -230,8 +240,10 @@ mod bringup {
                 delay.delay_micros(1);
             }
         }
+    }
 
-        // Route the EMAC reference clock out on GPIO17.
+    /// Route the EMAC reference clock out on GPIO17 (`EMAC_CLK_OUT_180`).
+    fn route_clk_out_gpio17() {
         let io_mux = unsafe { &*esp32::IO_MUX::ptr() };
         io_mux
             .gpio17()
