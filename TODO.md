@@ -283,3 +283,12 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: rfq-scope
       asked: 2026-10-25
       by: hardware session (docs/hardware-spec)
+- [ ] **OTA enablement: when does the rack take its one USB reflash?** — PR 105 (feat/ota) changes the partition table to the A/B layout; merging is safe (boards on the factory table log `OTA: unavailable` and keep uplinking) but each board needs one more USB flash (`./scripts/flash.sh <device> staging`, ~2 min each) before it can ever OTA. Seven racked boards today. After that, never again.
+      needs: a date, or "merge now, flash as boards come to the bench"
+      result: PR 105 un-drafted; every board on the A/B table; rack-flash.sh becomes the recovery path only
+      options: switch day 2026-10-26, all seven | merge now, flash opportunistically | hold until the bench run (ota-bench) passes
+      est: 30m
+      difficulty: low
+      id: ota-enablement-reflash
+      asked: 2026-10-25
+      by: OTA session (feat/ota)
