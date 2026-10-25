@@ -14,7 +14,7 @@ use serde::ser::SerializeMap;
 use serde::Serialize;
 
 use crate::error::AppError;
-use crate::fleet::{staleness_of, Staleness, DARK_SECS};
+use crate::fleet::{payload_current, power_state, staleness_of, PowerState, Staleness, DARK_SECS};
 use crate::models::{DeviceRecord, UplinkRecord};
 use crate::store::DeviceStore;
 use crate::time::{format_rfc3339, parse_rfc3339_unix};
@@ -195,11 +195,33 @@ impl TimelinePoint {
     }
 }
 
+/// Active-device power counts as of the end of one bucket.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct PowerPoint {
+    /// Bucket start, Unix seconds (counts are evaluated at `t + step`).
+    pub t: u64,
+    /// Last current at or above the threshold.
+    pub on: usize,
+    /// Last current below the threshold.
+    pub off: usize,
+    /// No reading, or the last one older than `DARK_SECS`.
+    pub unknown: usize,
+}
+
+impl PowerPoint {
+    /// Active devices represented at this point.
+    pub fn total(&self) -> usize {
+        self.on + self.off + self.unknown
+    }
+}
+
 /// The `/fleet/history` response.
 #[derive(Debug, Clone, Serialize)]
 pub struct History {
     /// Preset label (`"1h"`).
     pub window: &'static str,
+    /// Current (mA) at or above which a device counts as on.
+    pub threshold_ma: i64,
     /// Window start, RFC 3339.
     pub since: String,
     /// Window end (`now`), RFC 3339.
@@ -208,6 +230,8 @@ pub struct History {
     pub step_s: u64,
     /// Active-device staleness per bucket.
     pub timeline: Vec<TimelinePoint>,
+    /// Active-device power state per bucket.
+    pub power: Vec<PowerPoint>,
     /// Per-device bucketed telemetry, sorted by device id, every
     /// registered device present (empty series for silent ones).
     pub devices: Vec<DeviceSeries>,
@@ -357,11 +381,73 @@ fn staleness_of_unix(last: u64, now: u64) -> Staleness {
     staleness_of(Some(&format_rfc3339(last, 0)), now)
 }
 
+/// Power state of the active devices at the end of every bucket: the
+/// last `current` at or before the bucket end, judged against
+/// `threshold_ma`, and `unknown` once that reading is `DARK_SECS` old (or
+/// never existed). Same row contract as [`status_timeline`].
+pub fn power_timeline(
+    devices: &[DeviceRecord],
+    rows: &[UplinkRecord],
+    since: u64,
+    step: u64,
+    threshold_ma: i64,
+) -> Vec<PowerPoint> {
+    let mut readings: HashMap<&str, Vec<(u64, Option<i64>)>> = devices
+        .iter()
+        .filter(|d| d.status == status::ACTIVE)
+        .map(|d| (d.device_id.as_str(), Vec::new()))
+        .collect();
+    for row in rows {
+        if let (Some(list), Some(t)) = (
+            readings.get_mut(row.device_id.as_str()),
+            parse_rfc3339_unix(&row.received_at),
+        ) {
+            list.push((t, payload_current(&row.payload)));
+        }
+    }
+    for list in readings.values_mut() {
+        list.sort_unstable_by_key(|(t, _)| *t);
+    }
+    let mut cursors: HashMap<&str, usize> = readings.keys().map(|k| (*k, 0)).collect();
+
+    (0..BUCKETS)
+        .map(|i| {
+            let t0 = since + i as u64 * step;
+            let at = t0 + step;
+            let mut point = PowerPoint {
+                t: t0,
+                on: 0,
+                off: 0,
+                unknown: 0,
+            };
+            for (id, list) in &readings {
+                let cursor = cursors.get_mut(id).expect("cursor per device");
+                while *cursor < list.len() && list[*cursor].0 <= at {
+                    *cursor += 1;
+                }
+                let state = match cursor.checked_sub(1).map(|c| list[c]) {
+                    Some((last, current)) => {
+                        power_state(current, staleness_of_unix(last, at), threshold_ma)
+                    }
+                    None => PowerState::Unknown,
+                };
+                match state {
+                    PowerState::On => point.on += 1,
+                    PowerState::Off => point.off += 1,
+                    PowerState::Unknown => point.unknown += 1,
+                }
+            }
+            point
+        })
+        .collect()
+}
+
 /// Assemble the fleet history for `window` ending at `now_unix`.
 pub fn fleet_history(
     store: &dyn DeviceStore,
     window: Window,
     now_unix: u64,
+    threshold_ma: i64,
 ) -> Result<History, AppError> {
     let step = window.step();
     let since = now_unix.saturating_sub(step * BUCKETS as u64);
@@ -380,6 +466,7 @@ pub fn fleet_history(
     rows.truncate(MAX_ROWS);
 
     let timeline = status_timeline(&devices, &latest, &rows, since, step);
+    let power = power_timeline(&devices, &rows, since, step, threshold_ma);
     let series = devices
         .iter()
         .map(|d| bucket_series(&d.device_id, &rows, since, step))
@@ -387,10 +474,12 @@ pub fn fleet_history(
 
     Ok(History {
         window: window.label(),
+        threshold_ma,
         since: format_rfc3339(since, 0),
         until: format_rfc3339(now_unix, 0),
         step_s: step,
         timeline,
+        power,
         devices: series,
         truncated,
     })
@@ -622,6 +711,48 @@ mod tests {
         assert_eq!(tl[BUCKETS - 1].stale, 1, "{:?}", tl[BUCKETS - 1]);
         // One second later it was still fresh.
         assert_eq!(tl[BUCKETS - 2].fresh, 1, "{:?}", tl[BUCKETS - 2]);
+    }
+
+    #[test]
+    fn power_timeline_follows_the_last_reading_and_forgets_dark_devices() {
+        let step = 10;
+        let since = NOW - step * BUCKETS as u64;
+        let devices = vec![
+            device("pump", "active"),
+            device("silent", "active"),
+            device("revoked", "inactive"),
+        ];
+        let rows = vec![
+            // on at the start of the window, drops out in the middle, back on at the end
+            row("pump", since + 5, serde_json::json!({"current": 1500})),
+            row("pump", since + 405, serde_json::json!({"current": 0})),
+            row("pump", since + 805, serde_json::json!({"current": 100})),
+            row("revoked", NOW, serde_json::json!({"current": 9000})),
+        ];
+        let tl = power_timeline(&devices, &rows, since, step, 100);
+        assert_eq!(tl.len(), BUCKETS);
+        assert!(tl.iter().all(|p| p.total() == 2), "active devices only");
+        assert_eq!(
+            tl[0],
+            PowerPoint {
+                t: since,
+                on: 1,
+                off: 0,
+                unknown: 1
+            }
+        );
+        assert_eq!(tl[40].on, 0, "{:?}", tl[40]);
+        assert_eq!(tl[40].off, 1, "dropout to 0 reads as off: {:?}", tl[40]);
+        assert_eq!(tl[80].on, 1, "100 mA == threshold is on: {:?}", tl[80]);
+        assert_eq!(tl[BUCKETS - 1].on, 1);
+
+        // A reading older than DARK_SECS no longer counts as a power state.
+        let long = Window::D7.step();
+        let since = NOW - long * BUCKETS as u64;
+        let rows = vec![row("pump", since + 1, serde_json::json!({"current": 1500}))];
+        let tl = power_timeline(&devices[..1], &rows, since, long, 100);
+        assert_eq!(tl[0].on, 1, "{:?}", tl[0]);
+        assert_eq!(tl[BUCKETS - 1].unknown, 1, "{:?}", tl[BUCKETS - 1]);
     }
 
     #[test]

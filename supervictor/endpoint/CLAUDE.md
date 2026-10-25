@@ -36,6 +36,12 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   (no JS chart lib); the inline script only adds hover/keyboard tooltips
   and a visible-tab reload. Colours by fleet slot (`.s0`–`.s7`), validated
   against the dark surface — don't hand-pick new ones.
+- Power state: `fleet::power_state` — last `current` ≥ `POWER_THRESHOLD_MA`
+  (default 100, any i64) is `on`, below is `off`, no reading or a dark /
+  never device is `unknown`. Surfaces on `/fleet` (`current`, `power`),
+  `/fleet/summary` (`on`, `off`), `/fleet/history` (`power` timeline,
+  `threshold_ma`), the fleet table and the charts (current chart first,
+  with the threshold drawn).
 - Uplink identity: a device registered with a `subject_dn` is bound to that
   certificate — `POST /` for it must carry a matching mTLS subject or it is
   403'd (`handlers::authorize_uplink`). `REQUIRE_REGISTRATION=true` further

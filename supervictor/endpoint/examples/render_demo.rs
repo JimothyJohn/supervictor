@@ -8,13 +8,13 @@
 use std::fs;
 use std::path::Path;
 
-use supervictor_endpoint::fleet::FleetSummary;
+use supervictor_endpoint::fleet::{FleetSummary, DEFAULT_POWER_THRESHOLD_MA};
 use supervictor_endpoint::history::{
-    bucket_series, status_timeline, History, Window, BUCKETS, METRICS,
+    bucket_series, power_timeline, status_timeline, History, Window, BUCKETS, METRICS,
 };
 use supervictor_endpoint::models::{DeviceRecord, UplinkRecord};
 use supervictor_endpoint::time::format_rfc3339;
-use supervictor_endpoint::ui::views::{self, DeviceHistory, FleetRow, Staleness};
+use supervictor_endpoint::ui::views::{self, DeviceHistory, FleetRow, PowerState, Staleness};
 use supervictor_endpoint::ui::{assets, views::LIVE_SCRIPT};
 
 /// "Now" for the seeded history: 2026-07-11T04:00:00Z, just after the
@@ -161,6 +161,23 @@ fn uplink_full(
     }
 }
 
+fn demo_power(slot: usize) -> PowerState {
+    match slot {
+        0 => PowerState::On,
+        1 => PowerState::Off,
+        _ => PowerState::Unknown,
+    }
+}
+
+fn demo_current(slot: usize) -> Option<i64> {
+    match slot {
+        0 => Some(1_124),
+        1 => Some(12),
+        2 => Some(640),
+        _ => None,
+    }
+}
+
 fn main() {
     let outdir = std::env::args().nth(1).unwrap_or_else(|| "demo-out".into());
     let outdir = Path::new(&outdir);
@@ -194,21 +211,29 @@ fn main() {
             device: devices[0].clone(),
             last_uplink: Some("2026-07-11T03:58:12+00:00".into()),
             staleness: Staleness::Fresh,
+            current: Some(1_124),
+            power: PowerState::On,
         },
         FleetRow {
             device: devices[1].clone(),
             last_uplink: Some("2026-07-11T02:31:55+00:00".into()),
             staleness: Staleness::Stale,
+            current: Some(12),
+            power: PowerState::Off,
         },
         FleetRow {
             device: devices[2].clone(),
             last_uplink: Some("2026-06-28T17:04:40+00:00".into()),
             staleness: Staleness::Dark,
+            current: Some(640),
+            power: PowerState::Unknown,
         },
         FleetRow {
             device: devices[3].clone(),
             last_uplink: None,
             staleness: Staleness::Unknown,
+            current: None,
+            power: PowerState::Unknown,
         },
     ];
 
@@ -227,16 +252,19 @@ fn main() {
             m
         });
     let timeline = status_timeline(&devices, &latest, &rows, since, step);
+    let power = power_timeline(&devices, &rows, since, step, DEFAULT_POWER_THRESHOLD_MA);
     let series: Vec<_> = devices
         .iter()
         .map(|d| bucket_series(&d.device_id, &rows, since, step))
         .collect();
     let fleet_history = History {
         window: DEMO_WINDOW.label(),
+        threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
         since: format_rfc3339(since, 0),
         until: format_rfc3339(DEMO_NOW, 0),
         step_s: step,
         timeline,
+        power,
         devices: series.clone(),
         truncated: false,
     };
@@ -248,6 +276,8 @@ fn main() {
         stale: 0,
         dark: 0,
         never: 1,
+        on: 2,
+        off: 0,
     };
     let history_html =
         views::history_page(&fleet_history, &summary, DEMO_WINDOW, DEMO_SUBJECT).into_string();
@@ -282,6 +312,9 @@ fn main() {
             window: DEMO_WINDOW,
             truncated: false,
             slot,
+            power: demo_power(slot),
+            current: demo_current(slot),
+            threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
         };
         let page = views::device_page(record, &device_history, &uplinks, DEMO_CSRF, DEMO_SUBJECT)
             .into_string();

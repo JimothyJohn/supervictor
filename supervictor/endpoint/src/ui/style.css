@@ -104,6 +104,11 @@ a { color: var(--accent); }
 .badge.stale { color: var(--accent); }
 .badge.dark { color: var(--red); }
 .badge.unknown { color: var(--muted); }
+.badge.power.on { color: var(--green); border-color: var(--green); }
+.badge.power.off { color: var(--red); border-color: var(--red); }
+.current-inline { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
+.tile.on .tile-value { color: var(--green); }
+.tile.off .tile-value { color: var(--red); }
 form.inline { display: inline; }
 button {
   background: var(--surface);
@@ -197,6 +202,9 @@ figure.chart svg:focus-visible { outline: 1px solid var(--accent); outline-offse
 .dot { stroke: var(--surface); stroke-width: 2; }
 .seg.fresh { fill: var(--green); } .seg.stale { fill: var(--accent); }
 .seg.dark { fill: var(--red); } .seg.never { fill: var(--muted); }
+.seg.on { fill: var(--green); } .seg.off { fill: var(--red); } .seg.unknown { fill: var(--muted); }
+.threshold { stroke: var(--accent); stroke-width: 1; }
+.threshold-label { fill: var(--muted); font-size: 10px; }
 .crosshair { stroke: var(--muted); stroke-width: 1; visibility: hidden; pointer-events: none; }
 .crosshair.on { visibility: visible; }
 .legend {
@@ -210,6 +218,7 @@ figure.chart svg:focus-visible { outline: 1px solid var(--accent); outline-offse
 .key.s6 { background: var(--s6); } .key.s7 { background: var(--s7); } .key.s-other { background: var(--s-other); }
 .key.fresh { background: var(--green); } .key.stale { background: var(--accent); }
 .key.dark { background: var(--red); } .key.never { background: var(--muted); }
+.key.on { background: var(--green); } .key.off { background: var(--red); } .key.unknown { background: var(--muted); }
 .tooltip {
   position: absolute; z-index: 2; pointer-events: none; min-width: 11rem;
   background: var(--bg); border: 1px solid var(--border); border-radius: 4px;

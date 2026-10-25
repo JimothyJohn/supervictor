@@ -5,10 +5,10 @@
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 use crate::fleet::FleetSummary;
-pub use crate::fleet::Staleness;
+pub use crate::fleet::{PowerState, Staleness};
 use crate::history::{DeviceSeries, History, Window, METRICS};
 use crate::models::{DeviceRecord, UplinkRecord};
-use crate::ui::charts::{self, Series};
+use crate::ui::charts::{self, Reference, Series};
 use supervictor_common::status;
 
 /// One row of the fleet table.
@@ -19,6 +19,10 @@ pub struct FleetRow {
     pub last_uplink: Option<String>,
     /// Freshness classification of `last_uplink`.
     pub staleness: Staleness,
+    /// Last reported current in mA, if any.
+    pub current: Option<i64>,
+    /// Power state from `current` against the fleet threshold.
+    pub power: PowerState,
 }
 
 /// Static SSE hookup — live row updates, with a reload fallback where SSE
@@ -233,6 +237,8 @@ pub fn history_page(
             }
             section .tiles {
                 (charts::stat_tile("active devices", &summary.active.to_string(), &format!("{} registered, {} inactive", summary.total, summary.inactive), ""))
+                (charts::stat_tile("powered on", &summary.on.to_string(), &format!("current ≥ {} mA", history.threshold_ma), "on"))
+                (charts::stat_tile("powered off", &summary.off.to_string(), &format!("current < {} mA", history.threshold_ma), "off"))
                 (charts::stat_tile("fresh", &summary.fresh.to_string(), "heard from in the last 15 min", "fresh"))
                 (charts::stat_tile("stale", &summary.stale.to_string(), "quiet 15 min – 2 h", "stale"))
                 (charts::stat_tile("dark", &summary.dark.to_string(), "silent over 2 h", "dark"))
@@ -240,14 +246,25 @@ pub fn history_page(
                 (charts::stat_tile("uplinks", &uplinks.to_string(), &format!("in the last {}", window.label()), ""))
             }
             section .charts {
-                div .wide { (charts::status_chart("status", &history.timeline, window)) }
-                @for (m, metric) in METRICS.iter().enumerate() {
+                @let threshold_label = format!("on ≥ {} mA", history.threshold_ma);
+                @for (m, metric) in METRICS.iter().enumerate().take(1) {
                     @let series: Vec<Series<'_>> = history.devices.iter().enumerate().map(|(slot, d)| Series {
                         label: &d.device_id,
                         slot,
                         values: &columns[slot][m],
                     }).collect();
-                    div .wide[m == 0] { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window)) }
+                    div .wide { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window,
+                        Some(Reference { value: history.threshold_ma as f64, label: &threshold_label }))) }
+                }
+                div .wide { (charts::power_chart("power", &history.power, history.threshold_ma, window)) }
+                div .wide { (charts::status_chart("status", &history.timeline, window)) }
+                @for (m, metric) in METRICS.iter().enumerate().skip(1) {
+                    @let series: Vec<Series<'_>> = history.devices.iter().enumerate().map(|(slot, d)| Series {
+                        label: &d.device_id,
+                        slot,
+                        values: &columns[slot][m],
+                    }).collect();
+                    div { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window, None)) }
                 }
             }
         },
@@ -265,6 +282,12 @@ pub struct DeviceHistory<'a> {
     pub truncated: bool,
     /// Categorical colour slot (fleet order).
     pub slot: usize,
+    /// Power state right now.
+    pub power: PowerState,
+    /// Last reported current in mA, if any.
+    pub current: Option<i64>,
+    /// Current (mA) at or above which the device counts as on.
+    pub threshold_ma: i64,
 }
 
 /// `GET /ui` — fleet table plus the register form.
@@ -280,6 +303,7 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
                     tr {
                         th { "device" }
                         th { "status" }
+                        th { "power" }
                         th { "owner" }
                         th { "last uplink" }
                         th { "freshness" }
@@ -291,6 +315,10 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
                         tr data-device=(row.device.device_id) {
                             td { a href={ "/ui/devices/" (row.device.device_id) } { (row.device.device_id) } }
                             td { span .badge.(row.device.status) { (row.device.status) } }
+                            td {
+                                span .badge.power.(row.power.label()) { (row.power.label()) }
+                                @if let Some(c) = row.current { " " span .current-inline { (c) " mA" } }
+                            }
                             td { (row.device.owner_id) }
                             td .last-uplink { (row.last_uplink.as_deref().unwrap_or("never")) }
                             td { span .badge.staleness.(row.staleness.label()) { (row.staleness.label()) } }
@@ -342,6 +370,11 @@ pub fn device_page(
             dl .meta {
                 dt { "status" }
                 dd { span .badge.(device.status) { (device.status) } " " (status_form(device, csrf)) }
+                dt { "power" }
+                dd {
+                    span .badge.power.(history.power.label()) { (history.power.label()) }
+                    @if let Some(c) = history.current { " " span .current-inline { (c) " mA, threshold " (history.threshold_ma) " mA" } }
+                }
                 dt { "owner" }
                 dd { (device.owner_id) }
                 dt { "cert subject" }
@@ -359,9 +392,11 @@ pub fn device_page(
                 (charts::stat_tile("firmware", &fw, "as last reported", ""))
             }
             section .charts {
+                @let threshold_label = format!("on ≥ {} mA", history.threshold_ma);
                 @for (m, metric) in METRICS.iter().enumerate() {
                     @let series = [Series { label: &device.device_id, slot: history.slot, values: &columns[m] }];
-                    div .wide[m == 0] { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, history.window)) }
+                    @let reference = (m == 0).then(|| Reference { value: history.threshold_ma as f64, label: &threshold_label });
+                    div .wide[m == 0] { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, history.window, reference)) }
                 }
             }
             h2 { "recent uplinks" }
