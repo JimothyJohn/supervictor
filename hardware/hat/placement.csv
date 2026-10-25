@@ -1,0 +1,26 @@
+ref,value,footprint,x_mm,y_mm,rot_deg,side,note
+J1,EXT1 1x10 female,PinSocket_1x10_P2.54mm_Vertical,1.30,20.00,90,top,pin 1 at y=31.43 (toward the ESP32 module end); mates POE-ISO EXT1; body x 0.0-2.54 y 7.2-32.7
+J2,EXT2 1x10 female,PinSocket_1x10_P2.54mm_Vertical,26.70,20.00,90,top,pin 1 at y=31.43; mates POE-ISO EXT2; body x 25.4-28.0 y 7.2-32.7
+J3,3.5 mm TRS jack,SJ1-3523N (right angle TH),14.00,4.00,180,top,opening on the y=0 edge; body ~7 x 7 mm
+J4,STEMMA QT,JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal,25.00,38.60,0,top,opening on the y=40 edge; body x 22.0-28.0
+U1,MCP1700T-3002E/TT,SOT-23-3,4.40,31.50,90,top,LDO; narrow strip left of the UEXT notch (x 3.4-5.0)
+C1,4.7u,C_0603,4.20,27.30,0,top,LDO input
+C2,100n,C_0603,4.20,29.10,0,top,LDO input
+C3,4.7u,C_0603,4.20,33.90,0,top,LDO output
+C4,100n,C_0603,4.20,35.70,0,top,LDO output
+IC1,LMV321IDBVR,SOT-23-5,14.00,22.00,0,top,pin 1 (IN+) toward -X
+C6,100n,C_0603,14.00,25.20,0,top,at IC1 V+
+R1,47k,R_0603,11.00,19.00,0,top,feedback
+R2,47k,R_0603,11.00,16.50,0,top,to GND
+R3,47k,R_0603,14.00,12.00,0,top,input termination
+D2,1N5819HW-7-F,D_SOD-123,11.00,12.00,0,top,input clamp; cathode toward AC_IN (jack side)
+D1,1N5819HW-7-F,D_SOD-123,17.50,19.00,0,top,peak detector; cathode toward C7
+C7,10u,C_0805,20.50,16.00,90,top,hold capacitor
+R4,1M,R_0603,20.50,12.50,90,top,bleed
+R5,1k,R_0603,23.50,19.00,0,top,series to GPIO32 (J2 pin 6 at x 26.7 y 18.73)
+C8,100n,C_0603,23.50,21.50,0,top,at the ADC node
+U2,SHT41-AD1B-R2,DFN-4 1.5x1.5,23.50,33.00,0,top,"isolated corner: notch (x<22) on -X; 1 mm slot below (y 29.5-30.5, x 22-26) and on the +X side (x 25.6-26.6, y 29.5-36)"
+C9,100n,C_0603,23.50,35.80,0,top,at U2 VDD
+TP1,ADC_OUT,TestPoint_Pad_1.5mm,22.50,24.50,0,top,
+TP2,GND,TestPoint_Pad_1.5mm,22.50,27.00,0,top,
+TP3,AC_IN,TestPoint_Pad_1.5mm,14.00,9.00,0,top,

@@ -1,0 +1,73 @@
+net,ref,pin,pin_name,note
++3V3,J1,2,EXT1-2 +3.3V,from the POE-ISO 3.3 V rail (0.3 A budget)
++3V3,U1,2,VIN,
++3V3,C1,1,,4.7 uF input
++3V3,C2,1,,100 nF input
++3V3,U2,2,VDD,SHT41 on the 3.3 V bus rail
++3V3,C9,1,,100 nF at U2
++3V3,J4,2,V+,STEMMA QT red
+GND,J1,3,EXT1-3 GND,
+GND,U1,1,GND,
+GND,C1,2,,
+GND,C2,2,,
+GND,C3,2,,
+GND,C4,2,,
+GND,C6,2,,
+GND,C7,2,,
+GND,C8,2,,
+GND,C9,2,,
+GND,R2,2,,
+GND,R3,2,,
+GND,R4,2,,
+GND,D2,1,A,anode to GND: clamps negative input swing
+GND,IC1,2,V-,
+GND,U2,3,VSS,
+GND,J3,1,sleeve,confirm sleeve = pin 1 on the SJ1-3523N drawing
+GND,J4,1,GND,STEMMA QT black
+GND,TP2,1,,
++3V0,U1,3,VOUT,3.0 V analog rail (DFRobot reference uses 3.0 V)
++3V0,C3,1,,4.7 uF output (MCP1700 needs >= 1 uF ceramic)
++3V0,C4,1,,100 nF
++3V0,IC1,5,V+,
++3V0,C6,1,,100 nF at IC1
+AC_IN,J3,2,tip,0-1 V AC RMS from the clamp probe
+AC_IN,R3,1,,47 k to GND: input bias/termination
+AC_IN,D2,2,K,
+AC_IN,IC1,1,IN+,
+AC_IN,TP3,1,,
+FB,IC1,3,IN-,
+FB,R1,2,,
+FB,R2,1,,47 k to GND
+AMP_OUT,IC1,4,OUT,2x AC_IN (positive half-cycles)
+AMP_OUT,R1,1,,47 k feedback
+AMP_OUT,D1,1,A,
+ADC_RAW,D1,2,K,peak detector
+ADC_RAW,C7,1,,10 uF hold
+ADC_RAW,R4,1,,1 M bleed (tau = 10 s)
+ADC_RAW,R5,1,,
+ADC_OUT,R5,2,,1 k series into the ESP32 pin
+ADC_OUT,C8,1,,100 nF at the ADC node
+ADC_OUT,J2,6,EXT2-6 GPIO32,ADC1_CH4
+ADC_OUT,TP1,1,,
+SDA,J2,10,EXT2-10 GPIO13,2.2 k pull-up lives on the POE-ISO
+SDA,U2,1,SDA,
+SDA,J4,3,SDA,STEMMA QT blue
+SCL,J2,7,EXT2-7 GPIO16,2.2 k pull-up lives on the POE-ISO; POE2 = GPIO33 at the same header pin
+SCL,U2,4,SCL,
+SCL,J4,4,SCL,STEMMA QT yellow
+NC,J1,1,EXT1-1 +5V,no connect
+NC,J1,4,EXT1-4 ESP_EN,no connect
+NC,J1,5,EXT1-5 GPIO0,no connect (boot strap)
+NC,J1,6,EXT1-6 GPIO1,no connect (UART0)
+NC,J1,7,EXT1-7 GPIO2,no connect (boot strap / SD)
+NC,J1,8,EXT1-8 GPIO3,no connect (UART0)
+NC,J1,9,EXT1-9 GPIO4,no connect
+NC,J1,10,EXT1-10 GPIO5,no connect (boot strap)
+NC,J2,1,EXT2-1 GPI39,no connect
+NC,J2,2,EXT2-2 GPI36,no connect
+NC,J2,3,EXT2-3 GPI35,no connect
+NC,J2,4,EXT2-4 GPI34,no connect (button)
+NC,J2,5,EXT2-5 GPIO33,no connect on POE-ISO builds
+NC,J2,8,EXT2-8 GPIO15,no connect (SD)
+NC,J2,9,EXT2-9 GPIO14,no connect (SD)
+NC,J3,3,ring,no connect

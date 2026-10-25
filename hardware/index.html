@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supervictor hardware — dev kit and sensor hat</title>
+<meta name="description" content="The Supervictor telemetry node: Olimex ESP32-POE-ISO on PoE, a current clamp, an SHT41, and the SV-HAT-A sensor hat. 2D layout, 3D stack, what is needed to build it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0e0e10; --bg2:#131316; --surface:#18181b; --line:#27272a; --line-hi:#3f3f46;
+    --text:#e4e4e7; --muted:#8b8b93; --faint:#55555c; --accent:#f97316; --accent-dim:#c2410c;
+    --green:#22c55e; --amber:#fbbf24; --red:#ef4444; --blue:#60a5fa;
+    --display:"Chakra Petch",sans-serif; --mono:"IBM Plex Mono",monospace;
+  }
+  :root:not([data-theme="dark"]) { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { background:var(--bg); color:var(--text); font-family:var(--display); line-height:1.55; overflow-x:hidden; }
+  body::before { content:""; position:fixed; inset:0; background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px); background-size:56px 56px; opacity:.14; pointer-events:none; z-index:0; }
+  main, header.top, footer { position:relative; z-index:1; }
+  .wrap { max-width:1100px; margin:0 auto; padding:0 16px; }
+  header.top { border-bottom:1px solid var(--line); background:rgba(14,14,16,.85); backdrop-filter:blur(6px); position:sticky; top:0; }
+  .top-inner { display:flex; align-items:center; justify-content:space-between; height:56px; gap:16px; }
+  .brand { font-weight:700; font-size:16px; letter-spacing:.04em; text-transform:uppercase; }
+  .brand em { color:var(--accent); font-style:normal; }
+  .top-nav { display:flex; gap:14px; font-family:var(--mono); font-size:12px; flex-wrap:wrap; }
+  .top-nav a { color:var(--muted); text-decoration:none; }
+  .top-nav a:hover { color:var(--text); }
+  h1 { font-size:clamp(1.8rem,4vw,2.8rem); line-height:1.1; margin:40px 0 10px; }
+  h1 em { color:var(--accent); font-style:normal; }
+  h2 { font-size:1.35rem; margin:48px 0 14px; padding-top:12px; border-top:1px solid var(--line); }
+  h3 { font-size:1.05rem; margin:22px 0 8px; color:var(--text); }
+  p.lead { color:var(--muted); max-width:760px; font-size:1.05rem; }
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); }
+  .grid { display:grid; gap:14px; }
+  .g2 { grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  .card h3 { margin-top:0; }
+  table { width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12.5px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; letter-spacing:.04em; }
+  td.num { text-align:right; white-space:nowrap; }
+  .tag { display:inline-block; font-family:var(--mono); font-size:10.5px; padding:1px 7px; border-radius:999px; border:1px solid var(--line-hi); color:var(--muted); }
+  .tag.have { color:var(--green); border-color:var(--green); }
+  .tag.buy { color:var(--amber); border-color:var(--amber); }
+  .tag.you { color:var(--accent); border-color:var(--accent); }
+  ul.check { list-style:none; }
+  ul.check li { display:grid; grid-template-columns:22px 1fr; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); }
+  ul.check li .box { width:16px; height:16px; margin-top:4px; border:1.5px solid var(--line-hi); border-radius:3px; }
+  ul.check li b { display:block; }
+  ul.check li span.meta { font-family:var(--mono); font-size:11px; color:var(--muted); }
+  figure { margin:14px 0; }
+  figure figcaption { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-top:8px; }
+  svg.layout { width:100%; height:auto; display:block; background:var(--bg2); border:1px solid var(--line); border-radius:8px; }
+  img.sheet { width:100%; height:auto; display:block; background:var(--bg2); border:1px solid var(--line); border-radius:8px; }
+  #three-wrap { position:relative; background:var(--bg2); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  #three { width:100%; height:520px; display:block; touch-action:none; cursor:grab; }
+  .three-ui { position:absolute; left:12px; top:12px; display:flex; gap:8px; flex-wrap:wrap; }
+  .three-ui button, .three-ui label { font-family:var(--mono); font-size:11.5px; background:rgba(24,24,27,.9); color:var(--text); border:1px solid var(--line-hi); border-radius:6px; padding:5px 9px; cursor:pointer; }
+  .three-ui label { display:flex; align-items:center; gap:6px; }
+  .legend { display:flex; flex-wrap:wrap; gap:10px 18px; font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-top:10px; }
+  .legend span::before { content:""; display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px; background:var(--sw); }
+  .kv { font-family:var(--mono); font-size:12.5px; }
+  .kv div { display:flex; justify-content:space-between; gap:12px; padding:5px 0; border-bottom:1px solid var(--line); }
+  .kv div span:last-child { color:var(--muted); text-align:right; }
+  code { font-family:var(--mono); font-size:.92em; background:var(--bg2); border:1px solid var(--line); border-radius:4px; padding:0 5px; }
+  footer { margin:60px 0 30px; color:var(--faint); font-family:var(--mono); font-size:11px; }
+  @media (max-width:640px){ #three{height:380px;} h2{margin-top:36px;} }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-inner">
+    <div class="brand">super<em>victor</em> / hardware</div>
+    <nav class="top-nav">
+      <a href="#needed">Needed from you</a>
+      <a href="#kit">Kit</a>
+      <a href="#layout2d">2D</a>
+      <a href="#layout3d">3D</a>
+      <a href="#chain">Signal chain</a>
+      <a href="#plan">Plan</a>
+      <a href="#files">Files</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="eyebrow" style="margin-top:36px">Telemetry node · dev kit → sensor hat → integrated board</div>
+  <h1>One PoE cable, one clamp, <em>nothing soldered.</em></h1>
+  <p class="lead">An Olimex ESP32-POE-ISO powered and networked by the LS108GP switch, the DFRobot SEN0211 current clamp you already own on three jumper wires, an SHT41 on four more. The <b>SV-HAT-A</b> hat turns the jumpers into a plug-on board. Everything below is to scale from the Olimex drawings and the parts' datasheets; the text files next to this page are what a vendor builds from.</p>
+
+  <!-- ============ NEEDED FROM YOU ============ -->
+  <h2 id="needed">Needed from you</h2>
+  <p class="lead" style="font-size:.98rem">Everything a session cannot do: decisions, purchases, hands on the bench, and accounts. In the order they block.</p>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card">
+      <h3>Decide <span class="tag you">blocks firmware</span></h3>
+      <ul class="check">
+        <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>Current register full scale → 20 A <span class="tag have">decided</span></b><span class="meta">2026-10-25. Step 78.7 mA; the ~1 A floor is level 14; above ~17 A the ADC compresses. Lands in levels.rs on its own PR.</span></div></li>
+        <li><div class="box"></div><div><b>Power threshold for kit devices: 1000 mA?</b><span class="meta">The endpoint default of 100 mA is below the clamp's ~1 A floor. Per-device field already exists.</span></div></li>
+        <li><div class="box"></div><div><b>Calibration gain: compile-time env or NVS?</b><span class="meta">Compile-time matches how everything else is baked; NVS survives OTA. Pick one.</span></div></li>
+        <li><div class="box"></div><div><b>Which scope to RFQ: hat (B) only, or hat + integrated node (C)?</b><span class="meta">Recommendation is B now, C at 25+ units. SOURCING.md §1</span></div></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Buy <span class="tag buy">~$30 + optional meter</span></h3>
+      <ul class="check">
+        <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>Adafruit 5776 SHT41 STEMMA QT, $5.95 <span class="tag have">ordering</span></b><span class="meta">SHT40 (4885) is out of stock; same address 0x44, same driver.</span></div></li>
+        <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>Adafruit 4397 JST SH → female sockets, $0.95 <span class="tag have">ordering</span></b><span class="meta">Plugs the SHT41 straight onto the UEXT pins.</span></div></li>
+        <li><div class="box"></div><div><b>Klein 69409 line splitter, $19.99 at Lowe's</b><span class="meta">Only if the test machine is on a cord. Extech 480172 is the alternate.</span></div></li>
+        <li><div class="box"></div><div><b>True-RMS clamp meter if none on the bench</b><span class="meta">Fluke 323 $207.99 or Klein CL390 ~$100. The calibration reference.</span></div></li>
+        <li><div class="box"></div><div><b>For the hat build: nothing yet</b><span class="meta">Turnkey assembly sources the 22 parts; the vendor quote comes first.</span></div></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Bench <span class="tag you">hands required</span></h3>
+      <ul class="check">
+        <li><div class="box"></div><div><b>Wire the SEN0211 to the POE-ISO</b><span class="meta">GND → EXT1-3, VCC → EXT1-2 (+3.3 V), signal → EXT2-6 (GPIO32). 2D view below shows the pins.</span></div></li>
+        <li><div class="box"></div><div><b>Confirm the module reaches 2.45 V on a 3.3 V supply</b><span class="meta">Its LDO is 3.0 V with 0.3 V headroom. 1 V RMS into the jack, read TP/ADC. Decides whether the hat keeps a 3.0 V rail.</span></div></li>
+        <li><div class="box"></div><div><b>Clamp a known load and calibrate once</b><span class="meta">Resistive heater via the splitter; meter on the same conductor. Sets the gain constant.</span></div></li>
+        <li><div class="box"></div><div><b>Measure the SEN0211 module's own draw</b><span class="meta">Not on DFRobot's wiki. Needed for the hat power note.</span></div></li>
+        <li><div class="box"></div><div><b>Cable-pull fault test and a 24 h soak</b><span class="meta">TODO.md P2; still outstanding since July.</span></div></li>
+        <li><div class="box"></div><div><b>Record which board is on which switch port</b><span class="meta">The inventory's switch_port column is empty.</span></div></li>
+        <li><div class="box"></div><div><b>Check the SJ1-3523N jack pin numbering against your SEN0211 plug</b><span class="meta">Continuity: tip = signal, sleeve = GND. The hat netlist assumes it.</span></div></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Admin <span class="tag">vendor-facing</span></h3>
+      <ul class="check">
+        <li><div class="box"></div><div><b>Fill the bracketed parts of the RFQ cover email</b><span class="meta">Name, company, phone, shipping address, call availability. RFQ-prototype.md §12</span></div></li>
+        <li><div class="box"></div><div><b>Send to three shops and take two calls</b><span class="meta">Sierra Circuits, CircuitHub (hat); Cardinal Peak or DMC (node). 3–5 h over two weeks.</span></div></li>
+        <li><div class="box"></div><div><b>Open DigiKey/Mouser in a browser and confirm eight part numbers</b><span class="meta">They block automated readers; the numbers in bom-devkit.csv are exact search strings.</span></div></li>
+        <li><div class="box"></div><div><b>Optionally install KiCad</b><span class="meta"><code>brew install --cask kicad</code> lets a session turn hat/ into Gerbers here instead of paying a shop for layout.</span></div></li>
+        <li><div class="box"></div><div><b>Sign the PO and the 50/50 NRE terms</b><span class="meta">Only after quotes. Nothing is committed today.</span></div></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ KIT ============ -->
+  <h2 id="kit">The kit at a glance</h2>
+  <div class="grid g2">
+    <div class="card">
+      <h3>Parts</h3>
+      <table>
+        <tr><th>Part</th><th>Role</th><th>Status</th><th class="num">Unit</th></tr>
+        <tr><td>Olimex ESP32-POE-ISO</td><td>MCU, PoE PD, Ethernet, rails</td><td><span class="tag have">have ×4</span></td><td class="num">$28–29</td></tr>
+        <tr><td>DFRobot SEN0211 20 A clamp kit</td><td><code>current</code> (mA)</td><td><span class="tag have">have</span></td><td class="num">$19.90</td></tr>
+        <tr><td>Adafruit 5776 SHT41</td><td><code>temp_c</code>, <code>humidity_pct</code></td><td><span class="tag buy">buy</span></td><td class="num">$5.95</td></tr>
+        <tr><td>Adafruit 4397 cable</td><td>SHT41 → UEXT pins</td><td><span class="tag buy">buy</span></td><td class="num">$0.95</td></tr>
+        <tr><td>F/F jumpers ×3</td><td>clamp module → EXT headers</td><td><span class="tag have">have</span></td><td class="num">$3.95/40</td></tr>
+        <tr><td>Cat5e + LS108GP port</td><td>power and data</td><td><span class="tag have">have</span></td><td class="num">—</td></tr>
+        <tr><td>Klein 69409 splitter</td><td>clamp a corded load</td><td><span class="tag buy">optional</span></td><td class="num">$19.99</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Why these</h3>
+      <div class="kv">
+        <div><span>Board</span><span>POE-ISO: 3000 V isolation, no PSRAM pin remap, 802.3af, four on the rack</span></div>
+        <div><span>Clamp</span><span>SEN0211: burden built in, DC out, zero external parts, already owned</span></div>
+        <div><span>Temp/RH</span><span>SHT41: one I²C transaction, CRC, board pull-ups already there</span></div>
+        <div><span>Link</span><span>Wired only: one cable, no credentials, no WiFi wedge</span></div>
+        <div><span>Kit cost from scratch</span><span>≈ $60 per node + switch port</span></div>
+        <div><span>Hat (SV-HAT-A)</span><span>22 parts, 2 layers, 28 × 40 mm, ≈ $40–60 each at 25</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 2D ============ -->
+  <h2 id="layout2d">2D layout</h2>
+  <p class="lead" style="font-size:.98rem">Top view of the POE-ISO with the hat fitted, to scale (1 px = 1 unit of mm after scaling). Feature positions are from the Olimex pinout drawing and the 98 × 28 mm outline; the hat geometry is from <code>hat/placement.csv</code>.</p>
+  <figure>
+    <svg class="layout" viewBox="-6 -22 116 72" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+      <!-- host board, X along length (0 = ESP32 module end), Y across width -->
+      <rect x="0" y="0" width="98" height="28" rx="1.2" fill="#0f3d2e" stroke="#e4e4e7" stroke-width="0.25"/>
+      <!-- module -->
+      <rect x="1" y="5" width="25.5" height="18" fill="#9ca3af" stroke="#e4e4e7" stroke-width="0.15"/>
+      <rect x="1" y="5" width="6" height="18" fill="#6b7280"/>
+      <text x="9" y="15" font-size="2" fill="#0e0e10">ESP32-WROOM-32</text>
+      <!-- buttons -->
+      <circle cx="8" cy="2" r="1.3" fill="#27272a" stroke="#e4e4e7" stroke-width="0.12"/><text x="10" y="3" font-size="1.4" fill="#8b8b93">BUT1</text>
+      <circle cx="8" cy="26" r="1.3" fill="#27272a" stroke="#e4e4e7" stroke-width="0.12"/><text x="10" y="27" font-size="1.4" fill="#8b8b93">RST</text>
+      <!-- UEXT box 15.5 x 9 across the width -->
+      <rect x="28" y="6.25" width="9" height="15.5" fill="#27272a" stroke="#fbbf24" stroke-width="0.2"/>
+      <text x="29" y="4.6" font-size="1.4" fill="#fbbf24">UEXT</text>
+      <!-- EXT1 / EXT2 pins: X = 33 + 2.54k -->
+      <g fill="#fbbf24">
+        <g id="ext"><circle cx="33" cy="1.3" r="0.6"/><circle cx="35.54" cy="1.3" r="0.6"/><circle cx="38.08" cy="1.3" r="0.6"/><circle cx="40.62" cy="1.3" r="0.6"/><circle cx="43.16" cy="1.3" r="0.6"/><circle cx="45.7" cy="1.3" r="0.6"/><circle cx="48.24" cy="1.3" r="0.6"/><circle cx="50.78" cy="1.3" r="0.6"/><circle cx="53.32" cy="1.3" r="0.6"/><circle cx="55.86" cy="1.3" r="0.6"/></g>
+        <use href="#ext" y="25.4"/>
+      </g>
+      <text x="32.2" y="-0.8" font-size="1.4" fill="#fbbf24">EXT1 pin1 (+5V)</text>
+      <text x="32.2" y="30.6" font-size="1.4" fill="#fbbf24">EXT2 pin1 (GPI39)</text>
+      <!-- micro USB on the Y=0 edge -->
+      <rect x="60" y="-1.2" width="7" height="5" fill="#3f3f46" stroke="#e4e4e7" stroke-width="0.12"/><text x="59.5" y="-2" font-size="1.4" fill="#8b8b93">USB</text>
+      <!-- PoE converter block -->
+      <rect x="68" y="7" width="13" height="14" fill="#3f3f46" stroke="#e4e4e7" stroke-width="0.12"/><text x="68.6" y="14.8" font-size="1.4" fill="#8b8b93">PoE DC-DC</text>
+      <!-- LiPo -->
+      <rect x="88" y="-0.8" width="6" height="4" fill="#3f3f46" stroke="#e4e4e7" stroke-width="0.12"/><text x="86" y="-1.6" font-size="1.4" fill="#8b8b93">LiPo</text>
+      <!-- RJ45 -->
+      <rect x="82" y="6" width="18" height="16" fill="#52525b" stroke="#e4e4e7" stroke-width="0.15"/><text x="86.5" y="14.8" font-size="2" fill="#0e0e10">RJ45 PoE</text>
+      <!-- HAT overlay: board X 24.4..64.4, notch X 24.4..37.4 Y 6..22 -->
+      <path d="M24.4 0 H64.4 V28 H24.4 V22 H37.4 V6 H24.4 Z" fill="rgba(249,115,22,0.16)" stroke="#f97316" stroke-width="0.35" stroke-dasharray="1.2 0.6"/>
+      <text x="45" y="5" font-size="2.2" fill="#f97316" font-weight="600">SV-HAT-A</text>
+      <text x="45" y="7.3" font-size="1.3" fill="#f97316">28 × 40 mm over EXT1/EXT2</text>
+      <!-- hat features in host frame: jack at hat Y=0 edge -> X=64.4, centred Y=14 -->
+      <rect x="57.4" y="10.5" width="7" height="7" fill="#27272a" stroke="#f97316" stroke-width="0.15"/><rect x="64.4" y="12.75" width="3" height="2.5" fill="#27272a" stroke="#f97316" stroke-width="0.15"/>
+      <text x="56.6" y="20.4" font-size="1.4" fill="#f97316">3.5 mm jack</text>
+      <!-- STEMMA at hat +Y edge X 22-28 -> host X 24.4..27, Y 22..28 -->
+      <rect x="24.4" y="22.2" width="2.8" height="5.6" fill="#27272a" stroke="#f97316" stroke-width="0.15"/><text x="15.5" y="26" font-size="1.3" fill="#f97316">STEMMA QT →</text>
+      <!-- SHT41 at hat (23.5,33) -> host X 31.4, Y 23.5 -->
+      <rect x="30.6" y="22.7" width="1.6" height="1.6" fill="#60a5fa"/><text x="33" y="24.3" font-size="1.3" fill="#60a5fa">SHT41</text>
+      <!-- op-amp at hat (14,22) -> host X 42.4, Y 14 -->
+      <rect x="41" y="12.6" width="2.9" height="2.8" fill="#3f3f46" stroke="#e4e4e7" stroke-width="0.1"/><text x="44.5" y="14.6" font-size="1.2" fill="#8b8b93">op-amp + detector</text>
+      <!-- kit v0 jumper wires (dashed): SEN0211 module off-board to the right-bottom -->
+      <g fill="none" stroke-width="0.35" stroke-dasharray="0.8 0.5">
+        <path d="M38.08 26.7 C 45 40, 60 40, 70 38" stroke="#60a5fa"/>
+        <path d="M45.7 26.7 C 52 42, 64 42, 72 40" stroke="#ef4444"/>
+        <path d="M43.16 1.3 C 30 -12, 70 -14, 74 36" stroke="#8b8b93"/>
+      </g>
+      <text x="30" y="34.2" font-size="1.3" fill="#60a5fa">EXT2-6 GPIO32 ← signal</text>
+      <text x="30" y="37.6" font-size="1.3" fill="#ef4444">EXT1-2 +3.3V (red) · EXT1-3 GND (grey)</text>
+      <!-- SEN0211 module 32 x 27 -->
+      <rect x="70" y="34" width="32" height="8" rx="1" fill="#0f3d2e" stroke="#e4e4e7" stroke-width="0.2"/><text x="71" y="39" font-size="1.8">SEN0211 module (not to scale)</text>
+      <text x="2" y="46.5" font-size="1.3" fill="#8b8b93">kit v0: SEN0211 module on jumpers beside the board.</text>
+      <text x="2" y="48.6" font-size="1.3" fill="#8b8b93">With the hat fitted the module goes away and the probe plugs into the jack.</text>
+      <!-- dimensions -->
+      <line x1="0" y1="-16" x2="98" y2="-16" stroke="#8b8b93" stroke-width="0.15"/><text x="46" y="-17" font-size="1.5" fill="#8b8b93">98.00</text>
+      <line x1="-3" y1="0" x2="-3" y2="28" stroke="#8b8b93" stroke-width="0.15"/><text x="-5.6" y="16" font-size="1.5" fill="#8b8b93" transform="rotate(-90 -5.6 16)">28</text>
+      <line x1="24.4" y1="-6" x2="64.4" y2="-6" stroke="#f97316" stroke-width="0.15"/><text x="41" y="-7" font-size="1.5" fill="#f97316">hat 40.00</text>
+    </svg>
+    <figcaption>Host board frame: X along the length from the ESP32 module end, Y across the width. The hat (orange) spans X 24.4–64.4 with its notch over the UEXT box; the 3.5 mm jack faces the RJ45 end. Dashed wires are the v0 jumper kit, replaced by the hat.</figcaption>
+  </figure>
+
+  <div class="grid g2">
+    <figure>
+      <img class="sheet" src="hat/outline.svg" alt="SV-HAT-A outline with the UEXT notch, header pins, slots and part bodies">
+      <figcaption>SV-HAT-A top view, 1 unit = 1 mm. Yellow pins mate the POE-ISO headers; orange lines are the 1 mm thermal slots around the SHT41; the notch clears the UEXT box. <a href="hat/outline.svg" style="color:var(--accent)">Open</a> · <a href="hat/placement.csv" style="color:var(--accent)">placement.csv</a></figcaption>
+    </figure>
+    <figure>
+      <svg class="layout" viewBox="-4 -4 76 34" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+        <!-- side elevation along the host length (X), heights in mm (Z up) -->
+        <g transform="translate(0,26) scale(1,-1)">
+          <rect x="0" y="0" width="66" height="1.6" fill="#0f3d2e" stroke="#e4e4e7" stroke-width="0.15"/>
+          <rect x="1" y="1.6" width="25.5" height="3.1" fill="#9ca3af"/>
+          <rect x="28" y="1.6" width="9" height="9" fill="#27272a" stroke="#fbbf24" stroke-width="0.15"/>
+          <rect x="33" y="1.6" width="23" height="8.5" fill="#18181b" stroke="#fbbf24" stroke-width="0.15"/>
+          <rect x="24.4" y="10.1" width="40" height="1.6" fill="#7c2d12" stroke="#f97316" stroke-width="0.2"/>
+          <rect x="57.4" y="11.7" width="7" height="5.5" fill="#27272a" stroke="#f97316" stroke-width="0.12"/>
+          <rect x="64.4" y="12.5" width="3" height="3" fill="#27272a" stroke="#f97316" stroke-width="0.12"/>
+          <rect x="30.6" y="11.7" width="1.6" height="0.9" fill="#60a5fa"/>
+          <rect x="24.4" y="11.7" width="2.8" height="2.95" fill="#27272a" stroke="#f97316" stroke-width="0.12"/>
+          <rect x="60" y="1.6" width="7" height="2.8" fill="#3f3f46"/>
+        </g>
+        <g font-size="1.5" fill="#8b8b93">
+          <text x="2" y="20.5">module 3.1</text>
+          <text x="27.2" y="13.5" fill="#fbbf24">UEXT 9.0</text>
+          <text x="38" y="20.5" fill="#fbbf24">sockets 8.5</text>
+          <text x="40" y="13" fill="#f97316">hat PCB at 8.5–10.1</text>
+          <text x="56" y="8" fill="#f97316">jack</text>
+          <text x="20" y="29.3">side view, mm · stack height ≈ 16 mm over the host board · UEXT box sits in the notch, not under the hat</text>
+        </g>
+      </svg>
+      <figcaption>Side elevation. Standard 8.5 mm sockets put the hat 0.5 mm below the top of a 9 mm UEXT box, which is why the hat is notched rather than relying on taller sockets.</figcaption>
+    </figure>
+  </div>
+
+  <!-- ============ 3D ============ -->
+  <h2 id="layout3d">3D stack</h2>
+  <p class="lead" style="font-size:.98rem">Drag to orbit, scroll to zoom. Exploded view lifts the hat off the headers. Geometry is the same millimetre data as the drawings above; it is a layout model, not a rendering of a specific revision.</p>
+  <div id="three-wrap">
+    <canvas id="three"></canvas>
+    <div class="three-ui">
+      <button type="button" data-view="iso">Iso</button>
+      <button type="button" data-view="top">Top</button>
+      <button type="button" data-view="side">Side</button>
+      <label><input type="checkbox" id="spin" checked> auto-rotate</label>
+      <label>explode <input type="range" id="explode" min="0" max="25" value="0" style="width:90px"></label>
+      <label><input type="checkbox" id="showhat" checked> hat</label>
+    </div>
+  </div>
+  <div class="legend">
+    <span style="--sw:#1f6b4a">POE-ISO PCB</span><span style="--sw:#9ca3af">ESP32 module</span><span style="--sw:#52525b">RJ45 / USB / PoE</span><span style="--sw:#fbbf24">EXT sockets + UEXT</span><span style="--sw:#c2410c">SV-HAT-A</span><span style="--sw:#60a5fa">SHT41</span><span style="--sw:#27272a">3.5 mm jack</span><span style="--sw:#0ea5e9">clamp probe + lead</span>
+  </div>
+
+  <!-- ============ SIGNAL CHAIN ============ -->
+  <h2 id="chain">Signal chain and limits</h2>
+  <div class="grid">
+    <figure>
+      <img class="sheet" src="hat/schematic.svg" alt="SV-HAT-A schematic">
+      <figcaption>Schematic (hat/schematic.svg). Pin-level truth is <a href="hat/netlist.csv" style="color:var(--accent)">netlist.csv</a>.</figcaption>
+    </figure>
+    <div class="card">
+      <h3>What the ESP32 can actually read</h3>
+      <table>
+        <tr><th>Point</th><th class="num">Volts</th><th class="num">Amps</th><th>Meaning</th></tr>
+        <tr><td>ADC floor (11 dB)</td><td class="num">150 mV</td><td class="num">1.06 A</td><td>below this: noise, report 0</td></tr>
+        <tr><td>Register full scale (20 A, decided)</td><td class="num">2.83 V</td><td class="num">20 A</td><td>level 255; 78.7 mA per step; ~1 A floor = level 14</td></tr>
+        <tr><td>ADC linear top</td><td class="num">2450 mV</td><td class="num">17.3 A</td><td>compresses above</td></tr>
+        <tr><td>Module max out</td><td class="num">2.8 V</td><td class="num">19.8 A</td><td>probe range end</td></tr>
+        <tr><td>Hold decay</td><td class="num">τ = 10 s</td><td class="num">—</td><td>~30 s to read 0 after switch-off</td></tr>
+      </table>
+      <div class="kv" style="margin-top:12px">
+        <div><span>Conversion</span><span>mA = adc_mV × 7.07</span></div>
+        <div><span>Accuracy budget</span><span>±5–6 % after one-point calibration</span></div>
+        <div><span>Sampling</span><span>64 reads averaged per 500 ms slot, ADC1 only</span></div>
+        <div><span>I²C</span><span>SHT41 at 0x44, 100 kHz, host pull-ups 2.2 kΩ</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PLAN ============ -->
+  <h2 id="plan">Plan, cost and time</h2>
+  <div class="card">
+    <table>
+      <tr><th>#</th><th>Step</th><th>Your time</th><th>Cash</th><th>Calendar</th></tr>
+      <tr><td>0</td><td>Order the missing kit parts</td><td>30 min</td><td>$30 (+$20 splitter, +$100–210 meter)</td><td>2–5 days</td></tr>
+      <tr><td>1</td><td>Jumper-wire bring-up, HARDWARE.md §8</td><td>1–2 days + 24 h soak</td><td>$0</td><td>1–2 weeks</td></tr>
+      <tr><td>2</td><td>Pick the scope, finish the RFQ</td><td>1–2 h</td><td>$0</td><td>1 day</td></tr>
+      <tr><td>3</td><td>Quotes from three shops</td><td>3–5 h</td><td>$0</td><td>5–10 business days</td></tr>
+      <tr><td>4B</td><td>Hat layout: in-house KiCad or Sierra design stage</td><td>2–3 h review</td><td>$0 / $1,500–4,000</td><td>1–2 weeks</td></tr>
+      <tr><td>5B</td><td>Hat build ×5 (CircuitHub / Sierra turnkey)</td><td>1 h</td><td>$400–1,000</td><td>1–2 weeks</td></tr>
+      <tr><td>6B</td><td>Hat bring-up and acceptance</td><td>1 day</td><td>$0</td><td>1 week</td></tr>
+      <tr><td>4C</td><td>Integrated node design, two review gates</td><td>6–10 h</td><td>$8,000–20,000</td><td>4–8 weeks</td></tr>
+      <tr><td>5C</td><td>Node build ×10 turnkey</td><td>1–2 h</td><td>$1,500–4,000</td><td>2–4 weeks</td></tr>
+      <tr><td>6C</td><td>Node bring-up, one respin reserve</td><td>2–3 days</td><td>$1,500–5,000</td><td>2–4 weeks</td></tr>
+      <tr><td>7</td><td>Compliance, only if selling (FCC 15B pre-scan)</td><td>1 day</td><td>$2,000–5,000 (full: $8–20k)</td><td>2–4 weeks</td></tr>
+    </table>
+    <div class="kv" style="margin-top:14px">
+      <div><span>Kit only</span><span>~2 days · $30–260 · 2–3 weeks</span></div>
+      <div><span>Kit + hat, in-house layout</span><span>~4 days · $500–1,500 · 6–9 weeks</span></div>
+      <div><span>Kit + hat at a design shop</span><span>~4 days · $2,000–5,500 · 7–10 weeks</span></div>
+      <div><span>Kit + integrated node</span><span>~6 days · $12,000–30,000 · 12–20 weeks</span></div>
+    </div>
+  </div>
+
+  <!-- ============ FILES ============ -->
+  <h2 id="files">Files</h2>
+  <div class="card">
+    <table>
+      <tr><th>File</th><th>What</th><th>Consumer</th></tr>
+      <tr><td><a href="../HARDWARE.md" style="color:var(--accent)">HARDWARE.md</a></td><td>Dev kit spec, pin budget, wiring, ADC analysis, bring-up checklist, open decisions</td><td>you</td></tr>
+      <tr><td><a href="bom-devkit.csv" style="color:var(--accent)">bom-devkit.csv</a></td><td>Cart-ready kit BOM with vendor part numbers, prices, stock, verification status</td><td>you, purchasing</td></tr>
+      <tr><td><a href="SOURCING.md" style="color:var(--accent)">SOURCING.md</a></td><td>Vendors, US design/build shops, scopes, licence, per-step estimates</td><td>you</td></tr>
+      <tr><td><a href="RFQ-prototype.md" style="color:var(--accent)">RFQ-prototype.md</a></td><td>Vendor package: scope, fixed pin map, spec, deliverables, acceptance tests, cover email</td><td>design/build shop</td></tr>
+      <tr><td><a href="hat/DESIGN.md" style="color:var(--accent)">hat/DESIGN.md</a></td><td>SV-HAT-A design notes, layout rules, test procedure, verified pinouts</td><td>layout engineer, assembler</td></tr>
+      <tr><td><a href="hat/schematic.svg" style="color:var(--accent)">hat/schematic.svg</a> · <a href="hat/netlist.csv" style="color:var(--accent)">netlist.csv</a></td><td>Schematic drawing and the pin-level netlist it is drawn from</td><td>layout engineer</td></tr>
+      <tr><td><a href="hat/bom.csv" style="color:var(--accent)">hat/bom.csv</a></td><td>22-placement BOM with manufacturer part numbers and alternates</td><td>turnkey assembly</td></tr>
+      <tr><td><a href="hat/placement.csv" style="color:var(--accent)">hat/placement.csv</a> · <a href="hat/outline.svg" style="color:var(--accent)">outline.svg</a></td><td>Positions, rotations, outline, notch and slots in mm</td><td>layout engineer</td></tr>
+    </table>
+    <p style="margin-top:12px;color:var(--muted);font-size:.95rem">Missing on purpose: Gerbers. No KiCad on this machine; a vendor or a KiCad session produces them from the netlist and placement. The integrated node's design files are Olimex's Rev O KiCad project (CERN OHL v1.2) plus the hat circuit.</p>
+  </div>
+
+  <footer>Supervictor hardware package · drawn 2026-10-25 from Olimex ESP32-POE-ISO drawings, DFRobot SEN0211 V1.0 schematic, TI SLOS263Y, Sensirion SHT4x, JST SH · three.js r128 from cdnjs</footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  if (!window.THREE) { document.getElementById('three-wrap').innerHTML = '<p style="padding:20px;color:#8b8b93;font-family:IBM Plex Mono,monospace;font-size:12px">three.js did not load (offline?). The 2D drawings above carry the same data.</p>'; return; }
+  const canvas = document.getElementById('three');
+  const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x131316);
+  const camera = new THREE.PerspectiveCamera(35, 2, 1, 2000);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 0.9));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(60, 120, 80); scene.add(sun);
+  const world = new THREE.Group(); scene.add(world);
+
+  // mm units. Host frame: X along the board (0 = module end), Z across width (0..28), Y up. Centre the board.
+  const OX = -49, OZ = -14;
+  function box(w, h, d, color, x, y, z, parent){
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({color, roughness:0.75, metalness:0.1}));
+    m.position.set(OX + x + w/2, y + h/2, OZ + z + d/2); (parent||world).add(m); return m;
+  }
+  // host PCB and features (x, z = lower-left corner in the host frame; y = base height)
+  box(98, 1.6, 28, 0x1f6b4a, 0, 0, 0);
+  box(25.5, 3.1, 18, 0x9ca3af, 1, 1.6, 5);                  // ESP32 module
+  box(6, 3.2, 18, 0x6b7280, 1, 1.6, 5);                      // module shield edge
+  box(9, 9, 15.5, 0x27272a, 28, 1.6, 6.25);                  // UEXT box
+  box(23, 8.5, 2.54, 0xfbbf24, 33 - 1.27, 1.6, 0);           // EXT1 socket stack height (female sockets on the hat come down to here)
+  box(23, 8.5, 2.54, 0xfbbf24, 33 - 1.27, 1.6, 25.46);       // EXT2
+  box(7, 2.8, 6, 0x52525b, 60, 1.6, -1.2);                   // micro USB
+  box(13, 8, 14, 0x52525b, 68, 1.6, 7);                      // PoE converter
+  box(18, 13.5, 16, 0x52525b, 82, 1.6, 6);                   // RJ45
+  box(6, 4, 4, 0x3f3f46, 88, 1.6, -0.8);                     // LiPo connector
+  // hat group (base at y = 10.1 top of sockets)
+  const hat = new THREE.Group(); world.add(hat);
+  const HY = 10.1;
+  // hat PCB with notch: two slabs (X 24.4..37.4 only outside Z 6..22; X 37.4..64.4 full)
+  box(27, 1.6, 28, 0xc2410c, 37.4, HY, 0, hat);
+  box(13, 1.6, 6, 0xc2410c, 24.4, HY, 0, hat);
+  box(13, 1.6, 6, 0xc2410c, 24.4, HY, 22, hat);
+  box(7, 5.5, 7, 0x27272a, 57.4, HY + 1.6, 10.5, hat);        // jack body
+  box(3, 3, 2.5, 0x27272a, 64.4, HY + 2.4, 12.75, hat);       // jack barrel
+  box(2.8, 2.95, 6, 0x27272a, 24.4, HY + 1.6, 22, hat);       // STEMMA QT
+  box(1.6, 0.9, 1.6, 0x60a5fa, 30.6, HY + 1.6, 22.7, hat);    // SHT41
+  box(2.9, 1.1, 2.8, 0x3f3f46, 41, HY + 1.6, 12.6, hat);      // op-amp
+  box(2.2, 1.1, 1.4, 0x3f3f46, 45.5, HY + 1.6, 16.4, hat);    // D1
+  box(2, 1.3, 1.2, 0x3f3f46, 48, HY + 1.6, 19.9, hat);        // C7
+  box(2.9, 1.1, 1.6, 0x3f3f46, 32.9, HY + 1.6, 3.6, hat);     // LDO
+  // clamp probe: ring beside the board with a lead into the jack
+  const probe = new THREE.Group(); world.add(probe);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(11, 3.2, 12, 40), new THREE.MeshStandardMaterial({color:0x0ea5e9, roughness:0.6}));
+  ring.position.set(OX + 120, 12, OZ + 14); ring.rotation.y = Math.PI/2; probe.add(ring);
+  const handle = box(10, 8, 22, 0x0c4a6e, 112, 1, 3, probe);
+  const lead = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+      new THREE.Vector3(OX + 112, 5, OZ + 14), new THREE.Vector3(OX + 95, 22, OZ + 30), new THREE.Vector3(OX + 72, 18, OZ + 30), new THREE.Vector3(OX + 67.5, HY + 3.9, OZ + 14)]), 40, 0.9, 8, false),
+    new THREE.MeshStandardMaterial({color:0x0ea5e9, roughness:0.8}));
+  probe.add(lead);
+  // ethernet cable stub out of the RJ45
+  world.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(OX + 100, 7, OZ + 14), new THREE.Vector3(OX + 125, 7, OZ + 14)]), 4, 2.2, 10, false), new THREE.MeshStandardMaterial({color:0x3f3f46})));
+
+  // interaction
+  let rotY = -0.7, rotX = 0.55, dist = 230, spin = true, dragging = false, px = 0, py = 0;
+  function place(){
+    camera.position.set(dist * Math.sin(rotY) * Math.cos(rotX), dist * Math.sin(rotX), dist * Math.cos(rotY) * Math.cos(rotX));
+    camera.lookAt(0, 6, 0);
+  }
+  canvas.addEventListener('pointerdown', e => { dragging = true; px = e.clientX; py = e.clientY; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; });
+  canvas.addEventListener('pointerup', e => { dragging = false; canvas.style.cursor = 'grab'; });
+  canvas.addEventListener('pointermove', e => { if (!dragging) return; rotY -= (e.clientX - px) * 0.008; rotX = Math.max(0.05, Math.min(1.5, rotX + (e.clientY - py) * 0.008)); px = e.clientX; py = e.clientY; });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); dist = Math.max(90, Math.min(600, dist * (1 + e.deltaY * 0.001))); }, {passive:false});
+  document.querySelectorAll('.three-ui button').forEach(b => b.addEventListener('click', () => {
+    const v = b.dataset.view; document.getElementById('spin').checked = spin = false;
+    if (v === 'top') { rotX = 1.5; rotY = 0; } else if (v === 'side') { rotX = 0.08; rotY = 0; } else { rotX = 0.55; rotY = -0.7; }
+  }));
+  document.getElementById('spin').addEventListener('change', e => spin = e.target.checked);
+  document.getElementById('explode').addEventListener('input', e => { hat.position.y = +e.target.value; });
+  document.getElementById('showhat').addEventListener('change', e => { hat.visible = e.target.checked; });
+  function resize(){
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) { renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+  }
+  function frame(){ resize(); if (spin && !dragging) rotY += 0.003; place(); renderer.render(scene, camera); requestAnimationFrame(frame); }
+  frame();
+})();
+</script>
+</body>
+</html>
