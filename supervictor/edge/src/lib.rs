@@ -25,6 +25,9 @@ pub mod error;
 pub mod models;
 /// Networking primitives: HTTP, DNS, TLS, and portal server.
 pub mod network;
+/// Over-the-air update: manifest, download framing, slot installer, boot
+/// policy (host-testable core) and the flash/bootloader glue (embedded).
+pub mod ota;
 
 /// Embassy async application tasks (WiFi, networking, main loop).
 #[cfg(feature = "embedded")]

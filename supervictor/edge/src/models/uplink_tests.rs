@@ -1,4 +1,4 @@
-use crate::models::uplink::{LambdaResponse, UplinkMessage};
+use crate::models::uplink::{LambdaResponse, UplinkAck, UplinkMessage};
 use heapless::String as HString;
 
 // serde-json-core still returns its own heapless-0.8 String (same bridge as
@@ -448,4 +448,41 @@ fn legacy_payload_parses_with_absent_optionals() {
     let (msg, _): (UplinkMessage, _) = serde_json_core::from_str(json).unwrap();
     assert_eq!(msg.seq, None);
     assert_eq!(msg.temp_c, None);
+}
+
+// ── UplinkAck (OTA control channel) ─────────────────────────────────
+
+#[test]
+fn ack_reads_desired_fw_and_skips_everything_else() {
+    let ack = UplinkAck::parse(
+        r#"{"message":"Uplink received","device_id":"poe-iso-rack-02","current":1172,"client_subject":"CN=poe-iso-rack-02,OU=devices,O=supervictor","desired_fw":"0.2.0"}"#,
+    );
+    assert_eq!(ack.desired_fw.as_deref(), Some("0.2.0"));
+}
+
+#[test]
+fn ack_without_a_target_or_with_garbage_means_no_instruction() {
+    for body in [
+        r#"{"message":"Uplink received","device_id":"d","current":1}"#,
+        r#"{"desired_fw":null}"#,
+        "{}",
+        "",
+        "not json",
+        "[]",
+        r#"{"desired_fw":42}"#,
+        r#"{"desired_fw":"this-version-string-is-far-too-long-for-the-buffer"}"#,
+        "<html>502 Bad Gateway</html>",
+    ] {
+        assert_eq!(UplinkAck::parse(body).desired_fw, None, "{body}");
+    }
+}
+
+#[test]
+fn firmware_version_is_a_parseable_version() {
+    use supervictor_common::firmware::Version;
+    assert!(
+        Version::parse(crate::models::uplink::FIRMWARE_VERSION).is_some(),
+        "{}",
+        crate::models::uplink::FIRMWARE_VERSION
+    );
 }

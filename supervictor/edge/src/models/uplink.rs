@@ -3,9 +3,40 @@ use heapless::Vec as HVec;
 use serde::{Deserialize, Serialize};
 use supervictor_common::levels;
 
-/// Firmware version baked in at compile time; reported with every uplink so
-/// the fleet dashboard can tell which devices need updating.
-pub const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Firmware version reported with every uplink so the fleet dashboard can
+/// tell which devices need updating, and compared with `desired_fw` for
+/// OTA. `FW_VERSION` at build time overrides the crate version so two
+/// builds of the same crate can be told apart in a rollout
+/// (`FW_VERSION=0.2.1 cargo build …`); it must be `MAJOR.MINOR.PATCH[-pre]`.
+pub const FIRMWARE_VERSION: &str = match option_env!("FW_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+const _: () = assert!(
+    FIRMWARE_VERSION.len() <= 16,
+    "FW_VERSION must fit the 16-byte fw field"
+);
+
+/// What the device reads back out of the uplink response: today only the
+/// OTA target. Every other key (`message`, `device_id`, `current`,
+/// `client_subject`) is skipped, so the endpoint may add fields freely.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct UplinkAck {
+    /// Version the endpoint wants this device to run, if an operator set one.
+    #[serde(default)]
+    pub desired_fw: Option<HString<32>>,
+}
+
+impl UplinkAck {
+    /// Parse the JSON body of a 2xx uplink response. Anything that is not
+    /// an object with the expected shapes reads as "no instruction": the
+    /// uplink itself succeeded, and a bad ack must not stall telemetry.
+    pub fn parse(body: &str) -> UplinkAck {
+        serde_json_core::from_str::<UplinkAck>(body)
+            .map(|(ack, _)| ack)
+            .unwrap_or_default()
+    }
+}
 
 /// Most samples one `levels` burst can carry.
 pub const LEVELS_SAMPLES_MAX: usize = 12;
