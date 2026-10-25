@@ -13,6 +13,8 @@ pub mod fleet;
 pub mod handlers;
 /// Fleet history: bucketed telemetry and status timeline (pure functions).
 pub mod history;
+/// Live view data: uplinks as timestamped 8-bit register samples.
+pub mod live;
 /// mTLS client certificate extraction middleware.
 pub mod middleware;
 /// Domain models, wire types, and API response structs.

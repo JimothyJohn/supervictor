@@ -128,7 +128,7 @@ async fn uplink(
     } else {
         Some(body.as_str())
     };
-    let resp = handlers::handle_uplink(
+    let ingested = handlers::ingest_uplink(
         body_opt,
         subject,
         Some(state.store.as_ref()),
@@ -137,13 +137,11 @@ async fn uplink(
 
     // Push to dashboard SSE subscribers; never blocks, no-op with no listeners.
     #[cfg(feature = "ui")]
-    let _ = state.events.send(crate::ui::sse::UplinkEvent {
-        device_id: resp.device_id.clone(),
-        current: resp.current,
-        received_at: crate::time::now_rfc3339(),
-    });
+    let _ = state
+        .events
+        .send(crate::ui::sse::UplinkEvent::from_record(&ingested.record));
 
-    Ok(Json(resp))
+    Ok(Json(ingested.response))
 }
 
 async fn register_device(

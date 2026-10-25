@@ -15,9 +15,11 @@ use serde::Serialize;
 
 use crate::error::AppError;
 use crate::fleet::{staleness_of, Staleness, DARK_SECS};
+use crate::live;
 use crate::models::{DeviceRecord, UplinkRecord};
 use crate::store::DeviceStore;
-use crate::time::{format_rfc3339, parse_rfc3339_unix};
+use crate::time::{format_rfc3339, parse_rfc3339_unix, parse_rfc3339_unix_ms};
+use supervictor_common::levels;
 use supervictor_common::status;
 
 /// Buckets per window: every chart has the same x resolution, whatever
@@ -98,45 +100,10 @@ impl Window {
     }
 }
 
-/// A charted telemetry field: payload key, human label, unit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Metric {
-    /// Key in the stored uplink payload.
-    pub key: &'static str,
-    /// Chart title.
-    pub label: &'static str,
-    /// Axis unit.
-    pub unit: &'static str,
-}
-
-/// The fields the history views chart, in display order.
-pub const METRICS: [Metric; 5] = [
-    Metric {
-        key: "current",
-        label: "current",
-        unit: "mA",
-    },
-    Metric {
-        key: "temp_c",
-        label: "temperature",
-        unit: "°C",
-    },
-    Metric {
-        key: "humidity_pct",
-        label: "humidity",
-        unit: "%RH",
-    },
-    Metric {
-        key: "rssi_dbm",
-        label: "wifi rssi",
-        unit: "dBm",
-    },
-    Metric {
-        key: "heap_free",
-        label: "free heap",
-        unit: "bytes",
-    },
-];
+/// The charted telemetry fields, in display order: the 8-bit register
+/// table from `supervictor_common::levels` (`key`, `label`, `unit`, and
+/// the full-scale range the live view and the `levels` bursts use).
+pub use supervictor_common::levels::{Register as Metric, REGISTERS as METRICS};
 
 /// Bucket means for one device: `values[i]` pairs with `METRICS[i]`;
 /// `None` when no uplink in the bucket carried that field.
@@ -229,6 +196,11 @@ fn bucket_of(t: u64, since: u64, step: u64) -> Option<usize> {
 
 /// Bucket a device's rows (any order, any device mix — rows for other
 /// devices are ignored) into `BUCKETS` mean points.
+///
+/// A row that carries a `levels` burst contributes every sample in it:
+/// the earlier samples dequantised and placed `levels_ms` apart before the
+/// receive time, the last one as the row's full-precision scalar fields.
+/// `count` and `uplinks` still count rows, not samples.
 pub fn bucket_series(
     device_id: &str,
     rows: &[UplinkRecord],
@@ -243,6 +215,23 @@ pub fn bucket_series(
         let Some(t) = parse_rfc3339_unix(&row.received_at) else {
             continue;
         };
+        if let Some(burst) = live::burst_of(&row.payload) {
+            let received_ms = parse_rfc3339_unix_ms(&row.received_at).unwrap_or(t * 1_000);
+            for k in 0..burst.len().saturating_sub(1) {
+                let Some(i) = bucket_of(burst.time_of(k, received_ms) / 1_000, since, step) else {
+                    continue;
+                };
+                let Some(sample) = burst.sample(k) else {
+                    continue;
+                };
+                for (m, v) in levels::unpack(&sample).iter().enumerate() {
+                    if let Some(v) = v {
+                        sums[i][m] += f64::from(*v);
+                        counts[i][m] += 1;
+                    }
+                }
+            }
+        }
         let Some(i) = bucket_of(t, since, step) else {
             continue;
         };
@@ -514,6 +503,63 @@ mod tests {
         assert_eq!(s.points[2].values[0], Some(7.0));
         assert_eq!(s.points[2].values[3], Some(-60.0));
         assert_eq!(s.points[BUCKETS - 1].t, since + 890);
+    }
+
+    /// A burst's earlier samples land in the buckets they were taken in;
+    /// the uplink instant itself comes from the scalar fields.
+    #[test]
+    fn bucket_series_expands_level_bursts_backwards_in_time() {
+        let since = NOW - 900;
+        let step = 10;
+        // Three samples 10 s apart ending at since+100: taken at +80, +90, +100.
+        let lv_a = METRICS[0].quantize(1_000.0);
+        let lv_b = METRICS[0].quantize(2_000.0);
+        let mut flat = vec![0u8; METRICS.len() * 3];
+        flat[0] = lv_a; // sample 0, current
+        flat[METRICS.len()] = lv_b; // sample 1, current
+        flat[METRICS.len() + 1] = METRICS[1].quantize(25.0); // sample 1, temp
+        flat[METRICS.len() * 2] = 77; // sample 2 is superseded by the scalars
+        let rows = vec![row(
+            "a",
+            since + 100,
+            serde_json::json!({ "current": 3000, "levels": flat, "levels_ms": 10_000 }),
+        )];
+        let s = bucket_series("a", &rows, since, step);
+        assert_eq!(s.uplinks, 1, "rows, not samples");
+        assert_eq!(s.points[8].count, 0, "count stays per row");
+        let v = s.points[8].values[0].unwrap();
+        assert!(
+            (v - 1_000.0).abs() <= f64::from(METRICS[0].step()) / 2.0,
+            "{v}"
+        );
+        assert_eq!(s.points[8].values[1], None, "level 0 = absent");
+        let v = s.points[9].values[0].unwrap();
+        assert!(
+            (v - 2_000.0).abs() <= f64::from(METRICS[0].step()) / 2.0,
+            "{v}"
+        );
+        let v = s.points[9].values[1].unwrap();
+        assert!(
+            (v - 25.0).abs() <= f64::from(METRICS[1].step()) / 2.0,
+            "{v}"
+        );
+        assert_eq!(s.points[10].count, 1);
+        assert_eq!(
+            s.points[10].values[0],
+            Some(3_000.0),
+            "uplink instant = exact scalar, not level 77"
+        );
+        assert_eq!(s.points[7].values[0], None);
+
+        // A burst whose early samples predate the window is clipped there.
+        let rows = vec![row(
+            "a",
+            since + 5,
+            serde_json::json!({ "current": 1, "levels": flat, "levels_ms": 10_000 }),
+        )];
+        let s = bucket_series("a", &rows, since, step);
+        assert_eq!(s.uplinks, 1);
+        assert_eq!(s.points[0].values[0], Some(1.0));
     }
 
     #[test]

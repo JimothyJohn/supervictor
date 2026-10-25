@@ -82,18 +82,40 @@ pub fn authorize_uplink(
     }
 }
 
+/// What an accepted uplink produced: the device-facing response and the
+/// record as persisted (or as it would be, when no store is attached) —
+/// the dashboard's live stream is built from the record, not re-parsed.
+#[derive(Debug)]
+pub struct Ingested {
+    /// Response body for the device.
+    pub response: UplinkResponse,
+    /// The stored row: device id, receive time, payload minus `id`.
+    pub record: UplinkRecord,
+}
+
 /// Parse and persist a device uplink message.
 ///
-/// The payload `id` must pass [`validate::check_device_id`]. When a store is
-/// present the device record is looked up and [`authorize_uplink`] decides
-/// whether the request may proceed; `require_registration` additionally
-/// demands an `active` registration.
+/// The payload `id` must pass [`validate::check_device_id`] and a `levels`
+/// burst, if present, [`validate::check_levels`]. When a store is present
+/// the device record is looked up and [`authorize_uplink`] decides whether
+/// the request may proceed; `require_registration` additionally demands an
+/// `active` registration.
 pub fn handle_uplink(
     raw_body: Option<&str>,
     client_subject: Option<String>,
     store: Option<&dyn DeviceStore>,
     require_registration: bool,
 ) -> Result<UplinkResponse, AppError> {
+    ingest_uplink(raw_body, client_subject, store, require_registration).map(|i| i.response)
+}
+
+/// [`handle_uplink`], keeping the persisted record for the caller.
+pub fn ingest_uplink(
+    raw_body: Option<&str>,
+    client_subject: Option<String>,
+    store: Option<&dyn DeviceStore>,
+    require_registration: bool,
+) -> Result<Ingested, AppError> {
     let body = raw_body
         .filter(|b| !b.trim().is_empty())
         .ok_or(AppError::MissingBody)?;
@@ -105,6 +127,7 @@ pub fn handle_uplink(
         })?;
 
     validate::check_device_id(fields::UPLINK_ID, &uplink.id)?;
+    validate::check_levels(&uplink.levels, uplink.levels_ms)?;
 
     if let Some(s) = store {
         let device = s.get_device(&uplink.id)?;
@@ -114,31 +137,37 @@ pub fn handle_uplink(
             client_subject.as_deref(),
             require_registration,
         )?;
+    }
 
-        // Persist every field the device sent (health metadata, sensor
-        // readings — absent Options are already off the wire), minus the id,
-        // which is the record key.
-        let mut payload = serde_json::to_value(&uplink).map_err(|e| AppError::InvalidPayload {
-            detail: e.to_string(),
-            structured: None,
-        })?;
-        if let Some(obj) = payload.as_object_mut() {
-            obj.remove("id");
-        }
-        s.put_uplink(UplinkRecord {
-            device_id: uplink.id.clone(),
-            received_at: now_rfc3339(),
-            payload,
-        })?;
+    // Persist every field the device sent (health metadata, sensor
+    // readings, the levels burst — absent Options are already off the
+    // wire), minus the id, which is the record key.
+    let mut payload = serde_json::to_value(&uplink).map_err(|e| AppError::InvalidPayload {
+        detail: e.to_string(),
+        structured: None,
+    })?;
+    if let Some(obj) = payload.as_object_mut() {
+        obj.remove("id");
+    }
+    let record = UplinkRecord {
+        device_id: uplink.id.clone(),
+        received_at: now_rfc3339(),
+        payload,
+    };
+    if let Some(s) = store {
+        s.put_uplink(record.clone())?;
     }
 
     tracing::info!(device_id = %uplink.id, current = uplink.current, "uplink received");
 
-    Ok(UplinkResponse {
-        message: "Uplink received".into(),
-        device_id: uplink.id,
-        current: uplink.current,
-        client_subject,
+    Ok(Ingested {
+        response: UplinkResponse {
+            message: "Uplink received".into(),
+            device_id: uplink.id,
+            current: uplink.current,
+            client_subject,
+        },
+        record,
     })
 }
 

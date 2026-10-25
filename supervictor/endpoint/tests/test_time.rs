@@ -1,4 +1,6 @@
-use supervictor_endpoint::time::{format_rfc3339, now_rfc3339, parse_rfc3339_unix};
+use supervictor_endpoint::time::{
+    format_rfc3339, now_rfc3339, now_unix_ms, parse_rfc3339_unix, parse_rfc3339_unix_ms,
+};
 
 /// Reference vectors generated with `chrono 0.4.45`'s
 /// `DateTime::<Utc>::from_timestamp(secs, nanos).to_rfc3339()` before the
@@ -155,4 +157,57 @@ fn now_has_rfc3339_shape() {
     // sanity: we're past 2026 and before year 3000
     let year: u32 = ts[0..4].parse().unwrap();
     assert!((2026..3000).contains(&year), "implausible year: {ts}");
+}
+
+/// Millisecond parse: whole seconds from the shared parser, the fraction
+/// padded or truncated to three digits, and `now_rfc3339()` round-trips
+/// to within a millisecond of `now_unix_ms()`.
+#[test]
+fn parse_unix_ms_reads_the_fraction() {
+    assert_eq!(parse_rfc3339_unix_ms("1970-01-01T00:00:00+00:00"), Some(0));
+    assert_eq!(parse_rfc3339_unix_ms("1970-01-01T00:00:01Z"), Some(1_000));
+    assert_eq!(parse_rfc3339_unix_ms("1970-01-01T00:00:01.5Z"), Some(1_500));
+    assert_eq!(
+        parse_rfc3339_unix_ms("1970-01-01T00:00:01.25+00:00"),
+        Some(1_250)
+    );
+    assert_eq!(
+        parse_rfc3339_unix_ms("1970-01-01T00:00:01.123+00:00"),
+        Some(1_123)
+    );
+    assert_eq!(
+        parse_rfc3339_unix_ms("1970-01-01T00:00:01.123456+00:00"),
+        Some(1_123)
+    );
+    assert_eq!(
+        parse_rfc3339_unix_ms("1970-01-01T00:00:01.999999999Z"),
+        Some(1_999)
+    );
+    for (secs, nanos, text) in CHRONO_VECTORS {
+        assert_eq!(
+            parse_rfc3339_unix_ms(text),
+            Some(secs * 1_000 + u64::from(nanos / 1_000_000)),
+            "{text}"
+        );
+    }
+    for bad in [
+        "",
+        "garbage",
+        "1970-01-01T00:00:01.Z",
+        "1970-01-01T00:00:01.x5Z",
+        "1970-01-01T00:00:01.5+01:00",
+    ] {
+        assert_eq!(parse_rfc3339_unix_ms(bad), None, "{bad:?}");
+    }
+    let before = now_unix_ms();
+    let stamped = parse_rfc3339_unix_ms(&now_rfc3339()).unwrap();
+    let after = now_unix_ms();
+    assert!(
+        before <= stamped && stamped <= after,
+        "{before} {stamped} {after}"
+    );
+    assert_eq!(
+        parse_rfc3339_unix_ms(&format_rfc3339(1_800_000_000, 7_000_000)),
+        Some(1_800_000_000_007)
+    );
 }

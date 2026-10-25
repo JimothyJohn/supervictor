@@ -17,7 +17,9 @@ use supervictor_endpoint::middleware::{
     dn_matches, extract_client_subject, is_admin_subject, sanitize_for_log,
 };
 use supervictor_endpoint::models::UplinkMessage;
-use supervictor_endpoint::validate::{check_text, MAX_DEVICE_ID_LEN};
+use supervictor_endpoint::validate::{
+    check_levels, check_text, MAX_DEVICE_ID_LEN, MAX_LEVELS_MS, MAX_LEVELS_SAMPLES,
+};
 
 // ── Strategies ───────────────────────────────────────────────────────
 
@@ -32,6 +34,18 @@ fn finite_f32() -> impl Strategy<Value = f32> {
 
 fn triple() -> impl Strategy<Value = [f32; 3]> {
     [finite_f32(), finite_f32(), finite_f32()]
+}
+
+/// A burst the validator must accept: whole samples, within the caps,
+/// with a positive spacing — or no burst at all.
+fn valid_burst() -> impl Strategy<Value = (Vec<u8>, Option<u32>)> {
+    prop_oneof![
+        Just((Vec::new(), None)),
+        (1usize..=24, 1u32..=MAX_LEVELS_MS).prop_flat_map(|(samples, ms)| {
+            proptest::collection::vec(any::<u8>(), samples * supervictor_common::levels::COUNT)
+                .prop_map(move |levels| (levels, Some(ms)))
+        }),
+    ]
 }
 
 prop_compose! {
@@ -53,12 +67,14 @@ prop_compose! {
             proptest::option::of(triple()),
             proptest::option::of(triple()),
         ),
+        burst in valid_burst(),
     ) -> UplinkMessage {
         let (seq, uptime_s, interval_s, heap_free, rssi_dbm) = health;
         let (temp_c, humidity_pct, accel_g, gyro_dps, mag_ut) = env;
+        let (levels, levels_ms) = burst;
         UplinkMessage {
             id, current, fw, seq, uptime_s, interval_s, heap_free, rssi_dbm,
-            temp_c, humidity_pct, accel_g, gyro_dps, mag_ut,
+            temp_c, humidity_pct, accel_g, gyro_dps, mag_ut, levels, levels_ms,
         }
     }
 }
@@ -125,7 +141,9 @@ proptest! {
             + msg.humidity_pct.is_some() as usize
             + msg.accel_g.is_some() as usize
             + msg.gyro_dps.is_some() as usize
-            + msg.mag_ut.is_some() as usize;
+            + msg.mag_ut.is_some() as usize
+            + !msg.levels.is_empty() as usize
+            + msg.levels_ms.is_some() as usize;
         prop_assert_eq!(obj.len(), some_fields, "payload: {:?}", obj);
 
         obj.insert("id".into(), serde_json::Value::String(msg.id.clone()));
@@ -189,6 +207,35 @@ proptest! {
 }
 
 // ── Registration ─────────────────────────────────────────────────────
+
+proptest! {
+    /// `check_levels` is complete: it accepts exactly the bursts that are a
+    /// whole number of samples within the caps with a positive spacing, or
+    /// no burst at all — and never panics on any length / spacing pair.
+    #[test]
+    fn check_levels_is_complete(
+        len in 0usize..(supervictor_common::levels::COUNT * (MAX_LEVELS_SAMPLES + 2)),
+        ms in proptest::option::of(any::<u32>()),
+    ) {
+        use supervictor_common::levels::COUNT;
+        let levels = vec![0u8; len];
+        let expected = if len == 0 {
+            ms.is_none()
+        } else {
+            len % COUNT == 0
+                && len / COUNT <= MAX_LEVELS_SAMPLES
+                && matches!(ms, Some(m) if (1..=MAX_LEVELS_MS).contains(&m))
+        };
+        let result = check_levels(&levels, ms);
+        prop_assert_eq!(result.is_ok(), expected, "len {} ms {:?}: {:?}", len, ms, result);
+        if let Err(e) = result {
+            let is_payload_error = matches!(e, AppError::InvalidPayload { .. });
+            prop_assert!(is_payload_error, "unexpected error class: {:?}", e);
+            let message = format!("{e}");
+            prop_assert!(message.starts_with("invalid payload: levels"), "{}", message);
+        }
+    }
+}
 
 proptest! {
     #[test]

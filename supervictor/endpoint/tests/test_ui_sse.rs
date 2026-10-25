@@ -58,6 +58,10 @@ async fn read_until(stream: &mut TcpStream, needle: &str) -> String {
 
 async fn post_uplink(addr: &str, device_id: &str, current: i32) -> String {
     let body = format!(r#"{{"id":"{device_id}","current":{current}}}"#);
+    post_body(addr, &body).await
+}
+
+async fn post_body(addr: &str, body: &str) -> String {
     let req = format!(
         "POST / HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -90,6 +94,51 @@ async fn sse_streams_uplinks_as_they_arrive() {
     let event = read_until(&mut sse, "live-device").await;
     assert!(event.contains("event: uplink"), "got: {event}");
     assert!(event.contains(r#""current":77"#), "got: {event}");
+}
+
+/// The event carries what the live strips need: the receive time in ms
+/// and the 8-bit levels — the device's burst verbatim when it sent one,
+/// otherwise its scalars quantised to a single sample (`levels_ms` 0).
+#[tokio::test]
+async fn sse_events_carry_levels() {
+    use supervictor_common::levels::{COUNT, REGISTERS};
+    let addr = serve().await;
+    let mut sse = open_sse(&addr).await;
+    read_until(&mut sse, "\r\n\r\n").await;
+
+    let resp = post_body(&addr, r#"{"id":"scalar-dev","current":3000,"temp_c":20.0}"#).await;
+    assert!(resp.contains("200 OK"), "uplink failed: {resp}");
+    let event = read_until(&mut sse, "scalar-dev").await;
+    let data = event
+        .lines()
+        .find_map(|l| l.strip_prefix("data: "))
+        .expect("data line");
+    let ev: serde_json::Value = serde_json::from_str(data).unwrap();
+    assert_eq!(ev["levels_ms"], 0);
+    assert!(ev["t_ms"].as_u64().unwrap() > 1_700_000_000_000);
+    let levels = ev["levels"].as_array().unwrap();
+    assert_eq!(levels.len(), COUNT);
+    assert_eq!(levels[0], REGISTERS[0].quantize(3000.0));
+    assert_eq!(levels[1], REGISTERS[1].quantize(20.0));
+    assert_eq!(levels[2], 0, "absent humidity is level 0");
+
+    let flat: Vec<u8> = (1..=(COUNT * 2) as u8).collect();
+    let body = format!(
+        r#"{{"id":"burst-dev","current":1,"levels":{},"levels_ms":250}}"#,
+        serde_json::to_string(&flat).unwrap()
+    );
+    let resp = post_body(&addr, &body).await;
+    assert!(resp.contains("200 OK"), "uplink failed: {resp}");
+    let event = read_until(&mut sse, "burst-dev").await;
+    let data = event
+        .lines()
+        .filter_map(|l| l.strip_prefix("data: "))
+        .find(|l| l.contains("burst-dev"))
+        .expect("data line");
+    let ev: serde_json::Value = serde_json::from_str(data).unwrap();
+    assert_eq!(ev["levels_ms"], 250);
+    assert_eq!(ev["levels"], serde_json::json!(flat));
+    assert_eq!(ev["current"], 1);
 }
 
 #[tokio::test]

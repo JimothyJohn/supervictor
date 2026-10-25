@@ -55,6 +55,8 @@ async fn every_ui_route_requires_a_certificate() {
         "/ui",
         "/ui/history",
         "/ui/history?window=6h",
+        "/ui/live",
+        "/ui/live.json",
         "/ui/devices/some-device",
         "/ui/devices/some-device?window=6h",
         "/ui/events",
@@ -557,4 +559,149 @@ async fn every_page_has_the_theme_toggle_and_light_tokens_exist() {
     assert!(css.contains("@media (prefers-color-scheme: light)"));
     assert!(css.contains(":root:not([data-theme=\"dark\"])"));
     assert!(css.contains("@media (max-width: 640px)"));
+}
+
+// ── Live view ─────────────────────────────────────────────────────────
+
+fn seed_burst(store: &dyn DeviceStore, id: &str, at: &str, levels: Vec<u8>, ms: u32) {
+    store
+        .put_uplink(UplinkRecord {
+            device_id: id.into(),
+            received_at: at.into(),
+            payload: serde_json::json!({ "current": 1500, "levels": levels, "levels_ms": ms }),
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn live_page_has_a_meter_per_device_per_register_and_a_strip_per_register() {
+    use supervictor_common::levels::{COUNT, REGISTERS};
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "bursty", "active");
+    seed_device(store.as_ref(), "quiet", "active");
+    seed_device(store.as_ref(), "plain", "inactive");
+    let now = supervictor_endpoint::time::now_rfc3339();
+    // bursty: three samples, the newest with current at level 200.
+    let mut flat = vec![1u8; COUNT * 3];
+    flat[COUNT * 2] = 200;
+    seed_burst(store.as_ref(), "bursty", &now, flat, 500);
+    seed_uplink(store.as_ref(), "plain", &now, 3000);
+
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server.get("/ui/live").add_header(name, value).await;
+    assert_eq!(resp.status_code(), 200);
+    let html = resp.text();
+    assert!(html.contains("id=\"live\""), "live root missing");
+    assert!(html.contains("data-poll=\"/ui/live.json\""));
+    assert!(html.contains("href=\"/ui/live\""), "nav link");
+    assert_eq!(
+        html.matches("class=\"meter\"").count(),
+        3 * COUNT,
+        "one meter per device per register"
+    );
+    assert_eq!(
+        html.matches("class=\"strip wide\"").count() + html.matches("class=\"strip\"").count(),
+        COUNT,
+        "one strip per register"
+    );
+    for r in &REGISTERS {
+        assert!(html.contains(r.label), "{} strip missing", r.label);
+    }
+    // bursty's newest current level is 200: a meter at --lv:200 with the
+    // dequantised value; quiet has no sample: level 0 renders as "–".
+    assert!(
+        html.contains("--lv:200"),
+        "newest level should drive the meter"
+    );
+    let expected = supervictor_endpoint::ui::charts::fmt_value(f64::from(
+        REGISTERS[0].dequantize(200).unwrap(),
+    ));
+    assert!(
+        html.contains(&format!("{expected} mA")),
+        "dequantised readout"
+    );
+    assert!(
+        html.contains("--lv:0"),
+        "a device with no sample reads empty"
+    );
+    // plain's scalar current 3000 is quantised for its meter.
+    let lv = REGISTERS[0].quantize(3000.0);
+    assert!(
+        html.contains(&format!("--lv:{lv}")),
+        "scalar fallback quantised"
+    );
+    // The seed carries the register table and the samples.
+    assert!(html.contains("&quot;registers&quot;"));
+    assert!(html.contains("&quot;window_s&quot;:120"));
+    // Legend for 2+ devices, span buttons, and no inline user data in scripts.
+    assert!(html.contains("class=\"legend\""));
+    assert!(html.contains("data-span=\"60\""));
+    assert!(html.contains("aria-valuenow=\"200\""));
+}
+
+#[tokio::test]
+async fn live_page_keeps_hostile_device_ids_inert_in_seed_and_bank() {
+    let (server, store) = server_with_store();
+    let hostile = "x\"><script>alert(1)</script>";
+    seed_device(store.as_ref(), hostile, "active");
+    seed_uplink(
+        store.as_ref(),
+        hostile,
+        &supervictor_endpoint::time::now_rfc3339(),
+        7,
+    );
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server.get("/ui/live").add_header(name, value).await;
+    assert_eq!(resp.status_code(), 200);
+    let html = resp.text();
+    assert!(!html.contains("<script>alert(1)"), "raw script tag leaked");
+    assert!(!html.contains("x\"><script"), "attribute breakout");
+    assert!(
+        html.contains("&lt;script&gt;alert(1)"),
+        "id escaped, not dropped"
+    );
+}
+
+#[tokio::test]
+async fn live_json_is_the_page_seed_with_expanded_bursts() {
+    use supervictor_common::levels::COUNT;
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "b", "active");
+    seed_device(store.as_ref(), "a", "active");
+    let now_ms = supervictor_endpoint::time::now_unix_ms();
+    let at = supervictor_endpoint::time::format_rfc3339(
+        now_ms / 1000,
+        (now_ms % 1000) as u32 * 1_000_000,
+    );
+    let flat: Vec<u8> = (1..=(COUNT * 4) as u8).collect();
+    seed_burst(store.as_ref(), "b", &at, flat, 250);
+    // A row two minutes and more ago is outside the window.
+    let old = supervictor_endpoint::time::format_rfc3339(now_ms / 1000 - 130, 0);
+    seed_uplink(store.as_ref(), "a", &old, 1);
+
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server.get("/ui/live.json").add_header(name, value).await;
+    assert_eq!(resp.status_code(), 200);
+    let json: serde_json::Value = resp.json();
+    assert_eq!(json["window_s"], 120);
+    assert!(json["now_ms"].as_u64().unwrap() >= now_ms);
+    let registers = json["registers"].as_array().unwrap();
+    assert_eq!(registers.len(), COUNT);
+    assert_eq!(registers[0]["key"], "current");
+    assert!(registers[0]["hi"].as_f64().unwrap() > registers[0]["lo"].as_f64().unwrap());
+    let devices = json["devices"].as_array().unwrap();
+    assert_eq!(devices.len(), 2);
+    assert_eq!(devices[0]["device_id"], "a", "sorted by id");
+    assert_eq!(devices[0]["slot"], 0);
+    assert_eq!(
+        devices[0]["samples"].as_array().unwrap().len(),
+        0,
+        "old row excluded"
+    );
+    let samples = devices[1]["samples"].as_array().unwrap();
+    assert_eq!(samples.len(), 4, "burst expanded");
+    let t: Vec<u64> = samples.iter().map(|s| s["t"].as_u64().unwrap()).collect();
+    assert!(t.windows(2).all(|w| w[1] == w[0] + 250), "{t:?}");
+    assert_eq!(samples[0]["l"], serde_json::json!([1, 2, 3, 4, 5]));
+    assert_eq!(samples[3]["l"][COUNT - 1], (COUNT * 4) as u64);
 }

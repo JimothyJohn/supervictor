@@ -1,5 +1,6 @@
 mod common;
 
+use supervictor_endpoint::error::AppError;
 use supervictor_endpoint::handlers;
 
 #[test]
@@ -248,4 +249,96 @@ fn full_roundtrip() {
     let uplinks = handlers::handle_get_device_uplinks("dev-1", store.as_ref(), 10).unwrap();
     assert_eq!(uplinks.len(), 1);
     assert_eq!(uplinks[0].payload["current"], 42);
+}
+
+// ── levels bursts ─────────────────────────────────────────────────────
+
+fn levels_body(levels: &str, ms: &str) -> String {
+    let mut body = format!(r#"{{"id": "dev-1", "current": 1, "levels": {levels}"#);
+    if !ms.is_empty() {
+        body.push_str(&format!(r#", "levels_ms": {ms}"#));
+    }
+    body.push('}');
+    body
+}
+
+/// A well-formed burst is stored byte for byte with its spacing, and the
+/// record the route builds its live event from carries it too.
+#[test]
+fn uplink_stores_levels_burst() {
+    use supervictor_common::levels::COUNT;
+    let store = common::test_store();
+    let flat: Vec<u8> = (0..(COUNT * 10) as u8).collect();
+    let body = levels_body(&serde_json::to_string(&flat).unwrap(), "500");
+    let ingested = handlers::ingest_uplink(Some(&body), None, Some(store.as_ref()), false).unwrap();
+    assert_eq!(ingested.response.device_id, "dev-1");
+    assert_eq!(ingested.record.device_id, "dev-1");
+    assert_eq!(ingested.record.payload["levels_ms"], 500);
+    let uplinks = store.get_uplinks("dev-1", 10).unwrap();
+    assert_eq!(uplinks[0].payload["levels"], serde_json::json!(flat));
+    assert_eq!(uplinks[0].payload["levels_ms"], 500);
+    assert_eq!(uplinks[0].payload, ingested.record.payload);
+    assert_eq!(uplinks[0].received_at, ingested.record.received_at);
+}
+
+/// Every malformed burst is a 422-class error and nothing is stored: a
+/// device cannot park megabytes of bytes, a ragged array, or a burst with
+/// no time base in a row.
+#[test]
+fn uplink_rejects_malformed_levels_bursts() {
+    use supervictor_common::levels::COUNT;
+    use supervictor_endpoint::validate::{MAX_LEVELS_MS, MAX_LEVELS_SAMPLES};
+    let store = common::test_store();
+    let one = serde_json::to_string(&vec![1u8; COUNT]).unwrap();
+    let ragged = serde_json::to_string(&vec![1u8; COUNT + 1]).unwrap();
+    let huge = serde_json::to_string(&vec![1u8; COUNT * (MAX_LEVELS_SAMPLES + 1)]).unwrap();
+    let cases: Vec<(String, &str)> = vec![
+        (levels_body(&one, ""), "levels_ms required"),
+        (levels_body(&one, "0"), "levels_ms zero"),
+        (
+            levels_body(&one, &(MAX_LEVELS_MS + 1).to_string()),
+            "levels_ms too long",
+        ),
+        (levels_body(&one, "-1"), "levels_ms negative"),
+        (levels_body(&one, "1.5"), "levels_ms fractional"),
+        (levels_body(&ragged, "500"), "ragged"),
+        (levels_body("[1, 2, 3]", "500"), "short"),
+        (levels_body(&huge, "500"), "too many samples"),
+        (levels_body("[256, 1, 1, 1, 1]", "500"), "byte overflow"),
+        (levels_body("[-1, 1, 1, 1, 1]", "500"), "negative byte"),
+        (levels_body("\"AQIDBAU=\"", "500"), "string not array"),
+        (levels_body("[]", "500"), "levels_ms without levels"),
+        (levels_body("[[1,2,3,4,5]]", "500"), "nested"),
+    ];
+    for (body, what) in cases {
+        let err =
+            handlers::handle_uplink(Some(&body), None, Some(store.as_ref()), false).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("invalid payload"), "{what}: got {msg}");
+        assert!(
+            matches!(err, AppError::InvalidPayload { .. }),
+            "{what}: {err:?}"
+        );
+    }
+    assert!(
+        store.get_uplinks("dev-1", 10).unwrap().is_empty(),
+        "nothing stored"
+    );
+    // The largest legal burst is fine.
+    let max = serde_json::to_string(&vec![255u8; COUNT * MAX_LEVELS_SAMPLES]).unwrap();
+    handlers::handle_uplink(
+        Some(&levels_body(&max, &MAX_LEVELS_MS.to_string())),
+        None,
+        Some(store.as_ref()),
+        false,
+    )
+    .unwrap();
+    // No burst at all is the common case and still fine.
+    handlers::handle_uplink(
+        Some(&levels_body("[]", "")),
+        None,
+        Some(store.as_ref()),
+        false,
+    )
+    .unwrap();
 }

@@ -1,4 +1,5 @@
 use alloc::string::String;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 /// Uplink payload sent by the device. Canonical wire type.
@@ -56,6 +57,15 @@ pub struct UplinkMessage {
     /// 9-axis IMU: magnetic field [x, y, z] in µT.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mag_ut: Option<[f32; 3]>,
+
+    // --- Sub-interval burst (absent unless the device batches samples) ---
+    /// 8-bit register levels, `levels::COUNT` per sample, oldest first;
+    /// the last sample is the uplink instant (see `crate::levels`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub levels: Vec<u8>,
+    /// Milliseconds between consecutive samples in `levels`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels_ms: Option<u32>,
 }
 
 /// Device registration request (CLI → endpoint).

@@ -35,6 +35,14 @@ pub const UPLINK_GYRO_DPS: &str = "gyro_dps";
 /// IMU magnetic field [x, y, z] in µT.
 pub const UPLINK_MAG_UT: &str = "mag_ut";
 
+// Sub-interval burst (optional): 8-bit levels, see `crate::levels`.
+
+/// Flat array of 8-bit register levels, `levels::COUNT` per sample,
+/// oldest first; the last sample is the uplink instant.
+pub const UPLINK_LEVELS: &str = "levels";
+/// Milliseconds between consecutive samples in `levels`.
+pub const UPLINK_LEVELS_MS: &str = "levels_ms";
+
 // --- RegisterDeviceRequest / DeviceRecord ---
 
 /// Device identifier field name.
