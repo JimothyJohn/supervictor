@@ -382,9 +382,10 @@ fn staleness_of_unix(last: u64, now: u64) -> Staleness {
 }
 
 /// Power state of the active devices at the end of every bucket: the
-/// last `current` at or before the bucket end, judged against
-/// `threshold_ma`, and `unknown` once that reading is `DARK_SECS` old (or
-/// never existed). Same row contract as [`status_timeline`].
+/// last `current` at or before the bucket end, judged against the device's
+/// own threshold (else `threshold_ma`), and `unknown` once that reading is
+/// `DARK_SECS` old (or never existed). Same row contract as
+/// [`status_timeline`].
 pub fn power_timeline(
     devices: &[DeviceRecord],
     rows: &[UplinkRecord],
@@ -392,6 +393,10 @@ pub fn power_timeline(
     step: u64,
     threshold_ma: i64,
 ) -> Vec<PowerPoint> {
+    let thresholds: HashMap<&str, i64> = devices
+        .iter()
+        .map(|d| (d.device_id.as_str(), d.effective_threshold_ma(threshold_ma)))
+        .collect();
     let mut readings: HashMap<&str, Vec<(u64, Option<i64>)>> = devices
         .iter()
         .filter(|d| d.status == status::ACTIVE)
@@ -426,9 +431,11 @@ pub fn power_timeline(
                     *cursor += 1;
                 }
                 let state = match cursor.checked_sub(1).map(|c| list[c]) {
-                    Some((last, current)) => {
-                        power_state(current, staleness_of_unix(last, at), threshold_ma)
-                    }
+                    Some((last, current)) => power_state(
+                        current,
+                        staleness_of_unix(last, at),
+                        thresholds.get(id).copied().unwrap_or(threshold_ma),
+                    ),
                     None => PowerState::Unknown,
                 };
                 match state {
@@ -516,6 +523,7 @@ mod tests {
             subject_dn: None,
             status: status.into(),
             created_at: "2026-01-01T00:00:00+00:00".into(),
+            power_threshold_ma: None,
         }
     }
 

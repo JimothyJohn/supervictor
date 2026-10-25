@@ -9,6 +9,7 @@ fn make_device(id: &str) -> DeviceRecord {
         subject_dn: None,
         status: "active".into(),
         created_at: "2025-01-01T00:00:00Z".into(),
+        power_threshold_ma: None,
     }
 }
 
@@ -99,6 +100,155 @@ fn get_uplinks_empty() {
     let store = common::test_store();
     let uplinks = store.get_uplinks("dev-1", 10).unwrap();
     assert!(uplinks.is_empty());
+}
+
+// ── Per-device power threshold ────────────────────────────────────────
+
+#[test]
+fn threshold_round_trips_through_put_get_and_list() {
+    let store = common::test_store();
+    let mut device = make_device("press-1");
+    device.power_threshold_ma = Some(12_000);
+    store.put_device(device).unwrap();
+    store.put_device(make_device("plain-1")).unwrap();
+
+    let got = store.get_device("press-1").unwrap().unwrap();
+    assert_eq!(got.power_threshold_ma, Some(12_000));
+    assert_eq!(got.effective_threshold_ma(100), 12_000);
+    let plain = store.get_device("plain-1").unwrap().unwrap();
+    assert_eq!(plain.power_threshold_ma, None);
+    assert_eq!(plain.effective_threshold_ma(100), 100);
+
+    let mut listed = store.list_devices().unwrap();
+    listed.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+    assert_eq!(
+        listed
+            .iter()
+            .map(|d| d.power_threshold_ma)
+            .collect::<Vec<_>>(),
+        [None, Some(12_000)]
+    );
+}
+
+#[test]
+fn set_device_threshold_sets_clears_and_rejects_unknown() {
+    let store = common::test_store();
+    store.put_device(make_device("saw-1")).unwrap();
+
+    let updated = store.set_device_threshold("saw-1", Some(5_000)).unwrap();
+    assert_eq!(updated.power_threshold_ma, Some(5_000));
+    assert_eq!(updated.status, "active", "other fields untouched");
+    assert_eq!(
+        store
+            .get_device("saw-1")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(5_000)
+    );
+
+    // Extremes are stored as given: the threshold is any i64, like the
+    // fleet default.
+    for t in [0, -1, i64::MAX, i64::MIN] {
+        let updated = store.set_device_threshold("saw-1", Some(t)).unwrap();
+        assert_eq!(updated.power_threshold_ma, Some(t), "{t}");
+    }
+
+    let cleared = store.set_device_threshold("saw-1", None).unwrap();
+    assert_eq!(cleared.power_threshold_ma, None);
+    assert_eq!(
+        store
+            .get_device("saw-1")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        None
+    );
+
+    let err = store.set_device_threshold("ghost", Some(1)).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            supervictor_endpoint::error::AppError::DeviceNotFound { .. }
+        ),
+        "{err:?}"
+    );
+    assert!(store.get_device("ghost").unwrap().is_none(), "no upsert");
+}
+
+/// Forward compatibility: a database created by a binary that predates the
+/// column opens cleanly, gains the column, and its old rows read as "no
+/// override". Rollback safety: the old column set is untouched, so an old
+/// binary's `SELECT device_id, owner_id, subject_dn, status, created_at`
+/// keeps working against the migrated file.
+#[test]
+fn opening_a_pre_threshold_database_migrates_it_in_place() {
+    use supervictor_endpoint::store::sqlite::SqliteDeviceStore;
+    use supervictor_endpoint::store::DeviceStore;
+
+    let path = std::env::temp_dir().join(format!(
+        "supervictor-threshold-migration-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let path_str = path.to_str().unwrap().to_string();
+    {
+        let conn = rusqlite::Connection::open(&path_str).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE devices (
+                device_id   TEXT PRIMARY KEY,
+                owner_id    TEXT NOT NULL,
+                subject_dn  TEXT,
+                status      TEXT NOT NULL DEFAULT 'active',
+                created_at  TEXT NOT NULL
+            );
+            INSERT INTO devices VALUES ('legacy-1', 'owner-1', NULL, 'active', '2025-01-01T00:00:00Z');",
+        )
+        .unwrap();
+    }
+
+    let store = SqliteDeviceStore::new(&path_str).expect("open + migrate");
+    let legacy = store.get_device("legacy-1").unwrap().unwrap();
+    assert_eq!(legacy.power_threshold_ma, None);
+    assert_eq!(legacy.owner_id, "owner-1");
+    store.set_device_threshold("legacy-1", Some(9_000)).unwrap();
+    drop(store);
+
+    // Reopening is idempotent (the column is not added twice) and the
+    // override persisted; an old-shaped query still works.
+    let store = SqliteDeviceStore::new(&path_str).expect("reopen");
+    assert_eq!(
+        store
+            .get_device("legacy-1")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(9_000)
+    );
+    drop(store);
+    {
+        let conn = rusqlite::Connection::open(&path_str).unwrap();
+        let owner: String = conn
+            .query_row(
+                "SELECT owner_id FROM devices WHERE device_id = 'legacy-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(owner, "owner-1");
+        let cols: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name = 'power_threshold_ma'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cols, 1, "column added exactly once");
+    }
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

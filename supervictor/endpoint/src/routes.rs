@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, put};
 use axum::{Json, Router};
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
@@ -71,6 +71,9 @@ pub fn router_with(store: Arc<dyn DeviceStore>, options: RouterOptions) -> Route
         .route(wire::FLEET, get(fleet_status))
         .route(wire::FLEET_SUMMARY, get(fleet_summary))
         .route(wire::FLEET_HISTORY, get(fleet_history))
+        // Per-device power threshold: an operator judgement about a machine,
+        // so admin-only like the rest of fleet management.
+        .route(wire::DEVICE_THRESHOLD_PATTERN, put(set_device_threshold))
         .route_layer(axum::middleware::from_fn(crate::middleware::require_admin))
         .with_state(state.clone());
 
@@ -131,6 +134,25 @@ async fn fleet_history(
         now,
         state.power_threshold_ma,
     )?))
+}
+
+async fn set_device_threshold(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    body: String,
+) -> Result<Json<DeviceResponse>, crate::error::AppError> {
+    let body_opt = if body.is_empty() {
+        None
+    } else {
+        Some(body.as_str())
+    };
+    let resp = handlers::handle_set_device_threshold(&device_id, body_opt, state.store.as_ref())?;
+    tracing::info!(
+        device_id = %crate::middleware::sanitize_for_log(&device_id),
+        threshold_ma = ?resp.power_threshold_ma,
+        "device threshold set"
+    );
+    Ok(Json(resp))
 }
 
 async fn hello(ClientSubject(subject): ClientSubject) -> Json<HelloResponse> {

@@ -59,6 +59,7 @@ fn device(id: &str, status: &str, subject: Option<&str>, created: &str) -> Devic
         subject_dn: subject.map(Into::into),
         status: status.into(),
         created_at: created.into(),
+        power_threshold_ma: None,
     }
 }
 
@@ -314,7 +315,8 @@ fn main() {
             slot,
             power: demo_power(slot),
             current: demo_current(slot),
-            threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
+            threshold_ma: record.effective_threshold_ma(DEFAULT_POWER_THRESHOLD_MA),
+            fleet_threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
         };
         let page = views::device_page(record, &device_history, &uplinks, DEMO_CSRF, DEMO_SUBJECT)
             .into_string();

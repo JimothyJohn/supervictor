@@ -13,6 +13,7 @@ fn device(id: &str) -> DeviceRecord {
         subject_dn: None,
         status: "active".into(),
         created_at: "2026-07-01T00:00:00+00:00".into(),
+        power_threshold_ma: None,
     }
 }
 

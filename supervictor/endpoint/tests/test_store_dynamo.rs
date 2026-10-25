@@ -180,6 +180,7 @@ fn device(id: &str, subject_dn: Option<&str>) -> DeviceRecord {
         subject_dn: subject_dn.map(str::to_string),
         status: "active".into(),
         created_at: "2099-07-01T00:00:00+00:00".into(),
+        power_threshold_ma: None,
     }
 }
 
@@ -306,6 +307,77 @@ async fn set_device_status_updates_and_rejects_unknown() {
     );
 
     let err = fx.store.set_device_status("ghost", "inactive").unwrap_err();
+    assert!(
+        matches!(err, AppError::DeviceNotFound { .. }),
+        "got {err:?}"
+    );
+    assert!(
+        fx.store.get_device("ghost").unwrap().is_none(),
+        "a failed conditional update must not upsert"
+    );
+    fx.teardown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_device_threshold_sets_clears_and_rejects_unknown() {
+    let fx = Fixture::new("threshold", TTL_DAYS).await;
+    fx.store
+        .put_device(device("dev-1", Some("CN=dev-1")))
+        .unwrap();
+    assert_eq!(
+        fx.store
+            .get_device("dev-1")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        None,
+        "no attribute = no override"
+    );
+
+    let updated = fx
+        .store
+        .set_device_threshold("dev-1", Some(12_000))
+        .unwrap();
+    assert_eq!(updated.power_threshold_ma, Some(12_000));
+    assert_eq!(
+        updated.subject_dn.as_deref(),
+        Some("CN=dev-1"),
+        "ReturnValues ALL_NEW must carry the untouched fields"
+    );
+    assert_eq!(
+        fx.store
+            .get_device("dev-1")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(12_000)
+    );
+    // Negative and huge values survive the N attribute round trip.
+    for t in [-1, i64::MAX, i64::MIN] {
+        let updated = fx.store.set_device_threshold("dev-1", Some(t)).unwrap();
+        assert_eq!(updated.power_threshold_ma, Some(t), "{t}");
+    }
+
+    // Clearing REMOVEs the attribute rather than storing a null.
+    let cleared = fx.store.set_device_threshold("dev-1", None).unwrap();
+    assert_eq!(cleared.power_threshold_ma, None);
+    let listed = fx.store.list_devices().unwrap();
+    assert_eq!(listed[0].power_threshold_ma, None);
+
+    // A threshold given at registration is stored with the item.
+    let mut with = device("dev-2", None);
+    with.power_threshold_ma = Some(5_000);
+    fx.store.put_device(with).unwrap();
+    assert_eq!(
+        fx.store
+            .get_device("dev-2")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(5_000)
+    );
+
+    let err = fx.store.set_device_threshold("ghost", Some(1)).unwrap_err();
     assert!(
         matches!(err, AppError::DeviceNotFound { .. }),
         "got {err:?}"

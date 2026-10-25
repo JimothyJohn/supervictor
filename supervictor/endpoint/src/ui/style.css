@@ -107,6 +107,8 @@ a { color: var(--accent); }
 .badge.power.on { color: var(--green); border-color: var(--green); }
 .badge.power.off { color: var(--red); border-color: var(--red); }
 .current-inline { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
+.muted { color: var(--muted); font-size: 0.75rem; }
+form.inline input[type="number"] { width: 6.5rem; }
 .tile.on .tile-value { color: var(--green); }
 .tile.off .tile-value { color: var(--red); }
 form.inline { display: inline; }

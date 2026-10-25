@@ -37,6 +37,7 @@ fn seed(store: &dyn DeviceStore, id: &str, status: &str) {
             subject_dn: None,
             status: status.into(),
             created_at: "2026-07-01T00:00:00+00:00".into(),
+            power_threshold_ma: None,
         })
         .unwrap();
 }
@@ -46,6 +47,49 @@ fn now_unix() -> u64 {
 }
 
 // ── Auth + input ──────────────────────────────────────────────────────
+
+/// The power timeline judges each device against its own threshold: two
+/// devices reporting the same 9 A, one on the fleet default (on) and one a
+/// press brake with a 12 A bar (off), count as one on + one off in every
+/// bucket after their readings.
+#[tokio::test]
+async fn power_timeline_uses_per_device_thresholds() {
+    let (server, store) = server_with_store();
+    seed(store.as_ref(), "bench-01", "active");
+    store
+        .put_device(DeviceRecord {
+            device_id: "press-01".into(),
+            owner_id: "owner-1".into(),
+            subject_dn: None,
+            status: "active".into(),
+            created_at: "2026-07-01T00:00:00+00:00".into(),
+            power_threshold_ma: Some(12_000),
+        })
+        .unwrap();
+    let now = now_unix();
+    for id in ["bench-01", "press-01"] {
+        store
+            .put_uplink(UplinkRecord {
+                device_id: id.into(),
+                received_at: format_rfc3339(now - 30 * 60, 0),
+                payload: serde_json::json!({ "current": 9_000 }),
+            })
+            .unwrap();
+    }
+
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server
+        .get("/fleet/history?window=1h")
+        .add_header(name, value)
+        .await;
+    assert_eq!(resp.status_code(), 200);
+    let body: serde_json::Value = resp.json();
+    assert_eq!(body["threshold_ma"], 100, "fleet default still reported");
+    let last = body["power"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["on"], 1, "{last}");
+    assert_eq!(last["off"], 1, "{last}");
+    assert_eq!(last["unknown"], 0, "{last}");
+}
 
 #[tokio::test]
 async fn history_requires_admin_certificate() {

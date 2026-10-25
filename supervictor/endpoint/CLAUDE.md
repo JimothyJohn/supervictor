@@ -36,12 +36,24 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   (no JS chart lib); the inline script only adds hover/keyboard tooltips
   and a visible-tab reload. Colours by fleet slot (`.s0`–`.s7`), validated
   against the dark surface — don't hand-pick new ones.
-- Power state: `fleet::power_state` — last `current` ≥ `POWER_THRESHOLD_MA`
-  (default 100, any i64) is `on`, below is `off`, no reading or a dark /
-  never device is `unknown`. Surfaces on `/fleet` (`current`, `power`),
-  `/fleet/summary` (`on`, `off`), `/fleet/history` (`power` timeline,
-  `threshold_ma`), the fleet table and the charts (current chart first,
-  with the threshold drawn).
+- Power state: `fleet::power_state` — last `current` ≥ the device's
+  threshold is `on`, below is `off`, no reading or a dark / never device is
+  `unknown`. The threshold is the device's own `power_threshold_ma`
+  (`DeviceRecord::effective_threshold_ma`) when set, else the fleet default
+  `POWER_THRESHOLD_MA` (100, any i64). Surfaces on `/fleet` (`current`,
+  `power`, `threshold_ma`, `threshold_overridden`), `/fleet/summary` (`on`,
+  `off`), `/fleet/history` (`power` timeline per device threshold;
+  `threshold_ma` there is the fleet default), the fleet table (`≥ N` beside
+  an overridden row) and the charts (current chart first, the device's
+  threshold drawn).
+- Per-device threshold: `PUT /devices/{id}/threshold` (admin mTLS) with
+  `{"power_threshold_ma": 12000}`; `{}`, `null` or an empty body clears it
+  (`deny_unknown_fields`, so a misspelt key is 422, never a clear).
+  `POST /devices` accepts an optional `power_threshold_ma`. The device page
+  has the form (`POST /ui/devices/{id}/threshold`, CSRF). SQLite adds the
+  column on open (`ALTER TABLE` guarded by `pragma_table_info`); DynamoDB
+  stores it as an `N` attribute, `REMOVE`d on clear. `scripts/sim-fleet.sh`
+  sets per-profile values for the simulated machines.
 - Uplink identity: a device registered with a `subject_dn` is bound to that
   certificate — `POST /` for it must carry a matching mTLS subject or it is
   403'd (`handlers::authorize_uplink`). `REQUIRE_REGISTRATION=true` further
