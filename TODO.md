@@ -119,10 +119,26 @@ compose/Caddy stack on that box is stopped and disabled, docker disabled.
       rev from `cfbraun/ph-esp32-mac`. If the fork disappears before #4
       merges, builds break — re-pin or vendor.
       **Unblocks:** upstream merging #4 and cutting a release.
-- [ ] OTA update path (prerequisite for cert rotation on deployed devices —
-      see todo/ENTERPRISE.md and ROADMAP.md Phase 2).
-      **Unblocks:** hardware + the esp migration above (A/B partition
-      support lands with the newer esp-hal line).
+- [x] OTA update path (2026-10-25, feat/ota): pull over the uplink's mTLS,
+      A/B slots, sha256 + read-back verify, app-driven rollback after 3
+      unconfirmed boots, `scripts/ota-push.sh`. docs/OTA.md "What shipped".
+      Host-verified (577 tests incl. proptest fault schedules); bench
+      verification is the open item below.
+- [ ] **OTA bench verification** — flash one board with the new partition
+      table (one USB flash; `scratch/01-flash-rack03-ota.sh`), then
+      `scratch/02-ota-push-rack03.sh` pushes 0.1.2 and watches /fleet flip.
+      Then the torture set from docs/OTA.md O.0/O.1: `espflash reset`
+      mid-download (resume), a build that panics at boot (3-boot revert,
+      ~15 min), 20 self-swaps.
+      needs: staging endpoint with FIRMWARE_DIR (scratch/03-install-staging-ota.sh) and a board on USB
+      result: OTA proven on hardware; the fleet can be reflashed once over USB and never again
+      est: 2h
+      difficulty: med
+      id: ota-bench
+- [ ] OTA: S3-backed firmware store for the Lambda stages (dev/prod answer
+      503 on the firmware routes until then); signed manifests (O.2);
+      identity in NVS so one image serves the fleet. docs/OTA.md.
+      **Unblocks:** ota-bench green.
 
 ## P3 — Endpoint
 

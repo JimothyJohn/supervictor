@@ -100,6 +100,9 @@ LOG_LEVEL=info
 REQUIRE_REGISTRATION=false
 # Days before uplink rows expire (DynamoDB only; SQLite keeps them).
 UPLINK_TTL_DAYS=30
+# OTA firmware images (docs/OTA.md). Under the unit's StateDirectory so the
+# dynamic user can write it; unset → the firmware routes answer 503.
+FIRMWARE_DIR=/var/lib/supervictor/firmware
 ENV
     chmod 0600 "$ETC/env"
     log "  wrote $ETC/env (edit to taste)"

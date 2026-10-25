@@ -29,6 +29,11 @@
 #   --monitor    after the poll, attach espflash monitor for 60 s without
 #                resetting the board.
 #
+# Partition table: supervictor/edge/partitions.csv (OTA A/B layout). espflash
+# writes the app to ota_0 and otadata is erased on every USB flash, so the
+# bootloader boots what was just written even on a board that had OTA'd into
+# ota_1. One USB flash with this layout is what enables OTA on a board.
+#
 # Needs a terminal for espflash. CH340 boards often time out on connect, so
 # three attempts are made. A board left dark after a failed flash:
 # espflash reset --port <port>.
@@ -94,8 +99,10 @@ ELF="$FW_ROOT/target/$RTARGET/debug/supervictor-embedded"
 # grep without -q: it must drain stdin, or strings dies of SIGPIPE and pipefail fails the check.
 strings "$ELF" | grep -Fx -- "$HOST" >/dev/null || fail "baked HOST not found in $ELF — the build did not pick up the env"
 
+PARTITIONS="$FW_ROOT/supervictor/edge/partitions.csv"
+[ -f "$PARTITIONS" ] || fail "partition table missing at $PARTITIONS"
 for attempt in 1 2 3; do
-    if espflash flash --port "$SERIAL_PORT" "$ELF"; then break; fi
+    if espflash flash --port "$SERIAL_PORT" --partition-table "$PARTITIONS" --erase-parts otadata "$ELF"; then break; fi
     [ "$attempt" -lt 3 ] && log "espflash failed (CH340 connect timeout is common) — retry $attempt" && sleep 2
     [ "$attempt" -eq 3 ] && fail "gave up; if the board is dark: espflash reset --port $SERIAL_PORT"
 done
