@@ -1,5 +1,8 @@
-/* Fleet dashboard — palette shared with docs/index.html */
+/* Fleet dashboard — palette shared with docs/index.html.
+   Dark is the default; light is the same tokens restated. The theme toggle
+   stamps data-theme on <html>; without a stamp the OS preference wins. */
 :root {
+  color-scheme: dark;
   --bg: #0e0e10;
   --surface: #18181b;
   --border: #27272a;
@@ -10,6 +13,36 @@
   --green: #22c55e;
   --blue: #3b82f6;
   --red: #ef4444;
+  /* Categorical slots: dark-surface steps of the validated reference
+     palette (dataviz skill), fixed order, assigned by fleet position. */
+  --s0: #3987e5; --s1: #d95926; --s2: #199e70; --s3: #c98500;
+  --s4: #d55181; --s5: #008300; --s6: #9085e9; --s7: #e66767;
+  --s-other: #71717a;
+}
+/* Light: validated against #ffffff — three slots sit under 3:1, which the
+   table twins and direct labels relieve. Declared twice on purpose: once
+   for the explicit toggle, once for the OS preference with no toggle. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f4f5; --surface: #ffffff; --border: #e4e4e7;
+  --text: #18181b; --muted: #52525b;
+  --accent: #c2410c; --accent-dim: #9a3412;
+  --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+  --s0: #2a78d6; --s1: #eb6834; --s2: #1baf7a; --s3: #eda100;
+  --s4: #e87ba4; --s5: #008300; --s6: #6250d6; --s7: #e34948;
+  --s-other: #71717a;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f4f4f5; --surface: #ffffff; --border: #e4e4e7;
+    --text: #18181b; --muted: #52525b;
+    --accent: #c2410c; --accent-dim: #9a3412;
+    --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+    --s0: #2a78d6; --s1: #eb6834; --s2: #1baf7a; --s3: #eda100;
+    --s4: #e87ba4; --s5: #008300; --s6: #6250d6; --s7: #e34948;
+    --s-other: #71717a;
+  }
 }
 * { box-sizing: border-box; }
 body {
@@ -20,14 +53,34 @@ body {
 }
 header {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 1rem;
+  gap: 0.5rem 1rem;
   padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--border);
 }
 header h1 { font-size: 1.1rem; margin: 0; }
 header h1 a { color: var(--accent); text-decoration: none; }
-header .subject { color: var(--muted); font-size: 0.8rem; margin-left: auto; }
+header .subject {
+  color: var(--muted); font-size: 0.8rem; margin-left: auto;
+  max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Sun/moon toggle: shows the icon of the theme you would switch TO. */
+#theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2rem; height: 2rem; padding: 0; border-radius: 999px;
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  cursor: pointer; align-self: center;
+}
+#theme-toggle:hover { border-color: var(--accent); color: var(--text); }
+#theme-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#theme-toggle .icon-moon { display: none; }
+:root[data-theme="light"] #theme-toggle .icon-moon { display: block; }
+:root[data-theme="light"] #theme-toggle .icon-sun { display: none; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) #theme-toggle .icon-moon { display: block; }
+  :root:not([data-theme="dark"]) #theme-toggle .icon-sun { display: none; }
+}
 main { padding: 1.5rem; max-width: 72rem; margin: 0 auto; }
 h2 { font-size: 1rem; color: var(--muted); }
 table { border-collapse: collapse; width: 100%; }
@@ -93,13 +146,6 @@ input[type="text"] {
 #live-dot.connected { color: var(--green); }
 
 /* ── history views ─────────────────────────────────────────────────── */
-/* Categorical slots: dark-surface steps of the validated reference
-   palette (dataviz skill), fixed order, assigned by fleet position. */
-:root {
-  --s0: #3987e5; --s1: #d95926; --s2: #199e70; --s3: #c98500;
-  --s4: #d55181; --s5: #008300; --s6: #9085e9; --s7: #e66767;
-  --s-other: #71717a;
-}
 header nav a { margin-right: 1rem; font-size: 0.85rem; text-decoration: none; }
 .filters { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0 0 1rem; }
 .filters-label { color: var(--muted); font-size: 0.75rem; margin-right: 0.25rem; }
@@ -177,3 +223,28 @@ figure.chart svg:focus-visible { outline: 1px solid var(--accent); outline-offse
 .table-view summary { color: var(--muted); cursor: pointer; }
 .table-view table { display: block; max-height: 16rem; overflow: auto; margin-top: 0.25rem; font-variant-numeric: tabular-nums; }
 .table-view th, .table-view td { padding: 0.2rem 0.5rem; }
+
+/* ── phones ────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  body { font-size: 14px; }
+  header { padding: 0.75rem 1rem; }
+  header .subject { order: 9; flex-basis: 100%; margin-left: 0; max-width: 100%; }
+  main { padding: 1rem; }
+  h2 { font-size: 0.95rem; }
+  /* Tables scroll sideways instead of squeezing columns to one letter. */
+  main > table, main > section > table, dl.meta + table, table:not(.table-view table) { display: block; overflow-x: auto; max-width: 100%; }
+  th, td { padding: 0.4rem 0.5rem; white-space: nowrap; }
+  td code { white-space: pre; }
+  .filters a { padding: 0.4rem 0.75rem; font-size: 0.85rem; }
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0.5rem; }
+  .tile { padding: 0.5rem 0.7rem; }
+  .tile-value { font-size: 1.2rem; }
+  .charts { grid-template-columns: 1fr; }
+  /* A 640-unit SVG shrunk to a phone makes 10px labels 5px: keep the
+     chart at a legible scale and let it pan sideways. */
+  figure.chart { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0.6rem 0.6rem 0.4rem; }
+  figure.chart svg { min-width: 560px; }
+  .tooltip { min-width: 9rem; font-size: 0.72rem; }
+  fieldset form { display: grid; gap: 0.5rem; }
+  input[type="text"] { width: 100%; margin: 0; }
+}
