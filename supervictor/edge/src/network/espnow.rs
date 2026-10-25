@@ -93,6 +93,10 @@ pub async fn espnow_listen_task(mut receiver: EspNowReceiver<'static>) {
         let frame = receiver.receive_async().await;
         heard += 1;
         let m = frame.info.src_address;
+        // The blob's rx_ctrl.rssi is a signed 8-bit bitfield that the binding
+        // reads unsigned (observed 175 for a bench neighbour): wrap it to dBm.
+        let rssi = frame.info.rx_control.rssi;
+        let rssi_dbm = if rssi > 127 { rssi - 256 } else { rssi };
         let data = frame.data();
         let text = core::str::from_utf8(data).unwrap_or("<binary>");
         println!(
@@ -104,7 +108,7 @@ pub async fn espnow_listen_task(mut receiver: EspNowReceiver<'static>) {
             m[3],
             m[4],
             m[5],
-            frame.info.rx_control.rssi,
+            rssi_dbm,
             data.len(),
             text
         );
