@@ -282,3 +282,6 @@ scratch/
 
 # Cross-build output (scripts/pi-edge.sh, scripts/deploy-staging-build.sh)
 target-pi/
+
+# static musl build of the endpoint for the staging box (docker, scratch/03)
+target-musl/
