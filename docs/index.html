@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Supervictor — Fleet operations for connected hardware</title>
-<meta name="description" content="Deploy, monitor, and sustain device fleets with per-device mTLS identity, a live fleet dashboard, and one-command provisioning. All Rust, register to database.">
+<meta name="description" content="Deploy, monitor, and sustain machine fleets with per-device mTLS identity, a dashboard that moves with every uplink, per-machine power state, and one-command provisioning. All Rust, register to database.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -160,6 +160,10 @@
   .pill.fresh { color: var(--green); border-color: var(--green); }
   .pill.stale { color: var(--amber); border-color: var(--amber); }
   .pill.dark  { color: var(--red); border-color: var(--red); }
+  .pill.on    { color: var(--green); border-color: var(--green); }
+  .pill.off   { color: var(--red); border-color: var(--red); }
+  .pill.unknown { color: var(--faint); border-color: var(--faint); }
+  .minifleet td.ma { color: var(--text); font-variant-numeric: tabular-nums; }
   .minifleet tr { transition: background .45s ease; }
   .minifleet tr.blip { background: rgba(249,115,22,0.12); transition: none; }
 
@@ -279,10 +283,11 @@
     <div class="hero">
       <div>
         <div class="sheetno rv" style="--i:0">SV·00</div>
-        <h1 class="rv" style="--i:1">Your fleet, captured<br>in real time.</h1>
+        <h1 class="rv" style="--i:1">Your plant floor,<br>live on one board.</h1>
         <p class="sub rv" style="--i:2">
-          Supervictor deploys and monitors your devices securely, with a
-          live dashboard for every site.
+          Supervictor puts every machine behind its own certificate and on a
+          dashboard that moves with every reading: who is running, who is
+          idle, who went dark — and what each one is drawing right now.
         </p>
       </div>
 
@@ -292,22 +297,30 @@
         <h3>Fleet status — live preview</h3>
         <div class="minifleet-wrap">
         <table class="minifleet" id="minifleet">
-          <thead><tr><th>Device</th><th>Uptime 24h</th><th>Last uplink</th><th>State</th></tr></thead>
+          <thead><tr><th>Machine</th><th>Current</th><th>Power</th><th>Last uplink</th><th>State</th></tr></thead>
           <tbody>
-            <tr data-period="5"><td>conveyor</td><td>99.9%</td><td class="ts">1s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="8"><td>extruder</td><td>98.7%</td><td class="ts">3s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="12"><td>lathe</td><td>99.4%</td><td class="ts">6s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="15"><td>press</td><td>99.8%</td><td class="ts">2s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="18"><td>welder</td><td>99.5%</td><td class="ts">11s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="21"><td>mill</td><td>99.1%</td><td class="ts">9s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="30"><td>compressor</td><td>98.3%</td><td class="ts">17s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr data-period="45"><td>kiln</td><td>97.2%</td><td class="ts">28s ago</td><td><span class="pill fresh">fresh</span></td></tr>
-            <tr><td>grinder</td><td>92.6%</td><td class="ts">46m ago</td><td><span class="pill stale">stale</span></td></tr>
-            <tr><td>packer</td><td>84.1%</td><td class="ts">3h ago</td><td><span class="pill dark">dark</span></td></tr>
+            <tr data-period="5" data-idle="9" data-run="42"><td>press brake</td><td class="ma">9.1 A</td><td><span class="pill off">off</span></td><td class="ts">1s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="8" data-idle="24" data-run="43"><td>extruder</td><td class="ma">43.2 A</td><td><span class="pill on">on</span></td><td class="ts">3s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="12" data-idle="6" data-run="31"><td>cnc mill</td><td class="ma">30.8 A</td><td><span class="pill on">on</span></td><td class="ts">6s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="15" data-idle="0.2" data-run="17"><td>compressor</td><td class="ma">17.2 A</td><td><span class="pill on">on</span></td><td class="ts">2s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="18" data-idle="1.5" data-run="31"><td>welder</td><td class="ma">1.5 A</td><td><span class="pill off">off</span></td><td class="ts">11s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="21" data-idle="4" data-run="11"><td>band saw</td><td class="ma">10.6 A</td><td><span class="pill on">on</span></td><td class="ts">9s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="30" data-idle="0.8" data-run="26"><td>oven</td><td class="ma">25.8 A</td><td><span class="pill on">on</span></td><td class="ts">17s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr data-period="45" data-idle="3" data-run="6"><td>conveyor</td><td class="ma">5.9 A</td><td><span class="pill on">on</span></td><td class="ts">28s ago</td><td><span class="pill fresh">fresh</span></td></tr>
+            <tr><td>injection molder</td><td class="ma">—</td><td><span class="pill unknown">unknown</span></td><td class="ts">46m ago</td><td><span class="pill stale">stale</span></td></tr>
+            <tr><td>process pump</td><td class="ma">—</td><td><span class="pill unknown">unknown</span></td><td class="ts">3h ago</td><td><span class="pill dark">dark</span></td></tr>
           </tbody>
         </table>
         </div>
       </div>
+    </div>
+
+    <!-- stats strip -->
+    <div class="stats rv" style="margin-top:-18px;margin-bottom:8px">
+      <div class="stat"><div class="n">5 s</div><div class="d">uplink period</div></div>
+      <div class="stat"><div class="n">1 cert</div><div class="d">per machine, revocable</div></div>
+      <div class="stat"><div class="n">10</div><div class="d">machine profiles to rehearse with</div></div>
+      <div class="stat"><div class="n">1 binary</div><div class="d">serverless or your own box</div></div>
     </div>
 
     <!-- SV-02 PLATFORM -->
@@ -323,15 +336,17 @@
         <ul>
           <li><strong>One-command onboarding</strong> — issue the certificate, register the device, flash the firmware, verify the first handshake. One step, repeatable per unit.</li>
           <li><strong>Certificate authority built in</strong> — device, server, and operator credentials from a single managed root; browser bundles for your team included.</li>
-          <li><strong>Runs where you run</strong> — the same service binary deploys serverless on AWS or on a $5/month box on your own network. No lock-in decision on day one.</li>
+          <li><strong>Runs where you run</strong> — the same service binary deploys serverless on AWS or on a $5/month box on your own network, terminating mTLS itself. No lock-in decision on day one.</li>
+          <li><strong>Rehearse without hardware</strong> — ten simulated machines (extruder, press brake, CNC mill, saw, oven, compressor, conveyor, molder, welder, pump) run as containers, each with its own certificate and a realistic working day, so the dashboard is proven before the first board is racked.</li>
         </ul>
       </div>
 
       <div class="pillar rv">
         <div class="k">Monitor <span>SEE EVERY UNIT</span></div>
         <ul>
-          <li><strong>Live fleet dashboard</strong> — telemetry streams in as it happens; freshness badges triage the fleet at a glance.</li>
-          <li><strong>Machine-readable health</strong> — the same fleet view as JSON, for your alerting, your scripts, your ops tooling.</li>
+          <li><strong>Live fleet dashboard</strong> — telemetry streams in as it happens; freshness badges triage the fleet at a glance. Pick a five-minute window and the charts re-render on every reading.</li>
+          <li><strong>Power state per machine</strong> — each unit has its own current threshold, so <em>on</em> means producing for a press whose idle pump draws 9 A and powered for a sensor node. Power-over-time shows the whole plant's day.</li>
+          <li><strong>Machine-readable health</strong> — the same fleet view, summary and history as JSON, for your alerting, your scripts, your ops tooling.</li>
           <li><strong>Dark-device watchdog</strong> — a device that goes quiet past its threshold is logged, flagged, and ready to page you.</li>
         </ul>
       </div>
@@ -386,15 +401,16 @@
         <div class="dim"></div>
       </div>
       <pre class="arch rv">
-DEVICE (ESP32-C3, no_std Rust)
+MACHINE  (ESP32-POE over PoE Ethernet, ESP32-C3 over WiFi, or a simulated machine)
    │
-   ├──<b>mTLS</b>──►  AWS API Gateway ──► Lambda ──► DynamoDB      <b>serverless</b>
+   ├──<b>mTLS</b>──►  AWS API Gateway ──► Lambda ──► DynamoDB            <b>serverless</b>
    │
-   └──<b>mTLS</b>──►  Caddy ──► service on your hardware ──► SQLite  <b>self-hosted</b>
+   └──<b>mTLS</b>──►  one static binary on your hardware ──► SQLite   <b>self-hosted</b>
                         │
-                        ├── /ui      live dashboard (admin mTLS)
-                        ├── /fleet   health API for your tooling
-                        └── watchdog dark-device alerting</pre>
+                        ├── /ui            dashboard: fleet, device pages, live windows
+                        ├── /ui/history    status + power over the day, every metric charted
+                        ├── /fleet         health, summary, history as JSON
+                        └── watchdog       dark-device alerting</pre>
       <p class="arch-note rv">
         The same product runs both ways: self-host on your own hardware for
         full control, or push to the cloud for enterprise scale — your
@@ -412,7 +428,7 @@ DEVICE (ESP32-C3, no_std Rust)
     <span>© 2026 ADVIN</span>
     <a href="developers.html">For engineers</a>
     <a href="https://github.com/JimothyJohn/supervictor">Source</a>
-    <span class="sp">SV·00 · REV A</span>
+    <span class="sp">SV·00 · REV B</span>
   </div>
 </footer>
 
@@ -427,22 +443,44 @@ DEVICE (ESP32-C3, no_std Rust)
   }, { threshold: 0.12 });
   document.querySelectorAll(".rv").forEach(function (el) { io.observe(el); });
 
-  // ticking mini fleet: each device has its own uplink period; ages tick once a
-  // second, and a row flashes when its uplink lands.
+  // ticking mini fleet: each machine has its own uplink period; ages tick once
+  // a second, and when an uplink lands the row flashes and its current moves
+  // between the machine's idle and running draw — the power pill follows,
+  // the way the real dashboard judges each machine against its own threshold.
   var rows = Array.prototype.slice.call(
     document.querySelectorAll("#minifleet tbody tr[data-period]"));
   var state = rows.map(function (row, i) {
-    return { row: row, period: +row.dataset.period, age: (i * 1.7) % +row.dataset.period };
+    return {
+      row: row, period: +row.dataset.period, age: (i * 1.7) % +row.dataset.period,
+      idle: +row.dataset.idle, run: +row.dataset.run, seed: i * 7919
+    };
   });
   function fmt(age) {
     if (age < 60) return Math.floor(age) + "s ago";
     return Math.floor(age / 60) + "m ago";
+  }
+  function next(d) {
+    // deterministic pseudo-random walk: mostly running, idle about a third of the time
+    d.seed = (d.seed * 1103515245 + 12345) % 2147483648;
+    var r = d.seed / 2147483648;
+    var running = r > 0.33;
+    var base = running ? d.run : d.idle;
+    var amps = base * (0.96 + (r % 0.08));
+    var threshold = (d.idle + d.run) / 2;
+    d.row.querySelector(".ma").textContent = amps.toFixed(1) + " A";
+    var pill = d.row.querySelector(".pill.on, .pill.off");
+    if (pill) {
+      var on = amps >= threshold;
+      pill.textContent = on ? "on" : "off";
+      pill.className = "pill " + (on ? "on" : "off");
+    }
   }
   setInterval(function () {
     state.forEach(function (d) {
       d.age += 1;
       if (d.age >= d.period) {
         d.age = 0;
+        next(d);
         d.row.classList.add("blip");
         setTimeout(function () { d.row.classList.remove("blip"); }, 350);
       }
