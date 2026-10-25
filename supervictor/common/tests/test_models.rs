@@ -1,4 +1,6 @@
-use supervictor_common::models::{DeviceResponse, RegisterDeviceRequest, UplinkMessage};
+use supervictor_common::models::{
+    DeviceResponse, DeviceStyle, LineStyle, Marker, RegisterDeviceRequest, UplinkMessage,
+};
 
 // ── UplinkMessage ────────────────────────────────────────────────────
 
@@ -214,6 +216,9 @@ fn register_roundtrip() {
         owner_id: "owner-1".into(),
         subject_dn: Some("CN=dev-1".into()),
         power_threshold_ma: None,
+        color: None,
+        line_style: None,
+        marker: None,
     };
     let json = serde_json::to_string(&req).unwrap();
     let back: RegisterDeviceRequest = serde_json::from_str(&json).unwrap();
@@ -227,6 +232,9 @@ fn register_field_names() {
         owner_id: "o".into(),
         subject_dn: None,
         power_threshold_ma: None,
+        color: None,
+        line_style: None,
+        marker: None,
     };
     let val: serde_json::Value = serde_json::to_value(&req).unwrap();
     assert!(val.get("device_id").is_some());
@@ -271,6 +279,9 @@ fn device_response_roundtrip() {
         status: "active".into(),
         created_at: "2025-01-01T00:00:00Z".into(),
         power_threshold_ma: None,
+        color: None,
+        line_style: None,
+        marker: None,
     };
     let json = serde_json::to_string(&resp).unwrap();
     let back: DeviceResponse = serde_json::from_str(&json).unwrap();
@@ -286,6 +297,9 @@ fn device_response_omits_none_subject_dn() {
         status: "active".into(),
         created_at: "t".into(),
         power_threshold_ma: None,
+        color: None,
+        line_style: None,
+        marker: None,
     };
     let json = serde_json::to_string(&resp).unwrap();
     let val: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -304,6 +318,9 @@ fn device_response_includes_some_subject_dn() {
         status: "active".into(),
         created_at: "t".into(),
         power_threshold_ma: None,
+        color: None,
+        line_style: None,
+        marker: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     assert_eq!(val["subject_dn"], "CN=x");
@@ -318,6 +335,9 @@ fn device_response_field_names() {
         status: "active".into(),
         created_at: "t".into(),
         power_threshold_ma: None,
+        color: None,
+        line_style: None,
+        marker: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     let obj = val.as_object().unwrap();
@@ -361,6 +381,9 @@ fn cli_register_json_compatible_with_endpoint() {
         owner_id: "owner-1".into(),
         subject_dn: Some("CN=dev-1,O=supervictor".into()),
         power_threshold_ma: None,
+        color: None,
+        line_style: None,
+        marker: None,
     };
     let json = serde_json::to_string(&req).unwrap();
 
@@ -384,4 +407,78 @@ fn uplink_fw_wire_compat_both_directions() {
     };
     let json = serde_json::to_string(&new).unwrap();
     assert!(json.contains(r#""fw":"1.2.3""#));
+}
+
+// ── DeviceStyle ──────────────────────────────────────────────────────
+
+#[test]
+fn style_tokens_round_trip_and_are_lowercase_on_the_wire() {
+    for line in LineStyle::ALL {
+        let json = serde_json::to_string(&line).unwrap();
+        assert_eq!(json, format!("\"{}\"", line.label()));
+        assert_eq!(serde_json::from_str::<LineStyle>(&json).unwrap(), line);
+        assert_eq!(LineStyle::parse(line.label()), Some(line));
+    }
+    for marker in Marker::ALL {
+        let json = serde_json::to_string(&marker).unwrap();
+        assert_eq!(json, format!("\"{}\"", marker.label()));
+        assert_eq!(serde_json::from_str::<Marker>(&json).unwrap(), marker);
+        assert_eq!(Marker::parse(marker.label()), Some(marker));
+    }
+    assert_eq!(LineStyle::parse("Dashed"), None, "exact match only");
+    assert_eq!(Marker::parse(""), None);
+    assert!(serde_json::from_str::<LineStyle>("\"wavy\"").is_err());
+    assert!(serde_json::from_str::<Marker>("\"star\"").is_err());
+    assert_eq!(LineStyle::default(), LineStyle::Solid);
+    assert_eq!(Marker::default(), Marker::None);
+}
+
+#[test]
+fn style_body_rejects_unknown_fields_and_omits_unset_parts() {
+    let full: DeviceStyle =
+        serde_json::from_str(r#"{"color":"s3","line_style":"dotted","marker":"circle"}"#).unwrap();
+    assert_eq!(full.color.as_deref(), Some("s3"));
+    assert_eq!(full.line_style, Some(LineStyle::Dotted));
+    assert_eq!(full.marker, Some(Marker::Circle));
+    assert!(!full.is_default());
+    let empty: DeviceStyle = serde_json::from_str("{}").unwrap();
+    assert!(empty.is_default());
+    assert_eq!(serde_json::to_string(&empty).unwrap(), "{}");
+    assert!(serde_json::from_str::<DeviceStyle>(r#"{"colour":"s3"}"#).is_err());
+    let partial = DeviceStyle {
+        color: Some("#ff8800".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        serde_json::to_string(&partial).unwrap(),
+        r##"{"color":"#ff8800"}"##
+    );
+}
+
+#[test]
+fn register_and_response_carry_style_fields_optionally() {
+    let req: RegisterDeviceRequest =
+        serde_json::from_str(r#"{"device_id":"d","owner_id":"o","color":"s1","marker":"square"}"#)
+            .unwrap();
+    assert_eq!(req.color.as_deref(), Some("s1"));
+    assert_eq!(req.line_style, None);
+    assert_eq!(req.marker, Some(Marker::Square));
+    let plain: RegisterDeviceRequest =
+        serde_json::from_str(r#"{"device_id":"d","owner_id":"o"}"#).unwrap();
+    assert_eq!(plain.color, None);
+    let resp = DeviceResponse {
+        device_id: "d".into(),
+        owner_id: "o".into(),
+        subject_dn: None,
+        status: "active".into(),
+        created_at: "2026-01-01T00:00:00Z".into(),
+        power_threshold_ma: None,
+        color: Some("s2".into()),
+        line_style: Some(LineStyle::Dashed),
+        marker: None,
+    };
+    let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
+    assert_eq!(val["color"], "s2");
+    assert_eq!(val["line_style"], "dashed");
+    assert!(val.get("marker").is_none(), "unset parts stay off the wire");
 }

@@ -25,6 +25,7 @@ fn device(id: &str) -> DeviceRecord {
         status: "active".into(),
         created_at: "2026-07-11T00:00:00+00:00".into(),
         power_threshold_ma: None,
+        style: Default::default(),
     }
 }
 

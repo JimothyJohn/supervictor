@@ -96,6 +96,7 @@ fn device(id: &str, status: &str, subject: Option<&str>, created: &str) -> Devic
         status: status.into(),
         created_at: created.into(),
         power_threshold_ma: None,
+        style: Default::default(),
     }
 }
 

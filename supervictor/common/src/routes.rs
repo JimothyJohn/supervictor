@@ -17,6 +17,10 @@ pub const DEVICE_UPLINKS_PATTERN: &str = "/devices/{device_id}/uplinks";
 /// /devices/{device_id}/threshold
 pub const DEVICE_THRESHOLD_PATTERN: &str = "/devices/{device_id}/threshold";
 
+/// Per-device chart style (colour, line, marker) — PUT (admin mTLS). Axum
+/// pattern: /devices/{device_id}/style
+pub const DEVICE_STYLE_PATTERN: &str = "/devices/{device_id}/style";
+
 /// Fleet status — GET (admin mTLS). Machine-readable per-device health.
 pub const FLEET: &str = "/fleet";
 

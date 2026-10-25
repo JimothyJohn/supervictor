@@ -3,8 +3,9 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection};
 
 use crate::error::AppError;
-use crate::models::{DeviceRecord, UplinkRecord};
+use crate::models::{DeviceRecord, DeviceStyle, UplinkRecord};
 use crate::store::{DeviceStore, StoreError};
+use supervictor_common::models::{LineStyle, Marker};
 
 /// SQLite-backed implementation of [`DeviceStore`].
 pub struct SqliteDeviceStore {
@@ -52,20 +53,27 @@ impl SqliteDeviceStore {
         // Additive column migrations: a database created before the column
         // existed gets it on open; a fresh one already has it. Old binaries
         // keep working against the new schema (they never select it).
-        let has_threshold = conn
-            .prepare("SELECT 1 FROM pragma_table_info('devices') WHERE name = 'power_threshold_ma'")
-            .and_then(|mut stmt| stmt.exists([]))
-            .map_err(|e| AppError::Store(StoreError::io("migration inspect", e)))?;
-        if !has_threshold {
-            conn.execute_batch("ALTER TABLE devices ADD COLUMN power_threshold_ma INTEGER")
-                .map_err(|e| AppError::Store(StoreError::io("migration add column", e)))?;
+        for (column, decl) in [
+            ("power_threshold_ma", "power_threshold_ma INTEGER"),
+            ("color", "color TEXT"),
+            ("line_style", "line_style TEXT"),
+            ("marker", "marker TEXT"),
+        ] {
+            let present = conn
+                .prepare("SELECT 1 FROM pragma_table_info('devices') WHERE name = ?1")
+                .and_then(|mut stmt| stmt.exists([column]))
+                .map_err(|e| AppError::Store(StoreError::io("migration inspect", e)))?;
+            if !present {
+                conn.execute_batch(&format!("ALTER TABLE devices ADD COLUMN {decl}"))
+                    .map_err(|e| AppError::Store(StoreError::io("migration add column", e)))?;
+            }
         }
         Ok(())
     }
 
     /// Column list shared by every device SELECT, in `row_to_device` order.
     const DEVICE_COLUMNS: &'static str =
-        "device_id, owner_id, subject_dn, status, created_at, power_threshold_ma";
+        "device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker";
 
     fn row_to_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRecord> {
         Ok(DeviceRecord {
@@ -75,6 +83,20 @@ impl SqliteDeviceStore {
             status: row.get(3)?,
             created_at: row.get(4)?,
             power_threshold_ma: row.get(5)?,
+            // Style tokens are stored as their wire strings; a token this
+            // binary does not know reads as unset rather than failing the
+            // row (a newer binary may have written it).
+            style: DeviceStyle {
+                color: row.get(6)?,
+                line_style: row
+                    .get::<_, Option<String>>(7)?
+                    .as_deref()
+                    .and_then(LineStyle::parse),
+                marker: row
+                    .get::<_, Option<String>>(8)?
+                    .as_deref()
+                    .and_then(Marker::parse),
+            },
         })
     }
 }
@@ -86,8 +108,18 @@ impl DeviceStore for SqliteDeviceStore {
             .lock()
             .map_err(|_| AppError::Store(StoreError::Poisoned))?;
         conn.execute(
-            "INSERT INTO devices (device_id, owner_id, subject_dn, status, created_at, power_threshold_ma) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![record.device_id, record.owner_id, record.subject_dn, record.status, record.created_at, record.power_threshold_ma],
+            "INSERT INTO devices (device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                record.device_id,
+                record.owner_id,
+                record.subject_dn,
+                record.status,
+                record.created_at,
+                record.power_threshold_ma,
+                record.style.color,
+                record.style.line_style.map(LineStyle::label),
+                record.style.marker.map(Marker::label),
+            ],
         )
         .map_err(|e| match e {
             rusqlite::Error::SqliteFailure(err, _)
@@ -196,6 +228,38 @@ impl DeviceStore for SqliteDeviceStore {
                     params![device_id, threshold_ma],
                 )
                 .map_err(|e| AppError::Store(StoreError::io("set_device_threshold", e)))?;
+            if updated == 0 {
+                return Err(AppError::DeviceNotFound {
+                    device_id: device_id.to_string(),
+                });
+            }
+        }
+        self.get_device(device_id)?.ok_or(AppError::DeviceNotFound {
+            device_id: device_id.to_string(),
+        })
+    }
+
+    fn set_device_style(
+        &self,
+        device_id: &str,
+        style: DeviceStyle,
+    ) -> Result<DeviceRecord, AppError> {
+        {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|_| AppError::Store(StoreError::Poisoned))?;
+            let updated = conn
+                .execute(
+                    "UPDATE devices SET color = ?2, line_style = ?3, marker = ?4 WHERE device_id = ?1",
+                    params![
+                        device_id,
+                        style.color,
+                        style.line_style.map(LineStyle::label),
+                        style.marker.map(Marker::label),
+                    ],
+                )
+                .map_err(|e| AppError::Store(StoreError::io("set_device_style", e)))?;
             if updated == 0 {
                 return Err(AppError::DeviceNotFound {
                     device_id: device_id.to_string(),

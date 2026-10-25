@@ -118,12 +118,17 @@ impl Window {
         (self.seconds() / self.buckets() as u64).max(1)
     }
 
-    /// The bucket grid for this window ending at `now_unix`.
+    /// The bucket grid for this window containing `now_unix`: the last
+    /// bucket is the one `now` falls in, so buckets start on multiples of
+    /// `step` and a reading never changes bucket between two renders (a
+    /// grid that ended exactly at `now` slid with every request and
+    /// re-bucketed the whole window each time). The last bucket is partial.
     pub fn grid(self, now_unix: u64) -> Grid {
         let step = self.step();
         let buckets = self.buckets();
+        let last_start = now_unix / step * step;
         Grid {
-            since: now_unix.saturating_sub(step * buckets as u64),
+            since: last_start.saturating_sub(step * (buckets as u64 - 1)),
             step,
             buckets,
         }
@@ -245,7 +250,8 @@ pub struct History {
     pub threshold_ma: i64,
     /// Window start, RFC 3339.
     pub since: String,
-    /// Window end (`now`), RFC 3339.
+    /// End of the last bucket, RFC 3339: `since + buckets * step_s`, which
+    /// is the end of the bucket `now` falls in (up to one step ahead of it).
     pub until: String,
     /// Bucket width in seconds.
     pub step_s: u64,
@@ -261,7 +267,8 @@ pub struct History {
 }
 
 /// The bucket grid of one window: `buckets` buckets of `step` seconds from
-/// `since` up to `until() == since + buckets * step`, which is "now".
+/// `since` up to `until() == since + buckets * step`, the end of the bucket
+/// "now" falls in (so up to one step ahead of now).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Grid {
     /// Window start, Unix seconds.
@@ -282,7 +289,7 @@ impl Grid {
         }
     }
 
-    /// Window end ("now").
+    /// End of the last bucket (at or after "now").
     pub fn until(&self) -> u64 {
         self.since + self.buckets as u64 * self.step
     }
@@ -555,7 +562,7 @@ pub fn fleet_history(
         buckets: grid.buckets,
         threshold_ma,
         since: format_rfc3339(since, 0),
-        until: format_rfc3339(now_unix, 0),
+        until: format_rfc3339(grid.until(), 0),
         step_s: step,
         timeline,
         power,
@@ -595,6 +602,7 @@ mod tests {
             status: status.into(),
             created_at: "2026-01-01T00:00:00+00:00".into(),
             power_threshold_ma: None,
+            style: Default::default(),
         }
     }
 
@@ -639,8 +647,9 @@ mod tests {
         for w in Window::ALL {
             assert_eq!(w.step() * w.buckets() as u64, w.seconds(), "{w:?}");
             let g = w.grid(NOW);
-            assert_eq!(g.until(), NOW, "{w:?}");
             assert_eq!(g.buckets, w.buckets());
+            assert_eq!(g.since % g.step, 0, "{w:?}: buckets start on the step");
+            assert!(g.until() > NOW && g.until() <= NOW + g.step, "{w:?}: {g:?}");
             assert_eq!(
                 g.bucket_of(NOW),
                 Some(w.buckets() - 1),
@@ -648,7 +657,29 @@ mod tests {
             );
             assert_eq!(g.bucket_of(g.since), Some(0));
             assert_eq!(g.bucket_of(g.since - 1), None);
-            assert_eq!(g.bucket_of(NOW + 1), None);
+            assert_eq!(g.bucket_of(g.until() + 1), None);
+        }
+    }
+
+    /// The grid is anchored to the clock, not to the request: two renders
+    /// inside the same step see identical buckets, and a reading stays in
+    /// its bucket as the window advances one step at a time.
+    #[test]
+    fn grid_does_not_slide_between_renders() {
+        for w in Window::ALL {
+            let step = w.step();
+            let base = NOW / step * step;
+            let a = w.grid(base + 1);
+            let b = w.grid(base + step - 1);
+            assert_eq!(a, b, "{w:?}: same step, same grid");
+            let c = w.grid(base + step);
+            assert_eq!(c.since, a.since + step, "{w:?}: next step shifts one bucket");
+            let t = base - 3 * step + 1;
+            let (Some(ia), Some(ic)) = (a.bucket_of(t), c.bucket_of(t)) else {
+                panic!("{w:?}: reading inside both grids");
+            };
+            assert_eq!(ia, ic + 1, "{w:?}: the reading moved exactly one column");
+            assert_eq!(a.t_of(ia), c.t_of(ic), "{w:?}: same bucket start");
         }
     }
 
@@ -680,8 +711,8 @@ mod tests {
         assert_eq!(s.points.len(), 60);
         assert_eq!(s.uplinks, 1);
         assert_eq!(
-            s.points[58].count, 1,
-            "NOW-7 is in the second-to-last 5 s bucket"
+            s.points[57].count, 1,
+            "NOW-7 is two buckets before the partial one NOW starts"
         );
         assert_eq!(
             power_timeline(&[device("a", "active")], &rows, g, 100).len(),

@@ -74,6 +74,8 @@ pub fn router_with(store: Arc<dyn DeviceStore>, options: RouterOptions) -> Route
         // Per-device power threshold: an operator judgement about a machine,
         // so admin-only like the rest of fleet management.
         .route(wire::DEVICE_THRESHOLD_PATTERN, put(set_device_threshold))
+        // Per-device chart style: how the dashboard draws the machine.
+        .route(wire::DEVICE_STYLE_PATTERN, put(set_device_style))
         .route_layer(axum::middleware::from_fn(crate::middleware::require_admin))
         .with_state(state.clone());
 
@@ -151,6 +153,27 @@ async fn set_device_threshold(
         device_id = %crate::middleware::sanitize_for_log(&device_id),
         threshold_ma = ?resp.power_threshold_ma,
         "device threshold set"
+    );
+    Ok(Json(resp))
+}
+
+async fn set_device_style(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    body: String,
+) -> Result<Json<DeviceResponse>, crate::error::AppError> {
+    let body_opt = if body.is_empty() {
+        None
+    } else {
+        Some(body.as_str())
+    };
+    let resp = handlers::handle_set_device_style(&device_id, body_opt, state.store.as_ref())?;
+    tracing::info!(
+        device_id = %crate::middleware::sanitize_for_log(&device_id),
+        color = ?resp.color,
+        line_style = ?resp.line_style,
+        marker = ?resp.marker,
+        "device style set"
     );
     Ok(Json(resp))
 }

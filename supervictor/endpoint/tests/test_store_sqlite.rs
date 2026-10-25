@@ -10,6 +10,7 @@ fn make_device(id: &str) -> DeviceRecord {
         status: "active".into(),
         created_at: "2025-01-01T00:00:00Z".into(),
         power_threshold_ma: None,
+        style: Default::default(),
     }
 }
 

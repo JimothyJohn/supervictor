@@ -33,6 +33,7 @@ fn seed_device(store: &dyn DeviceStore, id: &str, status: &str) {
             status: status.into(),
             created_at: "2026-07-01T00:00:00+00:00".into(),
             power_threshold_ma: None,
+            style: Default::default(),
         })
         .unwrap();
 }

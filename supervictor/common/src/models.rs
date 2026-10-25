@@ -82,6 +82,129 @@ pub struct RegisterDeviceRequest {
     /// "on". Absent means the fleet default (`POWER_THRESHOLD_MA`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_threshold_ma: Option<i64>,
+    /// Optional chart colour (see [`DeviceStyle::color`]); absent means the
+    /// endpoint assigns the first palette slot the fleet is not using.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Optional line style for the device's chart traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_style: Option<LineStyle>,
+    /// Optional point marker for the device's chart traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker: Option<Marker>,
+}
+
+/// How a device's trace is stroked on the dashboard charts.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LineStyle {
+    /// Continuous line (the default).
+    #[default]
+    Solid,
+    /// Long dashes.
+    Dashed,
+    /// Short dots.
+    Dotted,
+    /// Dash, dot, dash, dot.
+    DashDot,
+}
+
+impl LineStyle {
+    /// Every style, in menu order.
+    pub const ALL: [LineStyle; 4] = [
+        LineStyle::Solid,
+        LineStyle::Dashed,
+        LineStyle::Dotted,
+        LineStyle::DashDot,
+    ];
+
+    /// Wire token / CSS class (`solid`, `dashed`, `dotted`, `dashdot`).
+    pub fn label(self) -> &'static str {
+        match self {
+            LineStyle::Solid => "solid",
+            LineStyle::Dashed => "dashed",
+            LineStyle::Dotted => "dotted",
+            LineStyle::DashDot => "dashdot",
+        }
+    }
+
+    /// Parse a wire token; anything else is `None`.
+    pub fn parse(token: &str) -> Option<LineStyle> {
+        LineStyle::ALL.into_iter().find(|s| s.label() == token)
+    }
+}
+
+/// Glyph drawn at each plotted point of a device's trace, so two devices
+/// that share a colour still read apart.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Marker {
+    /// No per-point glyph (the default).
+    #[default]
+    None,
+    /// Filled circle.
+    Circle,
+    /// Filled square.
+    Square,
+    /// Filled diamond.
+    Diamond,
+    /// Filled triangle.
+    Triangle,
+}
+
+impl Marker {
+    /// Every marker, in menu order.
+    pub const ALL: [Marker; 5] = [
+        Marker::None,
+        Marker::Circle,
+        Marker::Square,
+        Marker::Diamond,
+        Marker::Triangle,
+    ];
+
+    /// Wire token / CSS class.
+    pub fn label(self) -> &'static str {
+        match self {
+            Marker::None => "none",
+            Marker::Circle => "circle",
+            Marker::Square => "square",
+            Marker::Diamond => "diamond",
+            Marker::Triangle => "triangle",
+        }
+    }
+
+    /// Parse a wire token; anything else is `None`.
+    pub fn parse(token: &str) -> Option<Marker> {
+        Marker::ALL.into_iter().find(|m| m.label() == token)
+    }
+}
+
+/// How a device is drawn on the dashboard charts. Stored on the device
+/// record; also the body of `PUT /devices/{id}/style` (admin), which
+/// replaces the whole style — an absent or `null` field clears that part
+/// back to its default. Unknown fields are rejected so a misspelt key
+/// cannot silently clear a colour.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceStyle {
+    /// Trace colour: a palette slot `s0`–`s7` (theme-aware, validated for
+    /// both surfaces) or a custom `#rrggbb`. `None` means the endpoint's
+    /// positional fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Stroke pattern; `None` is solid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_style: Option<LineStyle>,
+    /// Per-point glyph; `None` is no marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker: Option<Marker>,
+}
+
+impl DeviceStyle {
+    /// True when every part is unset.
+    pub fn is_default(&self) -> bool {
+        self.color.is_none() && self.line_style.is_none() && self.marker.is_none()
+    }
 }
 
 /// Per-device power threshold update (`PUT /devices/{id}/threshold`, admin).
@@ -112,4 +235,13 @@ pub struct DeviceResponse {
     /// Per-device power threshold (mA), if one overrides the fleet default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_threshold_ma: Option<i64>,
+    /// Stored chart colour (`s0`–`s7` or `#rrggbb`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Stored line style, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_style: Option<LineStyle>,
+    /// Stored point marker, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker: Option<Marker>,
 }
