@@ -1,0 +1,30 @@
+[package]
+name = "supervictor-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "MCP server exposing fleet and backend status over admin mTLS"
+
+# A stdio MCP server: JSON-RPC in, JSON-RPC out, one HTTPS request per tool
+# call against the endpoint's admin API. The protocol surface a tools-only
+# server needs (initialize, ping, tools/list, tools/call) is small enough to
+# speak directly with serde_json — no MCP SDK crate, so nothing new enters
+# the dependency tree. Every crate below was already in the workspace lock.
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Same TLS stack as the endpoint and the desktop client: ring, no C toolchain.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+# HTTP/1.1 response head parser (hyper's own; already in tree via axum).
+httparse = "1"
+# Route constants: the MCP asks for the same paths the firmware and the
+# endpoint compile against, so a renamed route breaks this build too.
+supervictor-common = { path = "../common", features = ["alloc"] }
+
+[dev-dependencies]
+# The end-to-end test runs the real endpoint with in-binary mTLS and
+# certificates from the repo's own generator; nothing is mocked.
+supervictor-endpoint = { path = "../endpoint", default-features = false, features = ["sqlite", "tls"] }
+axum = "0.8"
