@@ -608,27 +608,20 @@ cd supervictor</pre>
     </div>
     <div class="step">
       <div class="step-content">
-        <p>Check the toolchain</p>
-        <pre>./Quickstart install</pre>
+        <p>Run the guided path: toolchain check, .env, fleet CA and certificates, build, tests, a local mTLS endpoint on https://localhost:8443, then a simulated machine or a board over USB. Idempotent; prompts only where ambiguous. <code>make help</code> lists the same stages as make targets.</p>
+        <pre>./Quickstart</pre>
       </div>
     </div>
     <div class="step">
       <div class="step-content">
-        <p>Generate certificates and start the local endpoint</p>
-        <pre>./Quickstart certs ca && ./Quickstart certs device esp32 && ./Quickstart certs server caddy
-./Quickstart dev --serve</pre>
+        <p>Put a board on a reachable endpoint (certificate, registration, flash, first handshake)</p>
+        <pre>./Quickstart onboard &lt;device&gt; &lt;owner&gt; &lt;host&gt;</pre>
       </div>
     </div>
     <div class="step">
       <div class="step-content">
-        <p>Flash the device</p>
-        <pre>./Quickstart edge</pre>
-      </div>
-    </div>
-    <div class="step">
-      <div class="step-content">
-        <p>Deploy to production (when ready)</p>
-        <pre>./Quickstart prod</pre>
+        <p>Install the endpoint on a Linux box as one static binary (when ready)</p>
+        <pre>make deploy    # or scripts/install-endpoint.sh on the target</pre>
       </div>
     </div>
   </div>

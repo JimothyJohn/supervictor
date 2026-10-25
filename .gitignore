@@ -275,7 +275,9 @@ certs/
 .devcontainer/
 .ruff_cache/
 !certs/AmazonRootCA1.pem
-.claude
+# Session state (handoff, settings) stays local; the repo's skills ship.
+.claude/*
+!.claude/skills/
 scratch/
 
 # Pi cross-build output (scratch/12-pi-edge.sh)

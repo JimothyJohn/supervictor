@@ -1,8 +1,27 @@
 #!/usr/bin/env bash
 #
 # Quickstart — the single entry point for the supervictor workspace.
-# install → lint → build → unit → integration → deploy, plus the fleet
-# operations that used to live in the `qs` CLI (retired July 2026).
+#
+#   ./Quickstart            start to finish: toolchain check, .env, certificate
+#                           authority, build, tests, a local mTLS endpoint on
+#                           https://localhost:8443, then a simulated machine or
+#                           a flashed board posting to it. Idempotent — rerun it
+#                           any time; every step skips what already exists.
+#
+# Everything else (lint, build, unit, integration, dev, staging, prod, certs,
+# ping, fleet, onboard, ...) is a stage of that lifecycle you can run alone.
+# `make help` lists the same stages as make targets.
+#
+# Prompts appear only on a terminal and only where a choice is ambiguous; set
+# the QS_* variables below to answer them ahead of time (CI, agents, scripts).
+#
+#   QS_HARDWARE   none | sim | flash      what posts telemetry after setup
+#   QS_PORT       local endpoint port     (default 8443)
+#   QS_ADMIN      admin certificate name  (default $USER)
+#   QS_OWNER      owner_id for the device (default $USER)
+#   QS_TESTS      0 skips the host test suite
+#   SIM_PROFILE   machine the simulator impersonates (default generic)
+#   SIM_SPEED     simulated seconds per real second (default 60)
 #
 set -e
 set -o nounset
@@ -11,11 +30,14 @@ set -o pipefail
 export ENV="${ENV:-dev}"
 
 # Load stage config (CERT_PATH, HOST, SSID, ... consumed at compile time by edge)
-if [[ -f ".env.${ENV}" ]]; then
-    set -a
-    . ".env.${ENV}"
-    set +a
-fi
+load_env() {
+    if [[ -f ".env.${ENV}" ]]; then
+        set -a
+        . ".env.${ENV}"
+        set +a
+    fi
+}
+load_env
 
 # Xtensa build env (PATH to xtensa-esp32-elf-gcc, the edge linker) — written
 # by `espup install`; harmless to skip when only host-side work runs.
@@ -24,15 +46,64 @@ fi
 [[ "${TRACE:-0}" == "1" ]] && set -o xtrace
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+note() { printf '        %s\n' "$*"; }
 fail() { log "ERROR: $*" >&2; exit 1; }
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+is_tty() { [[ -t 0 && -t 1 ]]; }
+
+# ask VAR "question" "default" — prompt on a terminal, take the default
+# otherwise. A variable already set in the environment wins without asking.
+ask() {
+    local var="$1" question="$2" default="$3" answer
+    if [[ -n "${!var:-}" ]]; then return 0; fi
+    if is_tty; then
+        read -r -p "  $question [$default]: " answer
+        printf -v "$var" '%s' "${answer:-$default}"
+    else
+        printf -v "$var" '%s' "$default"
+    fi
+    export "$var"
+}
+
+# choose VAR "question" "default" option1 "label 1" option2 "label 2" ...
+choose() {
+    local var="$1" question="$2" default="$3"; shift 3
+    local -a keys=() labels=()
+    while [[ $# -gt 0 ]]; do keys+=("$1"); labels+=("$2"); shift 2; done
+    if [[ -n "${!var:-}" ]]; then return 0; fi
+    if ! is_tty; then printf -v "$var" '%s' "$default"; export "$var"; return 0; fi
+    local i answer
+    printf '  %s\n' "$question"
+    for i in "${!keys[@]}"; do
+        local mark=" "; [[ "${keys[$i]}" == "$default" ]] && mark="*"
+        printf '   %s %d) %s\n' "$mark" "$((i + 1))" "${labels[$i]}"
+    done
+    while :; do
+        read -r -p "  choice [${default}]: " answer
+        [[ -z "$answer" ]] && { printf -v "$var" '%s' "$default"; break; }
+        if [[ "$answer" =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= ${#keys[@]} )); then
+            printf -v "$var" '%s' "${keys[$((answer - 1))]}"; break
+        fi
+        for i in "${!keys[@]}"; do
+            [[ "$answer" == "${keys[$i]}" ]] && { printf -v "$var" '%s' "$answer"; break 2; }
+        done
+        echo "  pick 1-${#keys[@]}"
+    done
+    export "$var"
+}
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO_ROOT"
+command_exists rustc || { echo "ERROR: rustc not found — install Rust from https://rustup.rs then rerun" >&2; exit 1; }
 HOST_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
 LOG_DIR="$REPO_ROOT/.logs"
 SAM_PID_FILE="$LOG_DIR/sam_local.pid"
 SAM_LOG_FILE="$LOG_DIR/sam_local.log"
+ENDPOINT_PID_FILE="$LOG_DIR/endpoint.pid"
+ENDPOINT_LOG_FILE="$LOG_DIR/endpoint.log"
+SIM_PID_FILE="$LOG_DIR/sim.pid"
+SIM_LOG_FILE="$LOG_DIR/sim.log"
+LOCAL_DB="$LOG_DIR/local.db"
 GEN_CERTS="$REPO_ROOT/supervictor/endpoint/scripts/gen_certs.sh"
 EDGE_DIR="$REPO_ROOT/supervictor/edge"
 ENDPOINT_DIR="$REPO_ROOT/supervictor/endpoint"
@@ -41,16 +112,21 @@ mkdir -p "$LOG_DIR"
 help_function() {
     cat <<EOF
 
-Usage: $(basename "$0") <command> [args]
+Usage: $(basename "$0") [command] [args]
 
-Pipeline:
+  (no args) | up           Start to finish: toolchain, .env, certs, build, tests,
+                           local mTLS endpoint, then a simulated machine or a
+                           board. Idempotent; prompts only where ambiguous.
+  status                   What the local endpoint and simulator are doing
+  down                     Stop the local endpoint and simulator
+
+Stages (each runs alone):
   install                  Check toolchains (esp via espup) and fetch deps
   lint                     cargo fmt --check + clippy --all-targets -D warnings
   build                    Workspace + edge embedded (xtensa) + edge desktop
   unit                     Full workspace test suite on the host
   integration              SAM-local roundtrips (SAM_LOCAL_URL) + staging smoke
-  -t, --test               Everything: lint -> build -> unit -> integration
-  (no args)                lint -> build -> unit
+  -t, --test               lint -> build -> unit -> integration
 
 Local dev & deploy:
   dev [--serve|--stop]     Tests + sam build + sam local (+integration); --serve
@@ -68,6 +144,8 @@ Fleet operations:
   truststore-reload        Force API Gateway to re-read the mTLS truststore
 
 Env: ENV selects .env.<stage> (default: dev). TRACE=1 for xtrace.
+     QS_HARDWARE=none|sim|flash, QS_PORT, QS_ADMIN, QS_OWNER, QS_TESTS=0,
+     SIM_PROFILE, SIM_SPEED answer the guided path's prompts ahead of time.
      PING_CERTS, FLEET_ADMIN, SAM_LOCAL_PORT override defaults.
 EOF
 }
@@ -142,7 +220,289 @@ test_integration() {
     log "integration OK"
 }
 
-# ── Local dev pipeline (was: qs dev) ─────────────────────────────────
+# ── Guided path (no args / up) ───────────────────────────────────────
+
+pid_alive() { # <pidfile>
+    [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null
+}
+
+port_owner() { # <port> → pid listening on it, or nothing
+    if command_exists lsof; then
+        lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1
+    fi
+}
+
+preflight() {
+    log "[1/6] toolchain"
+    local missing=0
+    command_exists cargo || { note "cargo missing — install Rust: https://rustup.rs"; missing=1; }
+    command_exists rustup || { note "rustup missing — install Rust: https://rustup.rs"; missing=1; }
+    command_exists openssl || { note "openssl missing — brew install openssl / apt install openssl"; missing=1; }
+    command_exists curl || { note "curl missing — brew install curl / apt install curl"; missing=1; }
+    [[ $missing -eq 0 ]] || fail "install the tools above and rerun ./Quickstart"
+    note "cargo $(cargo --version | cut -d' ' -f2) · $(openssl version | cut -d' ' -f1-2) · target $HOST_TARGET"
+}
+
+ensure_env() {
+    log "[2/6] configuration (.env.$ENV)"
+    if [[ -f ".env.$ENV" ]]; then
+        note "using existing .env.$ENV (DEVICE_NAME=${DEVICE_NAME:-?}, HOST=${HOST:-?})"
+    else
+        note "no .env.$ENV yet — writing one for a local endpoint"
+        local device
+        ask device "name for your first device" "test-device"
+        cat > ".env.$ENV" <<EOF
+# Written by ./Quickstart on $(date +%Y-%m-%d). Gitignored. Edit freely.
+#
+# The edge firmware bakes most of these in at COMPILE TIME (env! macros):
+# SSID, PASSWORD, HOST, DEVICE_NAME, CERT_PATH, CA_PATH, TLS_VERSION.
+# Changing them means rebuild + reflash.
+
+# WiFi credentials for WiFi boards (ESP32-C3, POE2 in wifi mode). Wired
+# PoE boards ignore them. Leave blank until you flash a WiFi board.
+SSID=
+PASSWORD=
+
+# Serial port for espflash (macOS: /dev/cu.usb*, Linux: /dev/ttyUSB*).
+# Blank = Quickstart detects it, asking if there is more than one.
+ESPFLASH_PORT=
+
+# Endpoint a BOARD posts to on :443 — no https://, no trailing /. A board
+# cannot reach localhost; point this at a LAN host or a deployed endpoint
+# before flashing. The local endpoint and the simulator ignore it.
+HOST=localhost
+# Request path: "/" (custom domain / single binary) or "/<stage>" on a raw
+# execute-api URL.
+API_PATH=/
+SAM_LOCAL_PORT=3000
+
+# Certificate layout, repo-root-relative: CERT_PATH + CA_PATH = the CA the
+# device trusts for the SERVER; CERT_PATH + devices/\$DEVICE_NAME/client.*
+# = the device identity. The fleet CA signs the local server certificate;
+# for a public endpoint use its root (e.g. ca/AmazonRootCA1.pem).
+CERT_PATH=certs/
+CA_PATH=ca/ca.pem
+DEVICE_NAME=$device
+
+# Minimum TLS version for the device's mTLS session (1.2 or 1.3)
+TLS_VERSION=1.3
+
+# Endpoint: staleness watchdog tick (seconds); 0 disables.
+WATCHDOG_INTERVAL_SECS=300
+EOF
+        load_env
+        note "wrote .env.$ENV"
+    fi
+    : "${DEVICE_NAME:?DEVICE_NAME missing from .env.$ENV}"
+    : "${CERT_PATH:?CERT_PATH missing from .env.$ENV}"
+    : "${CA_PATH:?CA_PATH missing from .env.$ENV}"
+    QS_ADMIN="${QS_ADMIN:-${USER:-admin}}"
+    QS_OWNER="${QS_OWNER:-${USER:-owner}}"
+    QS_PORT="${QS_PORT:-8443}"
+}
+
+ensure_certs() {
+    log "[3/6] certificates (certs/, gitignored)"
+    [[ -x "$GEN_CERTS" ]] || fail "gen_certs.sh not found at $GEN_CERTS"
+    if [[ -f certs/ca/ca.pem ]]; then note "fleet CA exists"; else
+        note "issuing the fleet CA"; "$GEN_CERTS" ca; fi
+    if [[ -f certs/servers/localhost/server.pem ]]; then note "server cert (localhost) exists"; else
+        note "issuing a server cert for localhost"; "$GEN_CERTS" server localhost localhost; fi
+    if [[ -f "certs/devices/$DEVICE_NAME/client.pem" ]]; then note "device cert ($DEVICE_NAME) exists"; else
+        note "issuing a device cert for $DEVICE_NAME"; "$GEN_CERTS" device "$DEVICE_NAME"; fi
+    if [[ -f "certs/admins/$QS_ADMIN/admin.pem" ]]; then note "admin cert ($QS_ADMIN) exists"; else
+        note "issuing an admin cert for $QS_ADMIN (the browser bundle password prints once — keep it)"
+        "$GEN_CERTS" admin "$QS_ADMIN"; fi
+    # The firmware and the host tests include this file at compile time.
+    [[ -f "${CERT_PATH}${CA_PATH}" ]] || fail "CA_PATH in .env.$ENV points at ${CERT_PATH}${CA_PATH}, which does not exist.
+        For the local endpoint set CA_PATH=ca/ca.pem; for a public endpoint drop its root CA there."
+}
+
+build_and_test() {
+    log "[4/6] build + tests (host)"
+    note "first build fetches and compiles the workspace — a few minutes"
+    cargo build -q --workspace --target "$HOST_TARGET" \
+        || fail "workspace build failed — rerun 'cargo build --workspace --target $HOST_TARGET' for the full output"
+    cargo build -q -p supervictor-edge --features desktop --bin supervictor-desktop --target "$HOST_TARGET" \
+        || fail "desktop client build failed — rerun 'cargo build -p supervictor-edge --features desktop --target $HOST_TARGET'"
+    if [[ "${QS_TESTS:-1}" == "0" ]]; then
+        note "tests skipped (QS_TESTS=0)"
+    else
+        cargo test -q --workspace --target "$HOST_TARGET" > "$LOG_DIR/unit.log" 2>&1 \
+            || { tail -40 "$LOG_DIR/unit.log"; fail "tests failed (full log: $LOG_DIR/unit.log)"; }
+        note "workspace tests green ($LOG_DIR/unit.log)"
+    fi
+}
+
+admin_curl() { # curl with the admin identity against the local endpoint
+    curl -sS --max-time 5 --cacert certs/ca/ca.pem \
+        --cert "certs/admins/$QS_ADMIN/admin.pem" --key "certs/admins/$QS_ADMIN/admin.key" "$@"
+}
+
+endpoint_up() {
+    log "[5/6] local endpoint (mTLS in-process, SQLite)"
+    if pid_alive "$ENDPOINT_PID_FILE"; then
+        note "already running (pid $(cat "$ENDPOINT_PID_FILE"))"
+    else
+        local owner; owner="$(port_owner "$QS_PORT" || true)"
+        [[ -z "$owner" ]] || fail "port $QS_PORT is taken by pid $owner — stop it or set QS_PORT=<free port>"
+        local bin="$REPO_ROOT/target/$HOST_TARGET/debug/supervictor-endpoint"
+        [[ -x "$bin" ]] || fail "endpoint binary missing at $bin"
+        PORT="$QS_PORT" STORE_BACKEND=sqlite SQLITE_DB_PATH="$LOCAL_DB" LOG_LEVEL="${LOG_LEVEL:-info}" \
+        ENVIRONMENT=local REQUIRE_REGISTRATION="${REQUIRE_REGISTRATION:-false}" \
+        WATCHDOG_INTERVAL_SECS="${WATCHDOG_INTERVAL_SECS:-300}" \
+        TLS_CERT="$REPO_ROOT/certs/servers/localhost/server.pem" \
+        TLS_KEY="$REPO_ROOT/certs/servers/localhost/server.key" \
+        TLS_CLIENT_CA="$REPO_ROOT/certs/ca/ca.pem" \
+            nohup "$bin" > "$ENDPOINT_LOG_FILE" 2>&1 &
+        echo $! > "$ENDPOINT_PID_FILE"
+    fi
+    local i
+    for i in $(seq 1 40); do
+        admin_curl -o /dev/null "https://localhost:$QS_PORT/health" 2>/dev/null && break
+        pid_alive "$ENDPOINT_PID_FILE" || { tail -20 "$ENDPOINT_LOG_FILE"; fail "endpoint exited (log: $ENDPOINT_LOG_FILE)"; }
+        sleep 0.5
+    done
+    admin_curl -o /dev/null "https://localhost:$QS_PORT/health" \
+        || fail "endpoint not healthy on https://localhost:$QS_PORT (log: $ENDPOINT_LOG_FILE)"
+    note "healthy at https://localhost:$QS_PORT (pid $(cat "$ENDPOINT_PID_FILE"), db $LOCAL_DB)"
+
+    local subject payload status
+    subject="$(openssl x509 -in "certs/devices/$DEVICE_NAME/client.pem" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"
+    payload="$(printf '{"device_id":"%s","owner_id":"%s","subject_dn":"%s"}' "$DEVICE_NAME" "$QS_OWNER" "$subject")"
+    status="$(admin_curl -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+        -X POST "https://localhost:$QS_PORT/devices" -d "$payload")"
+    case "$status" in
+    201) note "registered $DEVICE_NAME (owner $QS_OWNER), bound to its certificate" ;;
+    409) note "$DEVICE_NAME already registered" ;;
+    *) fail "registering $DEVICE_NAME failed with HTTP $status (log: $ENDPOINT_LOG_FILE)" ;;
+    esac
+}
+
+sim_up() {
+    if pid_alive "$SIM_PID_FILE"; then note "simulator already running (pid $(cat "$SIM_PID_FILE"))"; return 0; fi
+    local bin="$REPO_ROOT/target/$HOST_TARGET/debug/supervictor-desktop"
+    local profile="${SIM_PROFILE:-generic}" speed="${SIM_SPEED:-60}"
+    HOST=localhost PORT="$QS_PORT" API_PATH=/ DEVICE_ID="$DEVICE_NAME" INTERVAL_S="${INTERVAL_S:-5}" \
+    SIM_PROFILE="$profile" SIM_SPEED="$speed" \
+    CA_PEM="$REPO_ROOT/certs/ca/ca.pem" \
+    CLIENT_CERT="$REPO_ROOT/certs/devices/$DEVICE_NAME/client.pem" \
+    CLIENT_KEY="$REPO_ROOT/certs/devices/$DEVICE_NAME/client.key" \
+        nohup "$bin" > "$SIM_LOG_FILE" 2>&1 &
+    echo $! > "$SIM_PID_FILE"
+    local i
+    for i in $(seq 1 30); do
+        grep -q "seq " "$SIM_LOG_FILE" 2>/dev/null && break
+        pid_alive "$SIM_PID_FILE" || { tail -10 "$SIM_LOG_FILE"; fail "simulator exited (log: $SIM_LOG_FILE)"; }
+        sleep 0.5
+    done
+    note "simulated $profile posting as $DEVICE_NAME every ${INTERVAL_S:-5}s at x$speed (pid $(cat "$SIM_PID_FILE"))"
+    note "other machines: SIM_PROFILE=extruder|press-brake|cnc|saw|oven|compressor|conveyor|molder|welder|pump"
+}
+
+flash_from_up() {
+    case "${HOST:-localhost}" in
+    localhost | 127.0.0.1 | "")
+        note "HOST in .env.$ENV is localhost — a board cannot reach that, and boards post on :443."
+        note "Set HOST to a LAN host or a deployed endpoint, rebuild, then:"
+        note "  ./Quickstart onboard $DEVICE_NAME $QS_OWNER <host>"
+        return 0 ;;
+    esac
+    command_exists espflash || fail "espflash missing — cargo install espflash --locked"
+    rustup toolchain list | grep -q '^esp' || fail "esp toolchain missing — ./Quickstart install"
+    if [[ -z "${ESPFLASH_PORT:-}" ]]; then
+        local -a ports=()
+        local p
+        for p in /dev/cu.usbserial* /dev/cu.usbmodem* /dev/ttyUSB* /dev/ttyACM*; do [[ -e "$p" ]] && ports+=("$p"); done
+        case ${#ports[@]} in
+        0) fail "no serial port found — plug the board in (USB) or set ESPFLASH_PORT" ;;
+        1) ESPFLASH_PORT="${ports[0]}" ;;
+        *) local -a menu=(); for p in "${ports[@]}"; do menu+=("$p" "$p"); done
+           choose ESPFLASH_PORT "several serial ports — which one is the board?" "${ports[0]}" ${menu[@]+"${menu[@]}"} ;;
+        esac
+        export ESPFLASH_PORT
+    fi
+    choose QS_BOARD "which board?" "poe-iso" \
+        poe-iso "Olimex ESP32-POE-ISO, wired Ethernet" \
+        poe2 "Olimex ESP32-POE2, wired Ethernet" \
+        c3 "ESP32-C3, WiFi (needs SSID/PASSWORD in .env.$ENV)"
+    local features="ethernet" target_flag=()
+    case "$QS_BOARD" in
+    poe2) features="board-poe2" ;;
+    c3) features="wifi,chip-esp32c3"; target_flag=(--target riscv32imc-unknown-none-elf)
+        [[ -n "${SSID:-}" && -n "${PASSWORD:-}" ]] || fail "SSID and PASSWORD are blank in .env.$ENV — fill them in for a WiFi board" ;;
+    esac
+    note "firmware: HOST=$HOST DEVICE_NAME=$DEVICE_NAME features=$features port=$ESPFLASH_PORT"
+    local go; ask go "flash now? (y/N)" "N"
+    [[ "$go" == "y" || "$go" == "Y" ]] || { note "skipped — later: ./Quickstart onboard $DEVICE_NAME $QS_OWNER $HOST"; return 0; }
+    (cd "$EDGE_DIR" && DEVICE_NAME="$DEVICE_NAME" cargo run --bin supervictor-embedded --features "$features" ${target_flag[@]+"${target_flag[@]}"})
+}
+
+cmd_up() {
+    for arg in "$@"; do
+        case "$arg" in
+        --no-tests) QS_TESTS=0 ;;
+        --sim) QS_HARDWARE=sim ;;
+        --flash) QS_HARDWARE=flash ;;
+        --none) QS_HARDWARE=none ;;
+        *) fail "unknown up flag: $arg (--no-tests, --sim, --flash, --none)" ;;
+        esac
+    done
+    preflight
+    ensure_env
+    ensure_certs
+    build_and_test
+    endpoint_up
+    log "[6/6] telemetry"
+    choose QS_HARDWARE "what should post telemetry?" "sim" \
+        sim "a simulated machine on this computer" \
+        flash "flash an ESP32 board over USB" \
+        none "nothing yet, just the endpoint"
+    case "$QS_HARDWARE" in
+    sim) sim_up ;;
+    flash) flash_from_up ;;
+    none) note "nothing posting; start a simulator later with: ./Quickstart up --sim" ;;
+    *) fail "QS_HARDWARE must be none, sim or flash (got '$QS_HARDWARE')" ;;
+    esac
+    local summary
+    summary="$(admin_curl "https://localhost:$QS_PORT/fleet/summary" 2>/dev/null || echo '{}')"
+    echo
+    log "ready"
+    note "dashboard   https://localhost:$QS_PORT/ui"
+    note "browser     import certs/admins/$QS_ADMIN/admin.p12 (password printed when it was issued),"
+    note "            and trust certs/ca/ca.pem — or: ./Quickstart fleet localhost $QS_PORT"
+    note "fleet       $summary"
+    note "logs        $ENDPOINT_LOG_FILE  $SIM_LOG_FILE"
+    note "stop        ./Quickstart down      status: ./Quickstart status"
+}
+
+cmd_status() {
+    local port="${QS_PORT:-8443}" admin="${QS_ADMIN:-${USER:-admin}}"
+    if pid_alive "$ENDPOINT_PID_FILE"; then
+        log "endpoint   running (pid $(cat "$ENDPOINT_PID_FILE")) https://localhost:$port"
+        [[ -f "certs/admins/$admin/admin.pem" ]] && QS_ADMIN="$admin" admin_curl "https://localhost:$port/fleet/summary" && echo
+    else
+        log "endpoint   stopped"
+    fi
+    if pid_alive "$SIM_PID_FILE"; then
+        log "simulator  running (pid $(cat "$SIM_PID_FILE")): $(tail -1 "$SIM_LOG_FILE" 2>/dev/null)"
+    else
+        log "simulator  stopped"
+    fi
+}
+
+cmd_down() {
+    local f
+    for f in "$SIM_PID_FILE" "$ENDPOINT_PID_FILE"; do
+        if pid_alive "$f"; then
+            kill "$(cat "$f")" && log "stopped pid $(cat "$f") ($(basename "$f" .pid))"
+        fi
+        rm -f "$f"
+    done
+    log "down (database kept at $LOCAL_DB; delete it to start clean)"
+}
+
+# ── Local dev pipeline (SAM) ─────────────────────────────────────────
 
 sam_local_stop() {
     if [[ -f "$SAM_PID_FILE" ]]; then
@@ -223,7 +583,7 @@ cmd_edge() {
     (cd "$EDGE_DIR" && cargo run --bin supervictor-embedded --features ethernet)
 }
 
-# ── Staging / prod pipelines (was: qs staging / qs prod) ─────────────
+# ── Staging / prod pipelines ─────────────────────────────────────────
 
 stack_endpoint() { # <config-env>
     # Pull stack_name from samconfig.toml's [<env>.deploy.parameters] (or
@@ -280,7 +640,7 @@ cmd_prod() {
     log "production deployment complete"
 }
 
-# ── Fleet operations (was: qs certs/ping/fleet/onboard/truststore) ───
+# ── Fleet operations ─────────────────────────────────────────────────
 
 cmd_certs() {
     [[ -x "$GEN_CERTS" ]] || fail "gen_certs.sh not found at $GEN_CERTS"
@@ -300,7 +660,7 @@ cmd_ping() { # [host] [port]
 
 cmd_fleet() { # [host] [port]
     local host="${1:-localhost}" port="${2:-443}"
-    local admin="${FLEET_ADMIN:-nick}"
+    local admin="${FLEET_ADMIN:-${QS_ADMIN:-${USER:-nick}}}"
     local dir="$REPO_ROOT/certs/admins/$admin"
     [[ -f "$dir/admin.pem" ]] || fail "admin cert not found at $dir (issue one with: ./Quickstart certs admin $admin)"
     local ca_flag=()
@@ -409,6 +769,9 @@ check_dependencies
 
 case "${1:-}" in
 -h | --help | help) help_function ;;
+"" | up) shift $(( $# > 0 ? 1 : 0 )); cmd_up "$@" ;;
+status) cmd_status ;;
+down) cmd_down ;;
 -t | --test)
     lint
     validate_and_build
@@ -430,11 +793,6 @@ ping) shift; cmd_ping "$@" ;;
 fleet) shift; cmd_fleet "$@" ;;
 onboard) shift; cmd_onboard "$@" ;;
 truststore-reload) cmd_truststore_reload ;;
-"")
-    lint
-    validate_and_build
-    test_unit
-    ;;
 *)
     log "unknown command: $1"
     help_function
