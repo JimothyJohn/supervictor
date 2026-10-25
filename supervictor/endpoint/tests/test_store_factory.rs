@@ -13,6 +13,8 @@ fn test_config(backend: &str) -> Config {
         sqlite_db_path: ":memory:".into(),
         watchdog_interval_secs: 0,
         uplink_ttl_days: 30,
+        require_registration: false,
+        tls: None,
     }
 }
 

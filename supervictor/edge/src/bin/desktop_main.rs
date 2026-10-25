@@ -1,15 +1,28 @@
 //! Desktop version of the Supervictor application
 //!
-//! This version uses rustls for TLS and runs on desktop platforms.
+//! This version uses rustls for TLS and runs on desktop platforms (and the
+//! bench Raspberry Pi). Each tick it posts one simulated telemetry sample —
+//! same simulator as the firmware, so a Pi looks like any other board on
+//! the dashboard.
 //!
 //! Environment variables (all runtime):
 //!   HOST        - Target host for HTTP requests (e.g. supervictor.advin.io)
+//!   API_PATH    - Request path: "/" (custom domain, default) or "/<stage>"
+//!                 against a raw execute-api URL
+//!   DEVICE_ID   - Device id to post as (default "1234567890"); should match
+//!                 the client cert's CN once the device is registered
+//!   INTERVAL_S  - Seconds between uplinks (default 5; jittered ±20 %)
+//!   SIM_SEED    - u64 seed salt for reproducible telemetry (default: clock)
 //!   CA_PEM      - Path to CA certificate PEM for server verification
 //!   CLIENT_CERT - Path to client certificate PEM for mTLS
 //!   CLIENT_KEY  - Path to client private key PEM for mTLS
 
 use heapless::String as HString;
-use std::{env, sync::Arc, time::Duration};
+use std::{
+    env,
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -19,7 +32,7 @@ use tokio::{
 use rustls::pki_types::ServerName;
 use rustls_pemfile::{certs, private_key};
 use supervictor::{
-    models::uplink::UplinkMessage,
+    models::sim::{seed_from, Hardware, Simulator},
     network::http::{parse_response, post_request},
 };
 use tokio_rustls::TlsConnector;
@@ -48,31 +61,41 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
     // SNI server name must match the server's certificate
     let server_name = ServerName::try_from(base_host.as_str())?.to_owned();
 
-    // Desktop reads its identity and path at runtime (embedded bakes
-    // DEVICE_NAME/API_PATH in at compile time); same env vars either way.
-    // API_PATH: "/" against a custom domain, "/<stage>" against execute-api.
-    let api_path = env::var("API_PATH").unwrap_or_else(|_| "/".into());
-    let device_name = env::var("DEVICE_NAME").expect("DEVICE_NAME environment variable not set");
-    let message = UplinkMessage::new(
-        device_name
-            .as_str()
-            .try_into()
-            .expect("DEVICE_NAME longer than 64 bytes"),
-        100,
-    );
-    // serde-json-core still returns its own heapless-0.8 String; bridge to
-    // our heapless-0.9 type via &str until serde-json-core moves to 0.9.
-    let json_body: HString<512> = serde_json_core::to_string::<_, 512>(&message)
-        .as_deref()
-        .unwrap_or("{}")
+    // API_PATH: "/" against a custom domain (base-path mapping supplies the
+    // stage), "/<stage>" against a raw execute-api URL. Runtime here; the
+    // embedded build bakes it in at compile time.
+    let api_path = env_or("API_PATH", "/");
+    let device_id: HString<64> = env_or("DEVICE_ID", "1234567890")
+        .as_str()
         .try_into()
-        .unwrap_or_default();
+        .map_err(|_| "DEVICE_ID longer than 64 bytes")?;
+    let interval_s: u32 = env_or("INTERVAL_S", "5")
+        .parse()
+        .map_err(|_| "INTERVAL_S must be a positive integer")?;
+    if interval_s == 0 {
+        return Err("INTERVAL_S must be at least 1".into());
+    }
+    let salt: u64 = match env::var("SIM_SEED") {
+        Ok(s) => s.parse().map_err(|_| "SIM_SEED must be a u64")?,
+        Err(_) => SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1),
+    };
+    let mut sim = Simulator::new(seed_from(device_id.as_str(), salt));
+    let booted = Instant::now();
 
     loop {
+        // post_request serializes its payload itself; handing it a pre-serialized
+        // string double-encoded the body as a JSON string literal.
+        let uptime_s = u32::try_from(booted.elapsed().as_secs()).unwrap_or(u32::MAX);
+        let message = sim.uplink(device_id.clone(), uptime_s, interval_s, Hardware::default());
+        let delay = Duration::from_millis(u64::from(sim.next_delay_ms(interval_s * 1_000)));
+
         match TcpStream::connect(socket_addr).await {
             Ok(socket) => match connector.connect(server_name.clone(), socket).await {
                 Ok(mut tls_stream) => {
-                    let request = match post_request(&base_host, &json_body, Some(&api_path)) {
+                    let request = match post_request(&base_host, &message, Some(&api_path)) {
                         Ok(r) => r,
                         Err(e) => {
                             println!("Error building request: {}", e);
@@ -93,9 +116,10 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
                             Ok(response_str) => match parse_response(&response_str) {
                                 Ok(response) => {
                                     println!(
-                                        "Parsed response:\n---\n{}\n---",
-                                        serde_json_core::to_string::<_, 1024>(&response.body)
-                                            .unwrap()
+                                        "seq {} current {} -> {}",
+                                        message.seq.unwrap_or(0),
+                                        message.current,
+                                        response.body
                                     )
                                 }
                                 Err(e) => println!("Error parsing response: {}", e),
@@ -112,7 +136,7 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => println!("TCP connection error: {}", e),
         }
 
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(delay).await;
     }
 }
 

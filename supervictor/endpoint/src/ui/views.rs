@@ -4,8 +4,11 @@
 
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
+use crate::fleet::FleetSummary;
 pub use crate::fleet::Staleness;
+use crate::history::{DeviceSeries, History, Window, METRICS};
 use crate::models::{DeviceRecord, UplinkRecord};
+use crate::ui::charts::{self, Series};
 use supervictor_common::status;
 
 /// One row of the fleet table.
@@ -45,27 +48,223 @@ pub const LIVE_SCRIPT: &str = r#"
 })();
 "#;
 
-fn layout(title: &str, subject: &str, body: Markup) -> Markup {
+/// Hover layer for every `figure.chart` (crosshair + one tooltip listing
+/// every series at that bucket; arrow keys do the same from the keyboard)
+/// and a visible-tab-only reload on pages that set `data-refresh`. All
+/// text goes in via `textContent`; the chart data comes from the escaped
+/// `data-chart` attribute the server rendered.
+pub const CHART_SCRIPT: &str = r#"
+(function () {
+  function fmt(v) {
+    if (v === null || v === undefined) return '–';
+    var a = Math.abs(v);
+    if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    if (a >= 1e4) return Math.round(v / 1e3) + 'K';
+    if (a >= 100 || v === Math.round(v)) return Math.round(v).toString();
+    if (a >= 10) return v.toFixed(1);
+    return v.toFixed(2);
+  }
+  function when(t) { return new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' UTC'; }
+  document.querySelectorAll('figure.chart[data-chart]').forEach(function (fig) {
+    var data; try { data = JSON.parse(fig.dataset.chart); } catch (_) { return; }
+    var svg = fig.querySelector('svg'), tip = fig.querySelector('.tooltip'), hair = fig.querySelector('.crosshair');
+    var n = data.t.length;
+    if (!svg || !tip || !hair || !n) return;
+    var stack = data.kind === 'stack', cur = n - 1;
+    function xOf(i) { return stack ? data.ml + (i + 0.5) * data.pw / n : data.ml + i * data.pw / Math.max(n - 1, 1); }
+    function idxAt(clientX) {
+      var r = svg.getBoundingClientRect();
+      var xv = (clientX - r.left) / r.width * data.w;
+      var i = stack ? Math.floor((xv - data.ml) / (data.pw / n)) : Math.round((xv - data.ml) / (data.pw / Math.max(n - 1, 1)));
+      return Math.max(0, Math.min(n - 1, i));
+    }
+    function render(i, clientX) {
+      cur = i;
+      hair.setAttribute('x1', xOf(i)); hair.setAttribute('x2', xOf(i)); hair.classList.add('on');
+      while (tip.firstChild) tip.removeChild(tip.firstChild);
+      var head = document.createElement('div'); head.className = 'tip-time'; head.textContent = when(data.t[i]); tip.appendChild(head);
+      data.series.forEach(function (s) {
+        var row = document.createElement('div'); row.className = 'tip-row';
+        var key = document.createElement('span'); key.className = 'key ' + (stack ? '' : 'line-key ') + s.slot;
+        var val = document.createElement('strong'); var v = s.values[i];
+        val.textContent = fmt(v) + (v === null || v === undefined ? '' : ' ' + data.unit);
+        var lab = document.createElement('span'); lab.className = 'tip-label'; lab.textContent = s.label;
+        row.appendChild(key); row.appendChild(val); row.appendChild(lab); tip.appendChild(row);
+      });
+      tip.hidden = false;
+      var r = svg.getBoundingClientRect(), fr = fig.getBoundingClientRect();
+      var px = (clientX === undefined ? r.left + xOf(i) / data.w * r.width : clientX) - fr.left;
+      var left = px + 12;
+      if (left + tip.offsetWidth > fr.width) left = px - tip.offsetWidth - 12;
+      tip.style.left = Math.max(0, left) + 'px';
+      tip.style.top = (r.top - fr.top + 8) + 'px';
+    }
+    function hide() { tip.hidden = true; hair.classList.remove('on'); }
+    svg.addEventListener('pointermove', function (e) { render(idxAt(e.clientX), e.clientX); });
+    svg.addEventListener('pointerleave', hide);
+    svg.setAttribute('tabindex', '0');
+    svg.addEventListener('focus', function () { render(cur); });
+    svg.addEventListener('blur', hide);
+    svg.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowLeft') { render(Math.max(0, cur - 1)); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { render(Math.min(n - 1, cur + 1)); e.preventDefault(); }
+      else if (e.key === 'Escape') { hide(); }
+    });
+  });
+  var refresh = parseInt(document.body.getAttribute('data-refresh') || '0', 10);
+  if (refresh > 0) {
+    setInterval(function () { if (document.visibilityState === 'visible') location.reload(); }, refresh * 1000);
+  }
+})();
+"#;
+
+/// Theme bootstrap + toggle. Runs in `<head>` so a stored choice applies
+/// before first paint (no flash); the click handler attaches once the
+/// header exists. The choice is a per-viewer convenience in localStorage,
+/// wrapped in try/catch — private windows and blocked storage just fall
+/// back to the OS preference.
+pub const THEME_SCRIPT: &str = r#"
+(function () {
+  var KEY = 'sv-theme', root = document.documentElement;
+  function stored() { try { return localStorage.getItem(KEY); } catch (_) { return null; } }
+  function effective() {
+    var t = root.getAttribute('data-theme');
+    if (t) return t;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  }
+  var saved = stored();
+  if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+  document.addEventListener('DOMContentLoaded', function () {
+    var button = document.getElementById('theme-toggle');
+    if (!button) return;
+    button.addEventListener('click', function () {
+      var next = effective() === 'light' ? 'dark' : 'light';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem(KEY, next); } catch (_) {}
+      button.setAttribute('aria-label', next === 'light' ? 'switch to dark mode' : 'switch to light mode');
+    });
+  });
+})();
+"#;
+
+/// Seconds between reloads of the history pages (visible tab only).
+const HISTORY_REFRESH_S: u32 = 60;
+
+fn layout(title: &str, subject: &str, refresh: Option<u32>, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
             head {
                 meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
+                meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover";
+                meta name="color-scheme" content="dark light";
+                meta name="theme-color" content="#0e0e10" media="(prefers-color-scheme: dark)";
+                meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)";
                 title { (title) " — supervictor fleet" }
                 link rel="stylesheet" href="/ui/assets/style.css";
+                script { (PreEscaped(THEME_SCRIPT)) }
             }
-            body {
+            body data-refresh=[refresh] {
                 header {
                     h1 { a href="/ui" { "supervictor fleet" } }
+                    nav {
+                        a href="/ui" { "fleet" }
+                        a href="/ui/history" { "history" }
+                    }
                     span #live-dot { "static" }
                     span .subject { (subject) }
+                    button #theme-toggle type="button" aria-label="switch colour theme" title="light / dark" {
+                        svg .icon-sun viewBox="0 0 24 24" aria-hidden="true" {
+                            circle cx="12" cy="12" r="4" {}
+                            path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" {}
+                        }
+                        svg .icon-moon viewBox="0 0 24 24" aria-hidden="true" {
+                            path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" {}
+                        }
+                    }
                 }
                 main { (body) }
                 script { (PreEscaped(LIVE_SCRIPT)) }
+                script { (PreEscaped(CHART_SCRIPT)) }
             }
         }
     }
+}
+
+/// Window preset row. `base` is the page path; the current preset is marked.
+fn window_filters(base: &str, current: Window) -> Markup {
+    html! {
+        nav .filters aria-label="time window" {
+            span .filters-label { "window" }
+            @for w in Window::ALL {
+                a .active[w == current] href={ (base) "?window=" (w.label()) } { (w.label()) }
+            }
+        }
+    }
+}
+
+/// `GET /ui/history` — status timeline, headline counts, one chart per metric.
+pub fn history_page(
+    history: &History,
+    summary: &FleetSummary,
+    window: Window,
+    subject: &str,
+) -> Markup {
+    let times: Vec<u64> = history.timeline.iter().map(|p| p.t).collect();
+    let uplinks: usize = history.devices.iter().map(|d| d.uplinks).sum();
+    // One column per device per metric, built once.
+    let columns: Vec<Vec<Vec<Option<f64>>>> = history
+        .devices
+        .iter()
+        .map(|d| {
+            (0..METRICS.len())
+                .map(|m| d.points.iter().map(|p| p.values[m]).collect())
+                .collect()
+        })
+        .collect();
+    layout(
+        "history",
+        subject,
+        Some(HISTORY_REFRESH_S),
+        html! {
+            (window_filters("/ui/history", window))
+            @if history.truncated {
+                p .banner { "row cap reached: the most recent part of this window is not shown — pick a shorter window" }
+            }
+            section .tiles {
+                (charts::stat_tile("active devices", &summary.active.to_string(), &format!("{} registered, {} inactive", summary.total, summary.inactive), ""))
+                (charts::stat_tile("fresh", &summary.fresh.to_string(), "heard from in the last 15 min", "fresh"))
+                (charts::stat_tile("stale", &summary.stale.to_string(), "quiet 15 min – 2 h", "stale"))
+                (charts::stat_tile("dark", &summary.dark.to_string(), "silent over 2 h", "dark"))
+                (charts::stat_tile("never", &summary.never.to_string(), "no uplink on record", ""))
+                (charts::stat_tile("uplinks", &uplinks.to_string(), &format!("in the last {}", window.label()), ""))
+            }
+            section .charts {
+                div .wide { (charts::status_chart("status", &history.timeline, window)) }
+                @for (m, metric) in METRICS.iter().enumerate() {
+                    @let series: Vec<Series<'_>> = history.devices.iter().enumerate().map(|(slot, d)| Series {
+                        label: &d.device_id,
+                        slot,
+                        values: &columns[slot][m],
+                    }).collect();
+                    div .wide[m == 0] { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, window)) }
+                }
+            }
+        },
+    )
+}
+
+/// What the device page needs beyond the record: its bucketed series,
+/// the window it covers, whether the row cap cut it, and its fleet colour.
+pub struct DeviceHistory<'a> {
+    /// Bucketed telemetry for the window.
+    pub series: &'a DeviceSeries,
+    /// Window shown.
+    pub window: Window,
+    /// Row cap hit.
+    pub truncated: bool,
+    /// Categorical colour slot (fleet order).
+    pub slot: usize,
 }
 
 /// `GET /ui` — fleet table plus the register form.
@@ -73,8 +272,9 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
     layout(
         "fleet",
         subject,
+        None,
         html! {
-            h2 { (rows.len()) " device(s)" }
+            h2 { (rows.len()) " device(s) · " a href="/ui/history" { "status over time" } }
             table {
                 thead {
                     tr {
@@ -113,22 +313,30 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str) -> Markup {
     )
 }
 
-/// `GET /ui/devices/{id}` — detail with uplink history and sparkline.
+/// `GET /ui/devices/{id}` — detail: metric charts over the window, then
+/// the most recent raw uplinks.
 pub fn device_page(
     device: &DeviceRecord,
+    history: &DeviceHistory<'_>,
     uplinks: &[UplinkRecord],
     csrf: &str,
     subject: &str,
 ) -> Markup {
-    let currents: Vec<i32> = uplinks
-        .iter()
-        .rev() // oldest → newest, left → right
-        .filter_map(|u| u.payload.get("current").and_then(|v| v.as_i64()))
-        .map(|v| v as i32)
+    let times: Vec<u64> = history.series.points.iter().map(|p| p.t).collect();
+    let columns: Vec<Vec<Option<f64>>> = (0..METRICS.len())
+        .map(|m| history.series.points.iter().map(|p| p.values[m]).collect())
         .collect();
+    let last = uplinks.first();
+    let fw = last
+        .and_then(|u| u.payload.get("fw"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("—")
+        .to_string();
+    let base = format!("/ui/devices/{}", device.device_id);
     layout(
         &device.device_id,
         subject,
+        Some(HISTORY_REFRESH_S),
         html! {
             h2 { (device.device_id) }
             dl .meta {
@@ -141,11 +349,22 @@ pub fn device_page(
                 dt { "registered" }
                 dd { (device.created_at) }
             }
-            @if currents.len() >= 2 {
-                h2 { "recent current readings" }
-                (sparkline(&currents))
+            (window_filters(&base, history.window))
+            @if history.truncated {
+                p .banner { "row cap reached: the most recent part of this window is not shown — pick a shorter window" }
             }
-            h2 { "uplinks" }
+            section .tiles {
+                (charts::stat_tile("uplinks", &history.series.uplinks.to_string(), &format!("in the last {}", history.window.label()), ""))
+                (charts::stat_tile("last uplink", last.map(|u| u.received_at.as_str()).unwrap_or("never"), "", ""))
+                (charts::stat_tile("firmware", &fw, "as last reported", ""))
+            }
+            section .charts {
+                @for (m, metric) in METRICS.iter().enumerate() {
+                    @let series = [Series { label: &device.device_id, slot: history.slot, values: &columns[m] }];
+                    div .wide[m == 0] { (charts::line_chart(metric.key, metric.label, metric.unit, &times, &series, history.window)) }
+                }
+            }
+            h2 { "recent uplinks" }
             @if uplinks.is_empty() {
                 p { "no uplinks recorded" }
             } @else {
@@ -177,36 +396,6 @@ fn status_form(device: &DeviceRecord, csrf: &str) -> Markup {
             input type="hidden" name="csrf" value=(csrf);
             input type="hidden" name="status" value=(next);
             button type="submit" { (verb) }
-        }
-    }
-}
-
-/// Inline-SVG sparkline: `<polyline>`, no charting dependency.
-fn sparkline(values: &[i32]) -> Markup {
-    const W: f64 = 240.0;
-    const H: f64 = 48.0;
-    const PAD: f64 = 4.0;
-    let min = *values.iter().min().unwrap_or(&0) as f64;
-    let max = *values.iter().max().unwrap_or(&1) as f64;
-    let span = if (max - min).abs() < f64::EPSILON {
-        1.0
-    } else {
-        max - min
-    };
-    let step = (W - 2.0 * PAD) / (values.len().saturating_sub(1).max(1)) as f64;
-    let points: String = values
-        .iter()
-        .enumerate()
-        .map(|(i, v)| {
-            let x = PAD + i as f64 * step;
-            let y = H - PAD - ((*v as f64 - min) / span) * (H - 2.0 * PAD);
-            format!("{x:.1},{y:.1}")
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    html! {
-        svg .sparkline width="240" height="48" viewBox={ "0 0 " (W) " " (H) } role="img" {
-            polyline points=(points) {}
         }
     }
 }

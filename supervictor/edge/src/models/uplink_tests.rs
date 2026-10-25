@@ -355,3 +355,86 @@ fn lambda_response_empty_fields() {
     assert!(resp.x_amzn_request_id.is_empty());
     assert!(resp.body.is_empty());
 }
+
+// ── Optional telemetry fields (wire contract, docs/TELEMETRY.md) ─────
+
+use crate::models::sim::{seed_from, Hardware, Simulator};
+
+/// Field names are the contract with `supervictor_common::fields`; a typo
+/// here would silently drop a column on the endpoint.
+const OPTIONAL_KEYS: [&str; 7] = [
+    "seq",
+    "uptime_s",
+    "interval_s",
+    "heap_free",
+    "rssi_dbm",
+    "temp_c",
+    "humidity_pct",
+];
+
+#[test]
+fn minimal_uplink_omits_every_optional_field() {
+    let msg = make_uplink("dev-1", 1);
+    let json: HString<256> = serde_json_core::to_string(&msg).unwrap();
+    for key in OPTIONAL_KEYS {
+        assert!(!json.contains(key), "{key} leaked into {json}");
+    }
+}
+
+#[test]
+fn full_uplink_serializes_every_field_by_its_wire_name() {
+    let mut sim = Simulator::new(seed_from("dev-1", 0));
+    let msg = sim.uplink("dev-1".try_into().unwrap(), 42, 5, Hardware::default());
+    let json: HString<256> = serde_json_core::to_string(&msg).unwrap();
+    for key in OPTIONAL_KEYS {
+        let mut quoted = HString::<32>::new();
+        quoted.push('"').unwrap();
+        quoted.push_str(key).unwrap();
+        quoted.push_str("\":").unwrap();
+        assert!(json.contains(quoted.as_str()), "{key} missing from {json}");
+    }
+    assert!(json.contains("\"uptime_s\":42,"));
+    assert!(json.contains("\"interval_s\":5,"));
+}
+
+#[test]
+fn full_uplink_round_trips_through_serde_json_core() {
+    let mut sim = Simulator::new(seed_from("dev-1", 1));
+    let msg = sim.uplink("dev-1".try_into().unwrap(), 7, 5, Hardware::default());
+    let json: HString<256> = serde_json_core::to_string(&msg).unwrap();
+    let (back, _): (UplinkMessage, _) = serde_json_core::from_str(json.as_str()).unwrap();
+    assert_eq!(back, msg);
+}
+
+/// The worst case — a 64-byte id, extreme values in every field — must fit
+/// the `post_request` JSON buffer (384) and the request buffer (512), or
+/// the firmware would silently stop uplinking after a rename. (It is 260
+/// bytes; the old 256 buffer was one field short.)
+#[test]
+fn full_uplink_with_max_id_fits_the_request_buffers() {
+    let id: HString<64> = core::iter::repeat_n('x', 64).collect();
+    let mut msg = UplinkMessage::new(id, i32::MIN);
+    msg.fw = "999.999.999".try_into().unwrap();
+    msg.seq = Some(u32::MAX);
+    msg.uptime_s = Some(u32::MAX);
+    msg.interval_s = Some(u32::MAX);
+    msg.heap_free = Some(u32::MAX);
+    msg.rssi_dbm = Some(i8::MIN);
+    msg.temp_c = Some(-99.999_99);
+    msg.humidity_pct = Some(100.000_01);
+    let json: HString<384> = serde_json_core::to_string(&msg).expect("fits 384");
+    assert!(json.len() <= 384, "{} bytes", json.len());
+    let request = crate::network::http::post_request("staging.supervictor.advin.io", &msg, None)
+        .expect("fits 512");
+    assert!(request.ends_with(json.as_str()));
+}
+
+/// Pre-telemetry endpoints ignore unknown keys; pre-telemetry firmware
+/// payloads still parse here (the field defaults are the rollback path).
+#[test]
+fn legacy_payload_parses_with_absent_optionals() {
+    let json = r#"{"id":"old","current":3,"fw":"0.0.1"}"#;
+    let (msg, _): (UplinkMessage, _) = serde_json_core::from_str(json).unwrap();
+    assert_eq!(msg.seq, None);
+    assert_eq!(msg.temp_c, None);
+}

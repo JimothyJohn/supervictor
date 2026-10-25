@@ -87,6 +87,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1);
     let rng = Rng::new();
     let net_seed = (rng.random() as u64) << 32 | rng.random() as u64;
+    let sim_seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
     // On Xtensa esp-rtos starts without a software interrupt; on riscv it
     // needs SoftwareInterrupt<0> for its scheduler.
@@ -182,7 +183,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     };
     tls.set_debug(TLS_DEBUG_LEVEL);
 
-    spawner.spawn(app(stack, tls, rwdt)).ok();
+    spawner.spawn(app(stack, tls, rwdt, sim_seed)).ok();
 
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;

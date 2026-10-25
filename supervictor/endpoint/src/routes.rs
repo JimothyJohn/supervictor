@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -20,15 +20,33 @@ use supervictor_common::routes as wire;
 pub struct AppState {
     /// Active persistence backend.
     pub store: Arc<dyn DeviceStore>,
+    /// Uplink admission policy (see [`RouterOptions`]).
+    pub require_registration: bool,
     /// Publisher for dashboard live updates; sends never block.
     #[cfg(feature = "ui")]
     pub events: crate::ui::sse::EventSender,
 }
 
-/// Build the axum [`Router`] with all API routes and tracing middleware.
+/// Runtime policy knobs the router needs beyond the store.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RouterOptions {
+    /// Reject uplinks from devices that are not registered, `active` and
+    /// cert-bound (`REQUIRE_REGISTRATION`). Binding of bound devices is
+    /// always enforced.
+    pub require_registration: bool,
+}
+
+/// Build the axum [`Router`] with default options (open ingest: unknown
+/// devices may uplink; registered-and-bound devices must match their cert).
 pub fn router(store: Arc<dyn DeviceStore>) -> Router {
+    router_with(store, RouterOptions::default())
+}
+
+/// Build the axum [`Router`] with all API routes and tracing middleware.
+pub fn router_with(store: Arc<dyn DeviceStore>, options: RouterOptions) -> Router {
     let state = AppState {
         store,
+        require_registration: options.require_registration,
         #[cfg(feature = "ui")]
         events: crate::ui::sse::channel(),
     };
@@ -37,6 +55,7 @@ pub fn router(store: Arc<dyn DeviceStore>) -> Router {
     let fleet_api = Router::new()
         .route(wire::FLEET, get(fleet_status))
         .route(wire::FLEET_SUMMARY, get(fleet_summary))
+        .route(wire::FLEET_HISTORY, get(fleet_history))
         .route_layer(axum::middleware::from_fn(crate::middleware::require_admin))
         .with_state(state.clone());
 
@@ -74,6 +93,27 @@ async fn fleet_summary(
     Ok(Json(crate::fleet::summarize(&devices)))
 }
 
+/// `?window=` for the history views; anything but a preset is rejected.
+#[derive(Debug, serde::Deserialize, Default)]
+pub struct HistoryQuery {
+    /// Preset token (`15m`, `1h`, `6h`, `24h`, `7d`); default `1h`.
+    #[serde(default)]
+    pub window: Option<String>,
+}
+
+async fn fleet_history(
+    State(state): State<AppState>,
+    Query(query): Query<HistoryQuery>,
+) -> Result<Json<crate::history::History>, crate::error::AppError> {
+    let window = crate::history::Window::parse(query.window.as_deref())?;
+    let now = crate::time::parse_rfc3339_unix(&crate::time::now_rfc3339()).unwrap_or(0);
+    Ok(Json(crate::history::fleet_history(
+        state.store.as_ref(),
+        window,
+        now,
+    )?))
+}
+
 async fn hello(ClientSubject(subject): ClientSubject) -> Json<HelloResponse> {
     Json(handlers::handle_hello(subject))
 }
@@ -88,7 +128,12 @@ async fn uplink(
     } else {
         Some(body.as_str())
     };
-    let resp = handlers::handle_uplink(body_opt, subject, Some(state.store.as_ref()), false)?;
+    let resp = handlers::handle_uplink(
+        body_opt,
+        subject,
+        Some(state.store.as_ref()),
+        state.require_registration,
+    )?;
 
     // Push to dashboard SSE subscribers; never blocks, no-op with no listeners.
     #[cfg(feature = "ui")]

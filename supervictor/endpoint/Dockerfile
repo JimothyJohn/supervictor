@@ -13,11 +13,9 @@ COPY supervictor/common ./supervictor/common
 COPY supervictor/endpoint/Cargo.toml supervictor/endpoint/Cargo.lock ./supervictor/endpoint/
 WORKDIR /app/supervictor/endpoint
 
-# Dependency caching: build with dummy src, then replace. The manifest also
-# declares the render_demo example (ui-gated, GitHub Pages only), and cargo
-# refuses to parse a manifest whose example path is missing — stub it and keep
-# the stub: the real file is never compiled here (no `ui` feature) and isn't
-# shipped in the image.
+# Dependency caching: build with dummy src, then replace. Cargo.toml declares
+# an [[example]] (render_demo), and cargo refuses to parse the manifest unless
+# the example file exists, so stub it too. Examples are never built here.
 RUN mkdir src examples && echo "fn main() {}" > src/main.rs && echo "" > src/lib.rs \
     && echo "fn main() {}" > examples/render_demo.rs \
     && cargo build --release --features sqlite,dynamo \

@@ -276,3 +276,7 @@ certs/
 .ruff_cache/
 !certs/AmazonRootCA1.pem
 .claude
+scratch/
+
+# Pi cross-build output (scratch/12-pi-edge.sh)
+target-pi/

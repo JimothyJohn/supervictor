@@ -151,11 +151,23 @@ Device tests use mock TCP servers with canned responses. Endpoint tests use in-m
 
 The endpoint runs anywhere Rust compiles:
 
+- **Any Linux box (the default path):** one static binary that terminates mTLS itself, a systemd unit, SQLite. No Docker, no reverse proxy, no toolchain on the host. See below.
 - **Local dev:** `docker compose up` (Caddy mTLS reverse proxy + SQLite)
-- **AWS Lambda:** SAM template with Lambda Web Adapter, arm64/Graviton, DynamoDB
+- **AWS Lambda:** SAM template with Lambda Web Adapter, arm64/Graviton, DynamoDB; API Gateway terminates mTLS via its truststore, ACM certificates, Route53 DNS.
 - **Any container platform:** Multi-stage Dockerfile, 30MB final image on Debian slim
 
-Production deployment includes mTLS enforcement via API Gateway truststore, ACM certificates, and Route53 DNS.
+### Single binary on a Linux server
+
+Releases ship static `aarch64` and `x86_64` musl builds with sha256 sums. On the target machine, as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JimothyJohn/supervictor/master/scripts/install-endpoint.sh \
+  | sudo bash -s -- v0.1.0            # downloads, verifies, installs binary + unit
+sudo cp server.pem server.key ca.pem /etc/supervictor/   # from ./Quickstart certs
+sudo systemctl start supervictor-endpoint
+```
+
+With `TLS_CERT`, `TLS_KEY` and `TLS_CLIENT_CA` set (the unit passes the PEMs in as systemd credentials), the binary listens on `:443`, requires a client certificate chaining to `ca.pem`, and takes each device's identity from the certificate it presented. Forwarded-subject headers are ignored in this mode. The unit runs as a dynamic user with `ProtectSystem=strict`, a syscall filter, and only `CAP_NET_BIND_SERVICE`; the database lives in `/var/lib/supervictor`. Re-run the installer with a newer tag to upgrade; `/etc/supervictor/env` is left alone.
 
 ## Tech Stack
 

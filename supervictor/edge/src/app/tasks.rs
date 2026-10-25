@@ -1,6 +1,5 @@
 use crate::config::*;
 use crate::models::sim::{seed_from, Hardware, Simulator};
-use crate::models::uplink::UplinkMessage;
 use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
 use embassy_net::tcp::TcpSocket;
@@ -62,10 +61,19 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }
 
-/// Main application loop: resolves DNS, establishes mTLS, and sends uplink telemetry.
+/// Device identity on the wire: `DEVICE_NAME` at build time (what the
+/// Quickstart flashes with), falling back to the historical bench id.
+pub const DEVICE_ID_ON_WIRE: &str = match option_env!("DEVICE_NAME") {
+    Some(name) => name,
+    None => "1234567890",
+};
+
+/// Main application loop: resolves DNS, establishes mTLS, and sends uplink
+/// telemetry. `seed` (hardware RNG) salts the telemetry simulator so two
+/// boots of the same board don't replay the same trace.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
-pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt) {
+pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt, seed: u64) {
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;
         if stack.is_link_up() {
@@ -86,16 +94,13 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt) {
     // at flash time (the onboard flow does this); .cargo/config.toml provides
     // the "factory-01" default. Length-checked at compile time against the
     // UplinkMessage id capacity so a long name can't panic on boot.
-    const _: () = assert!(env!("DEVICE_NAME").len() <= 64);
-    let mut uplink = UplinkMessage::new(env!("DEVICE_NAME").try_into().unwrap(), 100);
-    uplink.interval_s = Some(UPLINK_INTERVAL_S);
+    const _: () = assert!(DEVICE_ID_ON_WIRE.len() <= 64);
+    let device_id: heapless::String<64> = DEVICE_ID_ON_WIRE.try_into().unwrap_or_default();
 
     // Simulated readings until real sensors land (docs/TELEMETRY.md): a
-    // per-board personality from DEVICE_NAME, salted by the hardware RNG so
-    // two boots don't replay the same trace. Heap and uptime stay real.
-    let rng = esp_hal::rng::Rng::new();
-    let salt = (u64::from(rng.random()) << 32) | u64::from(rng.random());
-    let mut sim = Simulator::new(seed_from(env!("DEVICE_NAME"), salt));
+    // per-board personality from the device id, salted by the hardware RNG
+    // so two boots don't replay the same trace. Heap and uptime stay real.
+    let mut sim = Simulator::new(seed_from(device_id.as_str(), seed));
 
     // Uplink path from API_PATH at compile time: "/" against a custom domain
     // (base-path mapping supplies the stage), "/<stage>" against a raw
@@ -173,23 +178,19 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt) {
         backoff = BACKOFF_INITIAL;
 
         loop {
-            // Refresh health metadata for this ping; sensor fields come from
-            // the simulator (real heap wins over its simulated leak).
-            let heap_free = esp_alloc::HEAP.free() as u32;
-            let sample = sim.sample(Hardware {
-                heap_free: Some(heap_free),
+            let uptime_s = embassy_time::Instant::now()
+                .as_secs()
+                .min(u64::from(u32::MAX)) as u32;
+            let hardware = Hardware {
+                heap_free: Some(esp_alloc::HEAP.free().min(u32::MAX as usize) as u32),
                 rssi_dbm: None,
-            });
-            uplink.seq = Some(uplink.seq.map_or(1, |n| n.wrapping_add(1)));
-            uplink.uptime_s = Some(embassy_time::Instant::now().as_secs() as u32);
-            uplink.heap_free = Some(heap_free);
-            uplink.current = sample.current;
-            uplink.temp_c = Some(sample.temp_c);
-            uplink.humidity_pct = Some(sample.humidity_pct);
+            };
+            #[allow(unused_mut)]
+            let mut uplink = sim.uplink(device_id.clone(), uptime_s, UPLINK_INTERVAL_S, hardware);
             // RSSI is a WiFi notion; wired boards leave it off the wire.
-            #[cfg(feature = "wifi")]
+            #[cfg(not(feature = "wifi"))]
             {
-                uplink.rssi_dbm = Some(sample.rssi_dbm);
+                uplink.rssi_dbm = None;
             }
 
             let request = match post_request(HOST, &uplink, Some(API_PATH)) {

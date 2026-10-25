@@ -224,7 +224,7 @@ impl DeviceStore for DynamoDeviceStore {
                 .key_condition_expression("device_id = :did")
                 .expression_attribute_values(":did", AttributeValue::S(device_id.to_string()))
                 .scan_index_forward(false)
-                .limit(limit as i32)
+                .limit(query_limit(limit))
                 .send(),
         )
         .map_err(|e| AppError::Store(StoreError::io("get_uplinks", e)))?;
@@ -232,37 +232,93 @@ impl DeviceStore for DynamoDeviceStore {
         result
             .items()
             .iter()
-            .map(|item| {
-                let device_id = item
-                    .get("device_id")
-                    .and_then(|v| v.as_s().ok())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| {
-                        AppError::Store(StoreError::io("get_uplinks", "missing device_id"))
-                    })?;
-                let received_at = item
-                    .get("received_at")
-                    .and_then(|v| v.as_s().ok())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| {
-                        AppError::Store(StoreError::io("get_uplinks", "missing received_at"))
-                    })?;
-                let payload_str = item
-                    .get("payload")
-                    .and_then(|v| v.as_s().ok())
-                    .unwrap_or(&String::new())
-                    .to_string();
-                let payload: serde_json::Value =
-                    serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null);
-
-                Ok(UplinkRecord {
-                    device_id,
-                    received_at,
-                    payload,
-                })
-            })
+            .map(|item| item_to_uplink(item, "get_uplinks"))
             .collect()
     }
+
+    /// Range query on the sort key: `received_at >= :since`, ascending. One
+    /// page of up to `limit` items — a window bigger than one page is
+    /// reported truncated by the caller (`fleet::history`), not followed.
+    fn device_uplinks_since(
+        &self,
+        device_id: &str,
+        since: &str,
+        limit: usize,
+    ) -> Result<Vec<UplinkRecord>, AppError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let result = block_on(
+            self.client
+                .query()
+                .table_name(&self.messages_table)
+                .key_condition_expression("device_id = :did AND received_at >= :since")
+                .expression_attribute_values(":did", AttributeValue::S(device_id.to_string()))
+                .expression_attribute_values(":since", AttributeValue::S(since.to_string()))
+                .scan_index_forward(true)
+                .limit(query_limit(limit))
+                .send(),
+        )
+        .map_err(|e| AppError::Store(StoreError::io("device_uplinks_since", e)))?;
+
+        result
+            .items()
+            .iter()
+            .map(|item| item_to_uplink(item, "device_uplinks_since"))
+            .collect()
+    }
+
+    /// Per-device range queries merged by `received_at`, then cut to the
+    /// oldest `limit` rows overall — same contract as the SQLite query.
+    fn uplinks_since(&self, since: &str, limit: usize) -> Result<Vec<UplinkRecord>, AppError> {
+        let devices = self.list_devices()?;
+        let mut out = Vec::new();
+        for device in devices {
+            out.extend(self.device_uplinks_since(&device.device_id, since, limit)?);
+        }
+        out.sort_by(|a, b| {
+            a.received_at
+                .cmp(&b.received_at)
+                .then_with(|| a.device_id.cmp(&b.device_id))
+        });
+        out.truncate(limit);
+        Ok(out)
+    }
+}
+
+/// DynamoDB takes an i32 page limit; clamp instead of wrapping a huge usize
+/// into a negative (which the service rejects).
+fn query_limit(limit: usize) -> i32 {
+    i32::try_from(limit).unwrap_or(i32::MAX).max(1)
+}
+
+fn item_to_uplink(
+    item: &std::collections::HashMap<String, AttributeValue>,
+    op: &'static str,
+) -> Result<UplinkRecord, AppError> {
+    let device_id = item
+        .get("device_id")
+        .and_then(|v| v.as_s().ok())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AppError::Store(StoreError::io(op, "missing device_id")))?;
+    let received_at = item
+        .get("received_at")
+        .and_then(|v| v.as_s().ok())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AppError::Store(StoreError::io(op, "missing received_at")))?;
+    let payload_str = item
+        .get("payload")
+        .and_then(|v| v.as_s().ok())
+        .unwrap_or(&String::new())
+        .to_string();
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null);
+
+    Ok(UplinkRecord {
+        device_id,
+        received_at,
+        payload,
+    })
 }
 
 #[cfg(test)]

@@ -9,31 +9,56 @@ permissions:
   contents: write
 
 jobs:
-  # Endpoint server for the t4g.micro staging host (and any arm64 Linux box).
+  # Static musl binaries: run on any Linux box with no runtime deps
+  # (scripts/install-endpoint.sh consumes these). sqlite + ui + tls (the
+  # default feature set); the dynamo backend ships only in the Lambda image.
   build-endpoint:
-    runs-on: ubuntu-24.04-arm
+    name: Build endpoint (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+    env:
+      # cc-rs picks the C compiler for rusqlite's bundled SQLite and ring
+      # from these; musl-tools provides musl-gcc for the runner's own arch.
+      CC_aarch64_unknown_linux_musl: musl-gcc
+      CC_x86_64_unknown_linux_musl: musl-gcc
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
         with:
           toolchain: stable
+          targets: ${{ matrix.target }}
 
-      - name: Build endpoint
-        run: cargo build -p supervictor-endpoint --release --features sqlite,dynamo
+      - name: Install musl toolchain
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Build endpoint (static)
+        run: cargo build -p supervictor-endpoint --release --locked --target ${{ matrix.target }}
 
       - name: Package binary
         run: |
           mkdir -p dist
-          cp target/release/supervictor-endpoint dist/supervictor-endpoint
+          cp target/${{ matrix.target }}/release/supervictor-endpoint dist/supervictor-endpoint
+          strip dist/supervictor-endpoint
+          file dist/supervictor-endpoint
+          # The whole point: no dynamic loader, no libc on the target.
+          file dist/supervictor-endpoint | grep -Eq 'static(ally|-pie) linked' \
+            || { echo "::error::binary is not statically linked"; exit 1; }
           cd dist
-          tar czf supervictor-endpoint-aarch64-unknown-linux-gnu.tar.gz supervictor-endpoint
-          shasum -a 256 supervictor-endpoint-aarch64-unknown-linux-gnu.tar.gz \
-            > supervictor-endpoint-aarch64-unknown-linux-gnu.tar.gz.sha256
+          tar czf supervictor-endpoint-${{ matrix.target }}.tar.gz supervictor-endpoint
+          sha256sum supervictor-endpoint-${{ matrix.target }}.tar.gz \
+            > supervictor-endpoint-${{ matrix.target }}.tar.gz.sha256
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: supervictor-endpoint-aarch64-unknown-linux-gnu
+          name: supervictor-endpoint-${{ matrix.target }}
           path: dist/supervictor-endpoint-*.tar.gz*
 
   release:
@@ -41,11 +66,11 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             supervictor-endpoint-*.tar.gz

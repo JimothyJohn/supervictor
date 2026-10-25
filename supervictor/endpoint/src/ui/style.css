@@ -1,5 +1,8 @@
-/* Fleet dashboard — palette shared with docs/index.html */
+/* Fleet dashboard — palette shared with docs/index.html.
+   Dark is the default; light is the same tokens restated. The theme toggle
+   stamps data-theme on <html>; without a stamp the OS preference wins. */
 :root {
+  color-scheme: dark;
   --bg: #0e0e10;
   --surface: #18181b;
   --border: #27272a;
@@ -10,6 +13,36 @@
   --green: #22c55e;
   --blue: #3b82f6;
   --red: #ef4444;
+  /* Categorical slots: dark-surface steps of the validated reference
+     palette (dataviz skill), fixed order, assigned by fleet position. */
+  --s0: #3987e5; --s1: #d95926; --s2: #199e70; --s3: #c98500;
+  --s4: #d55181; --s5: #008300; --s6: #9085e9; --s7: #e66767;
+  --s-other: #71717a;
+}
+/* Light: validated against #ffffff — three slots sit under 3:1, which the
+   table twins and direct labels relieve. Declared twice on purpose: once
+   for the explicit toggle, once for the OS preference with no toggle. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f4f5; --surface: #ffffff; --border: #e4e4e7;
+  --text: #18181b; --muted: #52525b;
+  --accent: #c2410c; --accent-dim: #9a3412;
+  --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+  --s0: #2a78d6; --s1: #eb6834; --s2: #1baf7a; --s3: #eda100;
+  --s4: #e87ba4; --s5: #008300; --s6: #6250d6; --s7: #e34948;
+  --s-other: #71717a;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f4f4f5; --surface: #ffffff; --border: #e4e4e7;
+    --text: #18181b; --muted: #52525b;
+    --accent: #c2410c; --accent-dim: #9a3412;
+    --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+    --s0: #2a78d6; --s1: #eb6834; --s2: #1baf7a; --s3: #eda100;
+    --s4: #e87ba4; --s5: #008300; --s6: #6250d6; --s7: #e34948;
+    --s-other: #71717a;
+  }
 }
 * { box-sizing: border-box; }
 body {
@@ -20,14 +53,34 @@ body {
 }
 header {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 1rem;
+  gap: 0.5rem 1rem;
   padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--border);
 }
 header h1 { font-size: 1.1rem; margin: 0; }
 header h1 a { color: var(--accent); text-decoration: none; }
-header .subject { color: var(--muted); font-size: 0.8rem; margin-left: auto; }
+header .subject {
+  color: var(--muted); font-size: 0.8rem; margin-left: auto;
+  max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Sun/moon toggle: shows the icon of the theme you would switch TO. */
+#theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2rem; height: 2rem; padding: 0; border-radius: 999px;
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  cursor: pointer; align-self: center;
+}
+#theme-toggle:hover { border-color: var(--accent); color: var(--text); }
+#theme-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#theme-toggle .icon-moon { display: none; }
+:root[data-theme="light"] #theme-toggle .icon-moon { display: block; }
+:root[data-theme="light"] #theme-toggle .icon-sun { display: none; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) #theme-toggle .icon-moon { display: block; }
+  :root:not([data-theme="dark"]) #theme-toggle .icon-sun { display: none; }
+}
 main { padding: 1.5rem; max-width: 72rem; margin: 0 auto; }
 h2 { font-size: 1rem; color: var(--muted); }
 table { border-collapse: collapse; width: 100%; }
@@ -91,3 +144,107 @@ input[type="text"] {
   font-size: 0.75rem;
 }
 #live-dot.connected { color: var(--green); }
+
+/* ── history views ─────────────────────────────────────────────────── */
+header nav a { margin-right: 1rem; font-size: 0.85rem; text-decoration: none; }
+.filters { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0 0 1rem; }
+.filters-label { color: var(--muted); font-size: 0.75rem; margin-right: 0.25rem; }
+.filters a {
+  padding: 0.15rem 0.6rem; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); text-decoration: none; font-size: 0.8rem;
+}
+.filters a:hover { border-color: var(--accent); }
+.filters a.active { border-color: var(--accent); color: var(--accent); }
+.banner {
+  border: 1px solid var(--accent); color: var(--accent); border-radius: 4px;
+  padding: 0.5rem 0.75rem; font-size: 0.8rem; margin: 0 0 1rem;
+}
+.tiles {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem; margin-bottom: 1.25rem;
+}
+.tile {
+  display: flex; flex-direction: column; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.9rem; min-width: 0;
+}
+.tile-label { color: var(--muted); font-size: 0.75rem; }
+.tile-value { font-size: 1.5rem; line-height: 1.3; overflow-wrap: anywhere; }
+.tile-note { color: var(--muted); font-size: 0.72rem; }
+.tile.fresh .tile-value { color: var(--green); }
+.tile.stale .tile-value { color: var(--accent); }
+.tile.dark .tile-value { color: var(--red); }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; }
+.charts .wide { grid-column: 1 / -1; }
+figure.chart {
+  position: relative; margin: 0; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem 0.5rem; min-width: 0;
+}
+figure.chart figcaption { color: var(--text); font-size: 0.85rem; margin-bottom: 0.25rem; }
+figure.chart .unit { color: var(--muted); }
+figure.chart svg { width: 100%; height: auto; display: block; overflow: visible; outline: none; }
+figure.chart svg:focus-visible { outline: 1px solid var(--accent); outline-offset: 4px; }
+.grid { stroke: var(--border); stroke-width: 1; }
+.tick, .empty, .end-label { fill: var(--muted); font-size: 10px; font-family: inherit; }
+.end-label { fill: var(--text); }
+.empty { font-size: 12px; }
+.line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.s0 { stroke: var(--s0); fill: var(--s0); } .s1 { stroke: var(--s1); fill: var(--s1); }
+.s2 { stroke: var(--s2); fill: var(--s2); } .s3 { stroke: var(--s3); fill: var(--s3); }
+.s4 { stroke: var(--s4); fill: var(--s4); } .s5 { stroke: var(--s5); fill: var(--s5); }
+.s6 { stroke: var(--s6); fill: var(--s6); } .s7 { stroke: var(--s7); fill: var(--s7); }
+.s-other { stroke: var(--s-other); fill: var(--s-other); }
+.line { fill: none; }
+.dot { stroke: var(--surface); stroke-width: 2; }
+.seg.fresh { fill: var(--green); } .seg.stale { fill: var(--accent); }
+.seg.dark { fill: var(--red); } .seg.never { fill: var(--muted); }
+.crosshair { stroke: var(--muted); stroke-width: 1; visibility: hidden; pointer-events: none; }
+.crosshair.on { visibility: visible; }
+.legend {
+  list-style: none; display: flex; flex-wrap: wrap; gap: 0.25rem 1rem;
+  padding: 0; margin: 0.5rem 0 0; font-size: 0.75rem; color: var(--muted);
+}
+.key { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 0.4rem; vertical-align: -2px; }
+.key.line-key { width: 16px; height: 2px; vertical-align: 3px; border-radius: 1px; }
+.key.s0 { background: var(--s0); } .key.s1 { background: var(--s1); } .key.s2 { background: var(--s2); }
+.key.s3 { background: var(--s3); } .key.s4 { background: var(--s4); } .key.s5 { background: var(--s5); }
+.key.s6 { background: var(--s6); } .key.s7 { background: var(--s7); } .key.s-other { background: var(--s-other); }
+.key.fresh { background: var(--green); } .key.stale { background: var(--accent); }
+.key.dark { background: var(--red); } .key.never { background: var(--muted); }
+.tooltip {
+  position: absolute; z-index: 2; pointer-events: none; min-width: 11rem;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 0.4rem 0.6rem; font-size: 0.75rem;
+}
+.tip-time { color: var(--muted); margin-bottom: 0.25rem; }
+.tip-row { display: flex; gap: 0.4rem; align-items: center; white-space: nowrap; }
+.tip-row strong { color: var(--text); font-weight: 600; }
+.tip-label { color: var(--muted); }
+.table-view { margin-top: 0.5rem; font-size: 0.75rem; }
+.table-view summary { color: var(--muted); cursor: pointer; }
+.table-view table { display: block; max-height: 16rem; overflow: auto; margin-top: 0.25rem; font-variant-numeric: tabular-nums; }
+.table-view th, .table-view td { padding: 0.2rem 0.5rem; }
+
+/* ── phones ────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  body { font-size: 14px; }
+  header { padding: 0.75rem 1rem; }
+  header .subject { order: 9; flex-basis: 100%; margin-left: 0; max-width: 100%; }
+  main { padding: 1rem; }
+  h2 { font-size: 0.95rem; }
+  /* Tables scroll sideways instead of squeezing columns to one letter. */
+  main > table, main > section > table, dl.meta + table, table:not(.table-view table) { display: block; overflow-x: auto; max-width: 100%; }
+  th, td { padding: 0.4rem 0.5rem; white-space: nowrap; }
+  td code { white-space: pre; }
+  .filters a { padding: 0.4rem 0.75rem; font-size: 0.85rem; }
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0.5rem; }
+  .tile { padding: 0.5rem 0.7rem; }
+  .tile-value { font-size: 1.2rem; }
+  .charts { grid-template-columns: 1fr; }
+  /* A 640-unit SVG shrunk to a phone makes 10px labels 5px: keep the
+     chart at a legible scale and let it pan sideways. */
+  figure.chart { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0.6rem 0.6rem 0.4rem; }
+  figure.chart svg { min-width: 560px; }
+  .tooltip { min-width: 9rem; font-size: 0.72rem; }
+  fieldset form { display: grid; gap: 0.5rem; }
+  input[type="text"] { width: 100%; margin: 0; }
+}

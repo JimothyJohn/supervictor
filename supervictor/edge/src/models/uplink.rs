@@ -7,13 +7,14 @@ pub const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Telemetry payload sent from the device to the cloud API.
 ///
-/// no_std twin of `supervictor_common::models::UplinkMessage` — keep the two
-/// in lockstep. Optional fields are omitted from the wire when `None`, so a
-/// build that never fills them serializes exactly like pre-telemetry
-/// firmware. Units live in the field names; full schema: `docs/TELEMETRY.md`.
+/// `no_std` twin of `supervictor_common::models::UplinkMessage`; the field
+/// names are the wire contract (`docs/TELEMETRY.md`) and must match the
+/// constants in `supervictor/common/src/fields.rs`. Everything past
+/// `id`/`current` is optional and left off the wire when `None`, so old
+/// firmware and new endpoints (and vice versa) stay compatible.
 /// Worst-case serialized size must fit the JSON buffer in
 /// `network/http.rs::post_request` — see `uplink_tests::uplink_worst_case_fits_json_buffer`.
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct UplinkMessage {
     /// Unique identifier for this device or message.
     pub id: HString<64>,
@@ -24,24 +25,24 @@ pub struct UplinkMessage {
     #[serde(default)]
     pub fw: HString<16>,
 
-    // --- Device health metadata (filled by the uplink loop every ping) ---
+    // --- Device health metadata ---
     /// Uplink counter since boot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u32>,
     /// Seconds since boot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uptime_s: Option<u32>,
-    /// Configured uplink period in seconds (t; user-facing frequency is 1/t).
+    /// Configured uplink period in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_s: Option<u32>,
-    /// Free heap in bytes — leak canary.
+    /// Free heap in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heap_free: Option<u32>,
-    /// WiFi RSSI in dBm; `None` on wired Ethernet uplinks.
+    /// WiFi RSSI in dBm; absent on wired Ethernet uplinks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rssi_dbm: Option<i8>,
 
-    // --- Environmental placeholders (`None` until sensors land) ---
+    // --- Environmental readings ---
     /// Ambient temperature in °C.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temp_c: Option<f32>,
@@ -60,9 +61,8 @@ pub struct UplinkMessage {
 }
 
 impl UplinkMessage {
-    /// Build an uplink stamped with this build's firmware version.
-    /// Health metadata and sensor fields start `None`; the uplink loop
-    /// fills the health fields before each send.
+    /// Build a minimal uplink stamped with this build's firmware version;
+    /// every optional field is absent.
     pub fn new(id: HString<64>, current: i32) -> Self {
         Self {
             id,

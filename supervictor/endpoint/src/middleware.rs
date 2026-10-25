@@ -2,31 +2,38 @@ use std::convert::Infallible;
 
 use axum::extract::{FromRequestParts, Request};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{Extensions, HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 /// Extract mTLS client certificate subject DN from request headers.
 ///
-/// Checks (in order):
-/// 1. x-amzn-request-context header (Lambda Web Adapter / API Gateway)
-/// 2. x-ssl-client-subject-dn header (nginx/Caddy reverse proxy)
-/// 3. None (local dev, no mTLS)
+/// Trust order:
+/// 1. `x-amzn-request-context` (Lambda Web Adapter / API Gateway). The adapter
+///    sets this header on every request and overwrites whatever the client
+///    sent, so its presence proves we are behind the adapter and its contents
+///    are the gateway's, not the caller's. When it is present it is the ONLY
+///    source: a missing `identity.clientCert` means "no client certificate",
+///    not "ask another header" — behind API Gateway nothing trustworthy sets
+///    `x-ssl-client-subject-dn`, so falling through would let any caller
+///    choose its own identity (observed on dev and prod, 2026-10-24).
+/// 2. `x-ssl-client-subject-dn` (reverse proxy / ingress convention), only
+///    when no adapter header is present. The proxy in front must strip it
+///    from incoming requests; this binary cannot tell.
 pub fn extract_client_subject(headers: &HeaderMap) -> Option<String> {
-    // Lambda Web Adapter passes API Gateway requestContext as a header
+    // Lambda Web Adapter passes API Gateway requestContext as a header. Its
+    // presence is authoritative: no fallback to client-controllable headers.
     if let Some(ctx_header) = headers.get("x-amzn-request-context") {
-        if let Ok(ctx_str) = ctx_header.to_str() {
-            if let Ok(ctx) = serde_json::from_str::<serde_json::Value>(ctx_str) {
-                if let Some(subject) = ctx
-                    .get("identity")
-                    .and_then(|id| id.get("clientCert"))
-                    .and_then(|cert| cert.get("subjectDN"))
-                    .and_then(|s| s.as_str())
-                {
-                    return Some(subject.to_string());
-                }
-            }
-        }
+        return ctx_header
+            .to_str()
+            .ok()
+            .and_then(|ctx_str| serde_json::from_str::<serde_json::Value>(ctx_str).ok())
+            .as_ref()
+            .and_then(|ctx| ctx.get("identity"))
+            .and_then(|id| id.get("clientCert"))
+            .and_then(|cert| cert.get("subjectDN"))
+            .and_then(|s| s.as_str())
+            .map(str::to_string);
     }
 
     // Reverse proxy / ingress controller convention
@@ -37,6 +44,26 @@ pub fn extract_client_subject(headers: &HeaderMap) -> Option<String> {
     }
 
     None
+}
+
+/// The request's authenticated client identity.
+///
+/// When this binary terminated TLS itself (feature `tls`, `TLS_*` set), the
+/// identity is the verified peer certificate's subject carried in
+/// `ConnectInfo<TlsPeer>` — and forwarded headers are ignored, whatever they
+/// say: nothing upstream vouched for them. Otherwise (API Gateway / Caddy in
+/// front) it is whatever the trusted proxy forwarded, per
+/// [`extract_client_subject`].
+pub fn client_identity(extensions: &Extensions, headers: &HeaderMap) -> Option<String> {
+    #[cfg(feature = "tls")]
+    if let Some(axum::extract::ConnectInfo(peer)) =
+        extensions.get::<axum::extract::ConnectInfo<crate::tls::TlsPeer>>()
+    {
+        return peer.subject.clone();
+    }
+    #[cfg(not(feature = "tls"))]
+    let _ = extensions;
+    extract_client_subject(headers)
 }
 
 /// True when the DN has an `OU=admin` component. Component-wise parse, not a
@@ -50,10 +77,38 @@ pub fn is_admin_subject(dn: &str) -> bool {
     })
 }
 
+/// True when two subject DNs name the same certificate subject.
+///
+/// Component-wise: split on `,`, trim, upper-case the attribute type, sort.
+/// The same certificate is rendered differently by API Gateway, Caddy and
+/// `openssl -nameopt RFC2253` (spacing, component order), so byte equality
+/// would reject legitimate devices. Anything looser than this — case-folding
+/// values, collapsing escapes — risks admitting a subject the CA never
+/// issued, so it is deliberately not done. An empty DN matches nothing,
+/// including another empty DN: a bound device with a blank record fails
+/// closed rather than open.
+pub fn dn_matches(a: &str, b: &str) -> bool {
+    fn canonical(dn: &str) -> Vec<(String, String)> {
+        let mut parts: Vec<(String, String)> = dn
+            .split(',')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(|c| {
+                let (key, value) = c.split_once('=').unwrap_or((c, ""));
+                (key.trim().to_ascii_uppercase(), value.trim().to_string())
+            })
+            .collect();
+        parts.sort();
+        parts
+    }
+    let (ca, cb) = (canonical(a), canonical(b));
+    !ca.is_empty() && ca == cb
+}
+
 /// Route-layer gate: 403 unless the forwarded mTLS subject is an admin.
 /// Shared by the dashboard (`/ui/*`) and the fleet JSON API (`/fleet*`).
 pub async fn require_admin(request: Request, next: Next) -> Response {
-    match extract_client_subject(request.headers()) {
+    match client_identity(request.extensions(), request.headers()) {
         Some(subject) if is_admin_subject(&subject) => next.run(request).await,
         Some(subject) => {
             tracing::warn!(
@@ -87,6 +142,9 @@ where
     type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        Ok(ClientSubject(extract_client_subject(&parts.headers)))
+        Ok(ClientSubject(client_identity(
+            &parts.extensions,
+            &parts.headers,
+        )))
     }
 }

@@ -33,6 +33,14 @@ pub enum AppError {
     /// Device exists but is not registered or not in active status.
     DeviceNotRegistered,
 
+    /// The mTLS client subject does not match the device's registered
+    /// `subject_dn` (or no client certificate was presented for a bound
+    /// device). The expected DN is never echoed back.
+    SubjectMismatch {
+        /// Device whose identity the request claimed.
+        device_id: String,
+    },
+
     /// Storage backend error (SQLite or DynamoDB), classified.
     Store(crate::store::StoreError),
 
@@ -53,6 +61,9 @@ impl core::fmt::Display for AppError {
             }
             AppError::DeviceNotFound { device_id } => write!(f, "device not found: {device_id}"),
             AppError::DeviceNotRegistered => f.write_str("device not registered or inactive"),
+            AppError::SubjectMismatch { device_id } => {
+                write!(f, "client certificate does not match device: {device_id}")
+            }
             AppError::Store(msg) => write!(f, "store error: {msg}"),
             AppError::Config(msg) => write!(f, "config error: {msg}"),
         }
@@ -100,6 +111,13 @@ impl IntoResponse for AppError {
                 StatusCode::FORBIDDEN,
                 ErrorResponse {
                     error: "Device not registered or inactive".into(),
+                    detail: None,
+                },
+            ),
+            AppError::SubjectMismatch { .. } => (
+                StatusCode::FORBIDDEN,
+                ErrorResponse {
+                    error: "Client certificate does not match device".into(),
                     detail: None,
                 },
             ),
