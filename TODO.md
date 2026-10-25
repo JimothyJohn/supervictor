@@ -223,3 +223,12 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
 - 2026-10-25: board inventory for the rack — how many ESP32-POE2 vs
   ESP32-POE-ISO, and are any POE-ISO the WROVER variant (PSRAM → RMII clock on
   GPIO0 like the POE2; needs its own feature or a PSRAM flag)?
+- [ ] **Which local-preview path failed on the new phone UI?** — PR 96 (phone glance layer) is on dev. The mobile-UI session left a Quickstart stack running in `../supervictor-mobile` (endpoint :8443 with a multi-name server cert, extruder sim, `.logs/`), a demo http server on :8000 serving `scratch/demo` + `supervictor-ca.pem`, and `scratch/01-trust-fleet-ca.sh` for the Studio's keychain. Nick said "not working" without saying which step: Studio browser (CA trust not yet run; server cert verified by curl on every address), the phone's CA profile / full-trust toggle, the phone identity (.p12 from 2026-10-24), or the phone being on 10.0.0.x rather than 192.168.3.x. Full state in that worktree's `.claude/handoff.md`.
+      needs: the exact symptom (which URL, which device, what error text)
+      result: a working preview path written into scripts/ or the README, and the stack torn down
+      options: Studio browser | phone CA trust | phone identity | network | something else
+      est: 1h
+      difficulty: low
+      id: mobile-preview-failed
+      asked: 2026-10-25
+      by: mobile-UI session (feat/ui-mobile-glance)
