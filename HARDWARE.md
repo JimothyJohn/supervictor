@@ -224,7 +224,7 @@ per-chip reference voltage varies. Consequences for this kit:
 |----------|-------|---------|
 | ADC floor | 150 mV → **≈1.06 A** | Below about 1 A the reading is noise-shaped, not zero |
 | ADC linear top | 2450 mV → **≈17.3 A** | Above it readings compress; 20 A is not reachable linearly |
-| `current` register full scale | 6000 mA → 849 mV | Comfortably inside the linear window |
+| `current` register full scale | 20 000 mA → 2.83 V (level 255) | Decided 2026-10-25: matches the probe; levels above ~17 A are compressed by the ADC, step 78.7 mA |
 | `POWER_THRESHOLD_MA` default | 100 mA → 14 mV | **Unreadable** with this sensor; see section 11 |
 | 12-bit count at 11 dB | ≈0.8 mV ≈ **5.4 mA** | Resolution is not the problem, accuracy is |
 | Stack accuracy | ±1 % probe, ±4 % module, ADC gain error | Budget ±5–6 % of reading after a one-point calibration |
@@ -352,19 +352,17 @@ dark fleet row maps to a cable.
 
 ## 11. Open decisions for Nick
 
-- **`current` register full scale (6 A) vs the 20 A probe.** With the
-  SEN0211 the linear window is ≈1–17 A. Either raise the register to 20 A
-  (step 78 mA; changes the stored-burst scale, do it before real bursts
-  ship) or swap the probe for the 5 A SEN0287 on the same module for
-  small loads. The 60 A sim profiles will pin at 255 either way.
+- ~~`current` register full scale~~ **Decided 2026-10-25: 20 A** (step
+  78.7 mA; `supervictor/common/src/levels.rs`, its own PR). The 60 A sim
+  profiles still pin at 255; the floor of ~1 A is level 14.
 - **`POWER_THRESHOLD_MA`.** 100 mA is below the sensor floor. Proposal:
   default 1000 mA for kit devices, settable per device
   (`power_threshold_ma` already exists on the device record).
 - **Where calibration lives.** Compile-time `CURRENT_GAIN_PPM` (simple,
   matches how everything else is baked) vs NVS (survives OTA). Compile-time
   for v0 is my pick.
-- **Buy the SHT40 now or keep `temp_c` simulated until after OTA?** Six
-  dollars; I would order it now so the `sim` feature flip happens once.
+- ~~Buy the SHT40 now?~~ **Decided 2026-10-25: ordering the SHT41 (Adafruit
+  5776) and cable from Adafruit.**
 
 ## 12. Later, deliberately not now
 

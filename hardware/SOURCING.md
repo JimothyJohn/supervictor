@@ -57,7 +57,7 @@ Notes that change what you buy:
 - **Olimex direct is cheapest at 10+ but ships from Bulgaria** (a week or two plus customs). For one or two boards, Mouser or DigiKey. For a 25-board order, Olimex direct and put the IDC ribbon cables in the same box.
 - **Industrial-temperature POE-ISO (-IND) is thin at both US distributors.** If the deployment is outdoors or unheated, order it from Olimex direct early.
 - **DFRobot direct** was verified in stock but its warehouse is not stated; expect international shipping. DigiKey carries the 20 A kit in the US.
-- **No probe-only SKU.** The 5 A and 20 A kits are the same price and each includes module, probe and cable. Buy the 5 A kit only if the `current` register stays at 6 A full scale (`HARDWARE.md` §11).
+- **No probe-only SKU.** The 5 A and 20 A kits are the same price and each includes module, probe and cable. With the register at 20 A (decided 2026-10-25) the 20 A kit is the one to standardise on; the 5 A kit is only for sub-amp loads.
 - **Clamp meter.** If a true-RMS clamp meter is already on the bench, skip the Fluke. With the splitter's 10× loop any 400 A meter resolves 1 A loads.
 
 **Cart for one kit from what is missing today:** Adafruit 5776 + 4397 (+ 266 if the jumper pack is gone) ≈ $11 plus shipping; Klein 69409 ≈ $20 from a local Lowe's. Nothing else needs buying for the bench kit.

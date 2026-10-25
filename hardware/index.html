@@ -99,7 +99,7 @@
     <div class="card">
       <h3>Decide <span class="tag you">blocks firmware</span></h3>
       <ul class="check">
-        <li><div class="box"></div><div><b>Current register full scale: keep 6 A or go to 20 A?</b><span class="meta">The 20 A probe is linear to ~17 A on the ESP32 ADC; 6 A pins at 255 above 6 A. Decide before real bursts are stored. HARDWARE.md §11</span></div></li>
+        <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>Current register full scale → 20 A <span class="tag have">decided</span></b><span class="meta">2026-10-25. Step 78.7 mA; the ~1 A floor is level 14; above ~17 A the ADC compresses. Lands in levels.rs on its own PR.</span></div></li>
         <li><div class="box"></div><div><b>Power threshold for kit devices: 1000 mA?</b><span class="meta">The endpoint default of 100 mA is below the clamp's ~1 A floor. Per-device field already exists.</span></div></li>
         <li><div class="box"></div><div><b>Calibration gain: compile-time env or NVS?</b><span class="meta">Compile-time matches how everything else is baked; NVS survives OTA. Pick one.</span></div></li>
         <li><div class="box"></div><div><b>Which scope to RFQ: hat (B) only, or hat + integrated node (C)?</b><span class="meta">Recommendation is B now, C at 25+ units. SOURCING.md §1</span></div></li>
@@ -108,8 +108,8 @@
     <div class="card">
       <h3>Buy <span class="tag buy">~$30 + optional meter</span></h3>
       <ul class="check">
-        <li><div class="box"></div><div><b>Adafruit 5776 SHT41 STEMMA QT, $5.95</b><span class="meta">SHT40 (4885) is out of stock; same address 0x44, same driver.</span></div></li>
-        <li><div class="box"></div><div><b>Adafruit 4397 JST SH → female sockets, $0.95</b><span class="meta">Plugs the SHT41 straight onto the UEXT pins.</span></div></li>
+        <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>Adafruit 5776 SHT41 STEMMA QT, $5.95 <span class="tag have">ordering</span></b><span class="meta">SHT40 (4885) is out of stock; same address 0x44, same driver.</span></div></li>
+        <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>Adafruit 4397 JST SH → female sockets, $0.95 <span class="tag have">ordering</span></b><span class="meta">Plugs the SHT41 straight onto the UEXT pins.</span></div></li>
         <li><div class="box"></div><div><b>Klein 69409 line splitter, $19.99 at Lowe's</b><span class="meta">Only if the test machine is on a cord. Extech 480172 is the alternate.</span></div></li>
         <li><div class="box"></div><div><b>True-RMS clamp meter if none on the bench</b><span class="meta">Fluke 323 $207.99 or Klein CL390 ~$100. The calibration reference.</span></div></li>
         <li><div class="box"></div><div><b>For the hat build: nothing yet</b><span class="meta">Turnkey assembly sources the 22 parts; the vendor quote comes first.</span></div></li>
@@ -296,7 +296,7 @@
       <table>
         <tr><th>Point</th><th class="num">Volts</th><th class="num">Amps</th><th>Meaning</th></tr>
         <tr><td>ADC floor (11 dB)</td><td class="num">150 mV</td><td class="num">1.06 A</td><td>below this: noise, report 0</td></tr>
-        <tr><td>Register full scale</td><td class="num">849 mV</td><td class="num">6.0 A</td><td>current <code>levels</code> byte pins here</td></tr>
+        <tr><td>Register full scale (20 A, decided)</td><td class="num">2.83 V</td><td class="num">20 A</td><td>level 255; 78.7 mA per step; ~1 A floor = level 14</td></tr>
         <tr><td>ADC linear top</td><td class="num">2450 mV</td><td class="num">17.3 A</td><td>compresses above</td></tr>
         <tr><td>Module max out</td><td class="num">2.8 V</td><td class="num">19.8 A</td><td>probe range end</td></tr>
         <tr><td>Hold decay</td><td class="num">τ = 10 s</td><td class="num">—</td><td>~30 s to read 0 after switch-off</td></tr>
