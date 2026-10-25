@@ -1,4 +1,5 @@
 use crate::config::*;
+use crate::models::profile::Profile;
 use crate::models::sim::{seed_from, Hardware, Simulator};
 use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
@@ -68,6 +69,39 @@ pub const DEVICE_ID_ON_WIRE: &str = match option_env!("DEVICE_NAME") {
     None => "1234567890",
 };
 
+/// Machine the telemetry simulator impersonates: `SIM_PROFILE` at build time
+/// (see `models::profile::Profile::parse` for the names), default the bench
+/// trace. An unknown name is a compile error, not a silent fallback.
+pub const SIM_PROFILE: Profile = match option_env!("SIM_PROFILE") {
+    None => Profile::Generic,
+    Some(name) => match Profile::parse(name) {
+        Some(profile) => profile,
+        None => panic!("SIM_PROFILE is not a known machine profile"),
+    },
+};
+
+/// Simulated seconds per real second for the machine model (`SIM_SPEED` at
+/// build time, default 1): a compressed working day for demos.
+pub const SIM_SPEED: u32 = match option_env!("SIM_SPEED") {
+    None => 1,
+    Some(s) => parse_u32(s),
+};
+
+/// Decimal `u32` parser usable in a `const`; rejects anything else at build time.
+const fn parse_u32(s: &str) -> u32 {
+    let bytes = s.as_bytes();
+    assert!(!bytes.is_empty(), "SIM_SPEED must be a positive integer");
+    let mut n: u32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let d = bytes[i];
+        assert!(d.is_ascii_digit(), "SIM_SPEED must be a positive integer");
+        n = n * 10 + (d - b'0') as u32;
+        i += 1;
+    }
+    n
+}
+
 /// Main application loop: resolves DNS, establishes mTLS, and sends uplink
 /// telemetry. `seed` (hardware RNG) salts the telemetry simulator so two
 /// boots of the same board don't replay the same trace.
@@ -100,7 +134,14 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt, seed:
     // Simulated readings until real sensors land (docs/TELEMETRY.md): a
     // per-board personality from the device id, salted by the hardware RNG
     // so two boots don't replay the same trace. Heap and uptime stay real.
-    let mut sim = Simulator::new(seed_from(device_id.as_str(), seed));
+    // SIM_PROFILE makes the board act like a machine (models/profile.rs).
+    let mut sim = Simulator::with_profile(seed_from(device_id.as_str(), seed), SIM_PROFILE);
+    sim.set_time_scale(SIM_SPEED);
+    println!(
+        "Telemetry profile: {} (x{} time)",
+        SIM_PROFILE.name(),
+        SIM_SPEED
+    );
 
     // Uplink path from API_PATH at compile time: "/" against a custom domain
     // (base-path mapping supplies the stage), "/<stage>" against a raw

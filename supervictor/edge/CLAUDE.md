@@ -55,6 +55,17 @@ no-reset-no-sync` to attach without rebooting the running firmware.
 - Use `serde-json-core` for JSON serialization (not `serde_json`)
 - Buffer sizes and capacities are defined in `src/config.rs` — check before changing message formats
 
+## Telemetry simulator
+- `src/models/sim.rs` fills the uplink; `src/models/profile.rs` makes it act
+  like a machine (`Profile::parse` lists the names). Integer-only, seeded,
+  stepped one simulated second at a time; tests run a full day per profile.
+- `SIM_PROFILE` / `SIM_SPEED`: compile-time (`option_env!`) for the firmware,
+  runtime env for `supervictor-desktop`. Unknown profile = compile error.
+- Fleet of containers: `docker-compose.sim.yml` + `Dockerfile.desktop`
+  (context = repo root, so edge/.cargo and the nightly toolchain file don't
+  apply); `../../scripts/sim-fleet.sh up staging` issues certs, registers,
+  starts; `down` stops the containers (they restart with Docker otherwise).
+
 ## Key Patterns
 - **Async runtime**: Embassy — use `embassy_time::Timer`, never `std::thread::sleep`
 - **TLS**: `mbedtls-rs` (embedded), `rustls` (desktop)

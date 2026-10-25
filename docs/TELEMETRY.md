@@ -52,6 +52,20 @@ Design rules:
 > `humidity_pct` on every ping. Until real sensors land the environmental
 > values (and RSSI) come from `supervictor/edge/src/models/sim.rs`, a
 > seeded simulator; `heap_free` and `uptime_s` are real on the ESP32.
+>
+> With a **machine profile** (`SIM_PROFILE`; `supervictor/edge/src/models/profile.rs`)
+> the simulator impersonates plant equipment instead of the bench trace:
+> `extruder`, `press-brake`, `cnc`, `saw`, `oven`, `compressor`, `conveyor`,
+> `molder`, `welder`, `pump`. `current` is then the one-leg supply current
+> in mA averaged over the uplink interval (tens of amps; motor inrush up to
+> 6× rated for one second), following that machine's duty cycle on top of a
+> working day of runs, breaks and shutdowns (shutdown = 0 mA, so the power
+> state flips). `temp_c` becomes the machine's probe: barrel/oven
+> temperature for the heated profiles (up to 400 °C), motor housing
+> otherwise. Firmware takes `SIM_PROFILE` / `SIM_SPEED` at build time (an
+> unknown name fails the build); the desktop client at runtime.
+> `supervictor/edge/docker-compose.sim.yml` runs one container per profile
+> (`./scripts/sim-fleet.sh up staging`).
 
 ### Device health (optional; firmware fills these every ping)
 
