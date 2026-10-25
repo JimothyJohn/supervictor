@@ -172,6 +172,15 @@ async fn history_defaults_to_one_hour_and_buckets_every_device() {
     assert_eq!(silent["uplinks"], 0);
     assert!(silent["points"][0]["current"].is_null());
 
+    assert_eq!(h["threshold_ma"], 100);
+    let power = h["power"].as_array().unwrap();
+    assert_eq!(power.len(), BUCKETS);
+    let p = &power[BUCKETS - 1];
+    assert_eq!(p["on"], 1, "a-dev mean 200 mA >= 100: {p}");
+    assert_eq!(p["off"], 0, "{p}");
+    assert_eq!(p["unknown"], 1, "b-dev never reported: {p}");
+    assert_eq!(power[0]["unknown"], 2, "nobody had reported an hour ago");
+
     let timeline = h["timeline"].as_array().unwrap();
     assert_eq!(timeline.len(), BUCKETS);
     let end = &timeline[BUCKETS - 1];

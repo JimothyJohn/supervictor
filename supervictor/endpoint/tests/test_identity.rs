@@ -397,6 +397,7 @@ async fn http_require_registration_option() {
         store,
         RouterOptions {
             require_registration: true,
+            ..RouterOptions::default()
         },
     ));
     server

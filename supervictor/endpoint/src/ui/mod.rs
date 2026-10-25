@@ -125,27 +125,32 @@ fn csrf_ok(headers: &HeaderMap, submitted: &str) -> bool {
 // ── Page handlers ─────────────────────────────────────────────────────
 
 /// Assemble fleet rows for the HTML table from a fleet snapshot.
-pub fn fleet_rows(store: &dyn DeviceStore) -> Result<Vec<FleetRow>, AppError> {
+pub fn fleet_rows(store: &dyn DeviceStore, threshold_ma: i64) -> Result<Vec<FleetRow>, AppError> {
     // Re-fetch devices for full records; snapshot carries the health fields.
     let devices = store.list_devices()?;
-    let health = fleet::snapshot_now(store)?;
-    let by_id: std::collections::HashMap<String, (Option<String>, fleet::Staleness)> = health
+    let health = fleet::snapshot_now(store, threshold_ma)?;
+    let by_id: std::collections::HashMap<String, fleet::FleetDevice> = health
         .into_iter()
-        .map(|d| (d.device_id, (d.last_uplink, d.staleness)))
+        .map(|d| (d.device_id.clone(), d))
         .collect();
 
     Ok(devices
         .into_iter()
-        .map(|device| {
-            let (last_uplink, staleness) = by_id
-                .get(&device.device_id)
-                .cloned()
-                .unwrap_or((None, fleet::Staleness::Unknown));
-            FleetRow {
+        .map(|device| match by_id.get(&device.device_id) {
+            Some(h) => FleetRow {
+                last_uplink: h.last_uplink.clone(),
+                staleness: h.staleness,
+                current: h.current,
+                power: h.power,
                 device,
-                last_uplink,
-                staleness,
-            }
+            },
+            None => FleetRow {
+                device,
+                last_uplink: None,
+                staleness: fleet::Staleness::Unknown,
+                current: None,
+                power: fleet::PowerState::Unknown,
+            },
         })
         .collect())
 }
@@ -155,7 +160,7 @@ fn subject_of(headers: &HeaderMap) -> String {
 }
 
 async fn fleet(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, AppError> {
-    let rows = fleet_rows(state.store.as_ref())?;
+    let rows = fleet_rows(state.store.as_ref(), state.power_threshold_ma)?;
     let (token, set_cookie) = ensure_csrf(&headers);
     let page = views::fleet_page(&rows, &token, &subject_of(&headers));
     Ok(match set_cookie {
@@ -177,8 +182,8 @@ async fn history_view(
     let window = Window::parse(query.window.as_deref())?;
     let store = state.store.as_ref();
     let now = now_unix();
-    let history = history::fleet_history(store, window, now)?;
-    let summary = fleet::summarize(&fleet::snapshot(store, now)?);
+    let history = history::fleet_history(store, window, now, state.power_threshold_ma)?;
+    let summary = fleet::summarize(&fleet::snapshot(store, now, state.power_threshold_ma)?);
     let page = views::history_page(&history, &summary, window, &subject_of(&headers));
     Ok(page.into_response())
 }
@@ -207,8 +212,15 @@ async fn device_detail(
         .collect();
     ids.sort();
     let slot = ids.iter().position(|id| *id == device_id).unwrap_or(0);
+    let now = now_unix();
     let (series, truncated) =
-        history::device_history(state.store.as_ref(), &device_id, window, now_unix())?;
+        history::device_history(state.store.as_ref(), &device_id, window, now)?;
+    let health = fleet::snapshot(state.store.as_ref(), now, state.power_threshold_ma)?
+        .into_iter()
+        .find(|d| d.device_id == device_id);
+    let (power, current) = health
+        .map(|h| (h.power, h.current))
+        .unwrap_or((fleet::PowerState::Unknown, None));
     let uplinks = state.store.get_uplinks(&device_id, 20)?;
     let (token, set_cookie) = ensure_csrf(&headers);
     let page = views::device_page(
@@ -218,6 +230,9 @@ async fn device_detail(
             window,
             truncated,
             slot,
+            power,
+            current,
+            threshold_ma: state.power_threshold_ma,
         },
         &uplinks,
         &token,

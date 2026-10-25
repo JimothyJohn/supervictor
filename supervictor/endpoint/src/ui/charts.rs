@@ -11,7 +11,7 @@
 
 use maud::{html, Markup};
 
-use crate::history::{TimelinePoint, Window};
+use crate::history::{PowerPoint, TimelinePoint, Window};
 use crate::time::format_rfc3339;
 
 /// Drawing surface in viewBox units.
@@ -30,6 +30,25 @@ pub const DIRECT_LABEL_MAX: usize = 4;
 /// de-emphasis slot instead of inventing a hue.
 pub const SLOTS: usize = 8;
 const GAP: f64 = 2.0;
+
+/// A horizontal reference line (e.g. the power threshold) with a label.
+pub struct Reference<'a> {
+    /// Y value in the chart's unit.
+    pub value: f64,
+    /// Short label drawn above the line.
+    pub label: &'a str,
+}
+
+/// One segment kind of a stacked chart: its label, CSS class and one
+/// count per bucket.
+pub struct Segment<'a> {
+    /// Legend / tooltip label.
+    pub label: &'a str,
+    /// CSS class (`seg.<class>` and `key.<class>` must exist in style.css).
+    pub class: &'a str,
+    /// One count per bucket.
+    pub values: Vec<usize>,
+}
 
 /// One line on a chart.
 pub struct Series<'a> {
@@ -186,6 +205,7 @@ pub fn line_chart(
     times: &[u64],
     series: &[Series<'_>],
     window: Window,
+    reference: Option<Reference<'_>>,
 ) -> Markup {
     let n = times.len();
     let labeled = !series.is_empty() && series.len() <= DIRECT_LABEL_MAX;
@@ -205,7 +225,12 @@ pub fn line_chart(
             }
         }
     }
-    let axis = if any {
+    let reference = reference.filter(|r| r.value.is_finite());
+    if let Some(r) = &reference {
+        min = min.min(r.value);
+        max = max.max(r.value);
+    }
+    let axis = if any || reference.is_some() {
         Axis::nice(min, max)
     } else {
         Axis::nice(0.0, 1.0)
@@ -262,6 +287,10 @@ pub fn line_chart(
                 }
                 @if !any {
                     text .empty x=(ML + pw / 2.0) y=(MT + ph / 2.0) text-anchor="middle" { "no data in window" }
+                }
+                @if let Some(r) = &reference {
+                    line .threshold x1=(ML) x2=(W - mr) y1=(fmt1(axis.y(r.value, ph))) y2=(fmt1(axis.y(r.value, ph))) {}
+                    text .threshold-label x=(ML + 4.0) y=(fmt1(axis.y(r.value, ph) - 4.0)) { (r.label) }
                 }
                 @for (class, d, _) in &paths {
                     @if !d.is_empty() {
@@ -322,50 +351,106 @@ fn table_twin(unit: &str, times: &[u64], series: &[Series<'_>]) -> Markup {
 /// Stacked columns of active-device staleness per bucket: fresh at the
 /// baseline, then stale, dark, never — status colours, 2 px surface gaps.
 pub fn status_chart(chart_id: &str, timeline: &[TimelinePoint], window: Window) -> Markup {
-    let n = timeline.len();
+    let times: Vec<u64> = timeline.iter().map(|p| p.t).collect();
+    let seg = |label: &'static str, f: fn(&TimelinePoint) -> usize| Segment {
+        label,
+        class: label,
+        values: timeline.iter().map(f).collect(),
+    };
+    stacked_chart(
+        chart_id,
+        "fleet status over time",
+        "active devices",
+        "no active devices",
+        &times,
+        &[
+            seg("fresh", |p| p.fresh),
+            seg("stale", |p| p.stale),
+            seg("dark", |p| p.dark),
+            seg("never", |p| p.never),
+        ],
+        window,
+    )
+}
+
+/// Stacked columns of active-device power state per bucket: on at the
+/// baseline, then off, then unknown.
+pub fn power_chart(
+    chart_id: &str,
+    points: &[PowerPoint],
+    threshold_ma: i64,
+    window: Window,
+) -> Markup {
+    let times: Vec<u64> = points.iter().map(|p| p.t).collect();
+    let note = format!("on = current ≥ {threshold_ma} mA");
+    let seg = |label: &'static str, f: fn(&PowerPoint) -> usize| Segment {
+        label,
+        class: label,
+        values: points.iter().map(f).collect(),
+    };
+    stacked_chart(
+        chart_id,
+        "power state over time",
+        &note,
+        "no active devices",
+        &times,
+        &[
+            seg("on", |p| p.on),
+            seg("off", |p| p.off),
+            seg("unknown", |p| p.unknown),
+        ],
+        window,
+    )
+}
+
+/// Stacked columns, one per bucket, segments bottom-up in `segments`
+/// order with 2 px surface gaps; legend, hover data and table twin.
+#[allow(clippy::too_many_arguments)]
+pub fn stacked_chart(
+    chart_id: &str,
+    title: &str,
+    note: &str,
+    empty_text: &str,
+    times: &[u64],
+    segments: &[Segment<'_>],
+    window: Window,
+) -> Markup {
+    let n = times.len();
     let mr = MR_PLAIN;
     let pw = W - ML - mr;
     let ph = H - MT - MB;
-    let total = timeline.iter().map(TimelinePoint::total).max().unwrap_or(0);
+    let total = (0..n)
+        .map(|i| {
+            segments
+                .iter()
+                .map(|s| s.values.get(i).copied().unwrap_or(0))
+                .sum::<usize>()
+        })
+        .max()
+        .unwrap_or(0);
     let axis = Axis::counts(total);
     let colw = if n > 0 { pw / n as f64 } else { pw };
     let barw = (colw - GAP).max(1.0);
     let unit_h = ph / axis.hi.max(1.0);
-    let times: Vec<u64> = timeline.iter().map(|p| p.t).collect();
     // (class, x, y, width, height) per drawn segment, stacked from the
     // baseline with a surface gap between neighbours.
-    let mut rects: Vec<(&'static str, f64, f64, f64, f64)> = Vec::new();
-    for (i, p) in timeline.iter().enumerate() {
+    let mut rects: Vec<(&str, f64, f64, f64, f64)> = Vec::new();
+    for i in 0..n {
         let x = ML + i as f64 * colw + GAP / 2.0;
         let mut base = MT + ph;
-        for (class, count) in [
-            ("fresh", p.fresh),
-            ("stale", p.stale),
-            ("dark", p.dark),
-            ("never", p.never),
-        ] {
+        for s in segments {
+            let count = s.values.get(i).copied().unwrap_or(0);
             if count == 0 {
                 continue;
             }
             let h = count as f64 * unit_h;
-            rects.push((class, x, base - h + GAP / 2.0, barw, (h - GAP).max(0.5)));
+            rects.push((s.class, x, base - h + GAP / 2.0, barw, (h - GAP).max(0.5)));
             base -= h;
         }
     }
-    let stack_series: Vec<serde_json::Value> = ["fresh", "stale", "dark", "never"]
+    let stack_series: Vec<serde_json::Value> = segments
         .iter()
-        .map(|k| {
-            let values: Vec<usize> = timeline
-                .iter()
-                .map(|p| match *k {
-                    "fresh" => p.fresh,
-                    "stale" => p.stale,
-                    "dark" => p.dark,
-                    _ => p.never,
-                })
-                .collect();
-            serde_json::json!({ "label": k, "slot": k, "values": values })
-        })
+        .map(|s| serde_json::json!({ "label": s.label, "slot": s.class, "values": s.values }))
         .collect();
     let data = serde_json::json!({
         "kind": "stack",
@@ -377,8 +462,8 @@ pub fn status_chart(chart_id: &str, timeline: &[TimelinePoint], window: Window) 
 
     html! {
         figure .chart.status-chart #(chart_id) data-chart=(data.to_string()) {
-            figcaption { "fleet status over time " span .unit { "(active devices)" } }
-            svg viewBox={ "0 0 " (W) " " (H) } role="img" aria-label="fleet status over time" preserveAspectRatio="none" {
+            figcaption { (title) " " span .unit { "(" (note) ")" } }
+            svg viewBox={ "0 0 " (W) " " (H) } role="img" aria-label=(title) preserveAspectRatio="none" {
                 @for tick in &axis.ticks {
                     line .grid x1=(ML) x2=(W - mr) y1=(fmt1(axis.y(*tick, ph))) y2=(fmt1(axis.y(*tick, ph))) {}
                     text .tick x=(ML - 8.0) y=(fmt1(axis.y(*tick, ph) + 3.5)) text-anchor="end" { (fmt_value(*tick)) }
@@ -390,26 +475,25 @@ pub fn status_chart(chart_id: &str, timeline: &[TimelinePoint], window: Window) 
                     rect .seg.(class) x=(fmt1(*x)) y=(fmt1(*y)) width=(fmt1(*w)) height=(fmt1(*h)) {}
                 }
                 @if total == 0 {
-                    text .empty x=(ML + pw / 2.0) y=(MT + ph / 2.0) text-anchor="middle" { "no active devices" }
+                    text .empty x=(ML + pw / 2.0) y=(MT + ph / 2.0) text-anchor="middle" { (empty_text) }
                 }
                 line .crosshair x1="0" x2="0" y1=(MT) y2=(MT + ph) {}
             }
             div .tooltip hidden {}
             ul .legend {
-                li { span .key.fresh {} "fresh" }
-                li { span .key.stale {} "stale" }
-                li { span .key.dark {} "dark" }
-                li { span .key.never {} "never" }
+                @for s in segments {
+                    li { span .key.(s.class) {} (s.label) }
+                }
             }
             details .table-view {
                 summary { "table" }
                 table {
-                    thead { tr { th { "bucket (UTC)" } th { "fresh" } th { "stale" } th { "dark" } th { "never" } } }
+                    thead { tr { th { "bucket (UTC)" } @for s in segments { th { (s.label) } } } }
                     tbody {
-                        @for p in timeline {
+                        @for (i, t) in times.iter().enumerate() {
                             tr {
-                                td { (time_full(p.t)) }
-                                td { (p.fresh) } td { (p.stale) } td { (p.dark) } td { (p.never) }
+                                td { (time_full(*t)) }
+                                @for s in segments { td { (s.values.get(i).copied().unwrap_or(0)) } }
                             }
                         }
                     }
@@ -519,8 +603,14 @@ mod tests {
                 },
             ],
             Window::H1,
+            Some(Reference {
+                value: 3.0,
+                label: "on ≥ 3 mA",
+            }),
         )
         .into_string();
+        assert!(html.contains("class=\"threshold\""), "reference line drawn");
+        assert!(html.contains("on ≥ 3 mA"));
         // Two path segments for `a` (gap at index 2) => two "M" commands.
         let a_path = html.split("class=\"line s0\"").nth(1).unwrap();
         let d = a_path
@@ -564,9 +654,11 @@ mod tests {
                 values: &v,
             }],
             Window::H1,
+            None,
         )
         .into_string();
         assert!(!html.contains("class=\"legend\""));
+        assert!(!html.contains("class=\"threshold\""));
         let none: [Option<f64>; 2] = [None, None];
         let html = line_chart(
             "c",
@@ -579,6 +671,7 @@ mod tests {
                 values: &none,
             }],
             Window::H1,
+            None,
         )
         .into_string();
         assert!(html.contains("no data in window"));
@@ -608,5 +701,23 @@ mod tests {
         assert!(html.contains("class=\"legend\""));
         let empty = status_chart("s", &[], Window::H1).into_string();
         assert!(empty.contains("no active devices"));
+    }
+
+    #[test]
+    fn power_chart_stacks_on_off_unknown_and_names_the_threshold() {
+        let pts: Vec<PowerPoint> = (0..2)
+            .map(|i| PowerPoint {
+                t: 1_800_000_000 + i * 40,
+                on: 1,
+                off: 1,
+                unknown: 0,
+            })
+            .collect();
+        let html = power_chart("power", &pts, 100, Window::H1).into_string();
+        assert_eq!(html.matches("class=\"seg on\"").count(), 2);
+        assert_eq!(html.matches("class=\"seg off\"").count(), 2);
+        assert_eq!(html.matches("class=\"seg unknown\"").count(), 0);
+        assert!(html.contains("on = current ≥ 100 mA"));
+        assert!(html.contains("<th>on</th>") && html.contains("<th>unknown</th>"));
     }
 }

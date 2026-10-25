@@ -27,22 +27,23 @@ async fn run(store: Arc<dyn DeviceStore>, interval_secs: u64) {
     // First tick fires immediately; use it to seed known_dark without
     // alerting on devices that were already dark at boot.
     ticker.tick().await;
-    let mut known_dark: HashSet<String> = match fleet::snapshot_now(store.as_ref()) {
-        Ok(devices) => devices
-            .iter()
-            .filter(|d| d.staleness == fleet::Staleness::Dark)
-            .map(|d| d.device_id.clone())
-            .collect(),
-        Err(e) => {
-            tracing::error!(error = %e, "watchdog: initial fleet snapshot failed");
-            HashSet::new()
-        }
-    };
+    let mut known_dark: HashSet<String> =
+        match fleet::snapshot_now(store.as_ref(), fleet::DEFAULT_POWER_THRESHOLD_MA) {
+            Ok(devices) => devices
+                .iter()
+                .filter(|d| d.staleness == fleet::Staleness::Dark)
+                .map(|d| d.device_id.clone())
+                .collect(),
+            Err(e) => {
+                tracing::error!(error = %e, "watchdog: initial fleet snapshot failed");
+                HashSet::new()
+            }
+        };
     tracing::info!(interval_secs, "staleness watchdog started");
 
     loop {
         ticker.tick().await;
-        let devices = match fleet::snapshot_now(store.as_ref()) {
+        let devices = match fleet::snapshot_now(store.as_ref(), fleet::DEFAULT_POWER_THRESHOLD_MA) {
             Ok(devices) => devices,
             Err(e) => {
                 tracing::error!(error = %e, "watchdog: fleet snapshot failed");

@@ -14,6 +14,10 @@ use supervictor_common::status;
 pub const FRESH_SECS: u64 = 15 * 60;
 /// Seconds since last uplink below which a device is "stale" (beyond: "dark").
 pub const DARK_SECS: u64 = 2 * 60 * 60;
+/// Default current (mA) at or above which a device counts as powered on
+/// (`POWER_THRESHOLD_MA`). The simulator's dropouts read 0 and its
+/// quietest baseline is 200, so 100 splits them.
+pub const DEFAULT_POWER_THRESHOLD_MA: i64 = 100;
 
 /// How recently a device has been heard from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -39,6 +43,52 @@ impl Staleness {
             Staleness::Unknown => "unknown",
         }
     }
+}
+
+/// Whether a device is drawing power, judged from its last `current`
+/// reading against the fleet threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PowerState {
+    /// Last current at or above the threshold.
+    On,
+    /// Last current below the threshold.
+    Off,
+    /// No current reading, or the last one is too old to trust.
+    Unknown,
+}
+
+impl PowerState {
+    /// CSS class / short label.
+    pub fn label(self) -> &'static str {
+        match self {
+            PowerState::On => "on",
+            PowerState::Off => "off",
+            PowerState::Unknown => "unknown",
+        }
+    }
+}
+
+/// Classify a current reading. A reading from a dark or never-heard
+/// device says nothing about its power now, so those are `Unknown`;
+/// otherwise `current >= threshold` is `On` (the threshold itself counts
+/// as on).
+pub fn power_state(current: Option<i64>, staleness: Staleness, threshold_ma: i64) -> PowerState {
+    match (current, staleness) {
+        (Some(_), Staleness::Dark) | (Some(_), Staleness::Unknown) | (None, _) => {
+            PowerState::Unknown
+        }
+        (Some(c), _) if c >= threshold_ma => PowerState::On,
+        (Some(_), _) => PowerState::Off,
+    }
+}
+
+/// `current` out of a stored payload: integer as sent, or a float rounded
+/// toward zero (bucket means and hand-written rows), never NaN/inf.
+pub fn payload_current(payload: &serde_json::Value) -> Option<i64> {
+    let v = payload.get("current")?;
+    v.as_i64()
+        .or_else(|| v.as_f64().filter(|f| f.is_finite()).map(|f| f as i64))
 }
 
 /// Classify a last-uplink timestamp against the fixed thresholds.
@@ -75,6 +125,11 @@ pub struct FleetDevice {
     /// Firmware version last reported by the device, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fw: Option<String>,
+    /// Last reported current in mA, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current: Option<i64>,
+    /// Power state from `current` against the fleet threshold.
+    pub power: PowerState,
 }
 
 /// Aggregate counts, as served by `GET /fleet/summary`.
@@ -94,12 +149,21 @@ pub struct FleetSummary {
     pub dark: usize,
     /// Active devices that have never uplinked.
     pub never: usize,
+    /// Active devices whose last current is at or above the threshold.
+    pub on: usize,
+    /// Active devices whose last current is below the threshold.
+    pub off: usize,
 }
 
-/// Snapshot of every device's health at `now` (Unix seconds).
-pub fn snapshot(store: &dyn DeviceStore, now_unix: u64) -> Result<Vec<FleetDevice>, AppError> {
+/// Snapshot of every device's health at `now` (Unix seconds), with power
+/// judged against `threshold_ma`.
+pub fn snapshot(
+    store: &dyn DeviceStore,
+    now_unix: u64,
+    threshold_ma: i64,
+) -> Result<Vec<FleetDevice>, AppError> {
     let devices = store.list_devices()?;
-    let latest: std::collections::HashMap<String, (String, Option<String>)> = store
+    let latest: std::collections::HashMap<String, (String, Option<String>, Option<i64>)> = store
         .latest_uplinks()?
         .into_iter()
         .map(|u| {
@@ -108,18 +172,20 @@ pub fn snapshot(store: &dyn DeviceStore, now_unix: u64) -> Result<Vec<FleetDevic
                 .get("fw")
                 .and_then(|v| v.as_str())
                 .map(String::from);
-            (u.device_id, (u.received_at, fw))
+            let current = payload_current(&u.payload);
+            (u.device_id, (u.received_at, fw, current))
         })
         .collect();
 
     Ok(devices
         .into_iter()
         .map(|device| {
-            let (last_uplink, fw) = match latest.get(&device.device_id) {
-                Some((at, fw)) => (Some(at.clone()), fw.clone()),
-                None => (None, None),
+            let (last_uplink, fw, current) = match latest.get(&device.device_id) {
+                Some((at, fw, current)) => (Some(at.clone()), fw.clone(), *current),
+                None => (None, None, None),
             };
             let staleness = staleness_of(last_uplink.as_deref(), now_unix);
+            let power = power_state(current, staleness, threshold_ma);
             FleetDevice {
                 device_id: device.device_id,
                 owner_id: device.owner_id,
@@ -127,6 +193,8 @@ pub fn snapshot(store: &dyn DeviceStore, now_unix: u64) -> Result<Vec<FleetDevic
                 last_uplink,
                 staleness,
                 fw,
+                current,
+                power,
             }
         })
         .collect())
@@ -148,6 +216,11 @@ pub fn summarize(devices: &[FleetDevice]) -> FleetSummary {
                 Staleness::Dark => summary.dark += 1,
                 Staleness::Unknown => summary.never += 1,
             }
+            match device.power {
+                PowerState::On => summary.on += 1,
+                PowerState::Off => summary.off += 1,
+                PowerState::Unknown => {}
+            }
         } else {
             summary.inactive += 1;
         }
@@ -156,6 +229,76 @@ pub fn summarize(devices: &[FleetDevice]) -> FleetSummary {
 }
 
 /// Convenience: snapshot at the current wall-clock time.
-pub fn snapshot_now(store: &dyn DeviceStore) -> Result<Vec<FleetDevice>, AppError> {
-    snapshot(store, parse_rfc3339_unix(&now_rfc3339()).unwrap_or(0))
+pub fn snapshot_now(
+    store: &dyn DeviceStore,
+    threshold_ma: i64,
+) -> Result<Vec<FleetDevice>, AppError> {
+    snapshot(
+        store,
+        parse_rfc3339_unix(&now_rfc3339()).unwrap_or(0),
+        threshold_ma,
+    )
+}
+
+#[cfg(test)]
+mod power_tests {
+    use super::*;
+
+    #[test]
+    fn threshold_itself_counts_as_on_and_stale_readings_still_count() {
+        assert_eq!(
+            power_state(Some(100), Staleness::Fresh, 100),
+            PowerState::On
+        );
+        assert_eq!(
+            power_state(Some(99), Staleness::Fresh, 100),
+            PowerState::Off
+        );
+        assert_eq!(power_state(Some(0), Staleness::Fresh, 100), PowerState::Off);
+        assert_eq!(
+            power_state(Some(5_000), Staleness::Stale, 100),
+            PowerState::On
+        );
+        assert_eq!(power_state(Some(-1), Staleness::Fresh, 0), PowerState::Off);
+        assert_eq!(
+            power_state(Some(i64::MAX), Staleness::Fresh, i64::MAX),
+            PowerState::On
+        );
+    }
+
+    #[test]
+    fn dark_never_or_missing_readings_are_unknown() {
+        assert_eq!(
+            power_state(Some(900), Staleness::Dark, 100),
+            PowerState::Unknown
+        );
+        assert_eq!(
+            power_state(Some(900), Staleness::Unknown, 100),
+            PowerState::Unknown
+        );
+        assert_eq!(
+            power_state(None, Staleness::Fresh, 100),
+            PowerState::Unknown
+        );
+    }
+
+    #[test]
+    fn payload_current_accepts_ints_and_finite_floats_only() {
+        assert_eq!(
+            payload_current(&serde_json::json!({"current": 1240})),
+            Some(1240)
+        );
+        assert_eq!(
+            payload_current(&serde_json::json!({"current": 1240.7})),
+            Some(1240)
+        );
+        assert_eq!(
+            payload_current(&serde_json::json!({"current": -3})),
+            Some(-3)
+        );
+        assert_eq!(payload_current(&serde_json::json!({"current": "12"})), None);
+        assert_eq!(payload_current(&serde_json::json!({"current": null})), None);
+        assert_eq!(payload_current(&serde_json::json!({})), None);
+        assert_eq!(payload_current(&serde_json::Value::Null), None);
+    }
 }

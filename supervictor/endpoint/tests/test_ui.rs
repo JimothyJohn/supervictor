@@ -138,6 +138,28 @@ async fn fleet_page_lists_devices_with_status() {
     assert!(html.contains("register device"));
     // factory-02 never uplinked
     assert!(html.contains("never"));
+    // Power column: factory-01's last current (42 mA, 2026) is too old to
+    // trust -> unknown; factory-02 has no reading -> unknown.
+    assert!(html.contains("<th>power</th>"));
+    assert_eq!(html.matches("badge power unknown").count(), 2, "{html}");
+    assert!(
+        html.contains("42 mA"),
+        "last current shown beside the badge"
+    );
+}
+
+#[tokio::test]
+async fn fleet_page_shows_on_and_off_from_fresh_readings() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "pump", "active");
+    seed_device(store.as_ref(), "idle", "active");
+    let now = supervictor_endpoint::time::now_rfc3339();
+    seed_uplink(store.as_ref(), "pump", &now, 1500);
+    seed_uplink(store.as_ref(), "idle", &now, 0);
+    let (name, value) = dn(ADMIN_DN);
+    let html = server.get("/ui").add_header(name, value).await.text();
+    assert_eq!(html.matches("badge power on").count(), 1, "{html}");
+    assert_eq!(html.matches("badge power off").count(), 1, "{html}");
 }
 
 #[tokio::test]
@@ -390,18 +412,32 @@ async fn history_page_renders_tiles_status_chart_and_a_chart_per_metric() {
     // Headline tiles reflect the fleet right now.
     assert!(html.contains("active devices"));
     assert!(html.contains("3 registered, 1 inactive"));
-    // One status chart plus one chart per metric, each with a table twin.
+    // Current first (with the threshold line), then power, then status,
+    // then the other metrics; every chart has a table twin.
+    let pos = |needle: &str| {
+        html.find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}"))
+    };
+    assert!(pos("id=\"current\"") < pos("id=\"power\""));
+    assert!(pos("id=\"power\"") < pos("id=\"status\""));
+    assert!(pos("id=\"status\"") < pos("id=\"temp_c\""));
     assert_eq!(
         html.matches("<figure class=\"chart status-chart\"").count(),
-        1
+        2
     );
+    assert!(
+        html.contains("class=\"threshold\""),
+        "threshold line on the current chart"
+    );
+    assert!(html.contains("on ≥ 100 mA"));
+    assert!(html.contains("powered on") && html.contains("powered off"));
     for key in ["current", "temp_c", "humidity_pct", "rssi_dbm", "heap_free"] {
         assert!(
             html.contains(&format!("<figure class=\"chart\" id=\"{key}\"")),
             "no chart for {key}"
         );
     }
-    assert_eq!(html.matches("class=\"table-view\"").count(), 6);
+    assert_eq!(html.matches("class=\"table-view\"").count(), 7);
     // Both active devices appear as series (legend + end labels); the
     // retired one is in the series list too (every registered device).
     assert!(html.contains("factory-01"));
@@ -505,6 +541,16 @@ async fn device_page_has_window_filters_and_metric_charts() {
     let html = resp.text();
     assert!(html.contains("class=\"active\" href=\"/ui/devices/factory-01?window=6h\""));
     assert_eq!(html.matches("<figure class=\"chart\"").count(), 5);
+    assert!(
+        html.contains("badge power off"),
+        "55 mA fresh reading is off: {html}"
+    );
+    assert!(html.contains("55 mA, threshold 100 mA"));
+    assert_eq!(
+        html.matches("class=\"threshold\"").count(),
+        1,
+        "only the current chart"
+    );
     assert!(
         !html.contains("class=\"legend\""),
         "a single series needs no legend"

@@ -25,6 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         store,
         supervictor_endpoint::routes::RouterOptions {
             require_registration: config.require_registration,
+            power_threshold_ma: config.power_threshold_ma,
         },
     );
 
