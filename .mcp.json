@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "supervictor": {
+      "command": "scripts/mcp.sh",
+      "args": [],
+      "env": {
+        "SUPERVICTOR_URL": "https://localhost:8443"
+      }
+    }
+  }
+}

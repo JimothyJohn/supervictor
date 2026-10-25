@@ -9,7 +9,7 @@
 QS := ./Quickstart
 
 .PHONY: help up down status install-dev lint fmt build test-unit test-integration test-all \
-        flash onboard certs-ca certs-device certs-admin certs-server fleet ping deploy release-check
+        flash onboard certs-ca certs-device certs-admin certs-server fleet ping deploy release-check mcp
 
 .DEFAULT_GOAL := up
 
@@ -83,3 +83,8 @@ deploy:  ## Deploy the self-hosted staging box (scripts/deploy-staging.sh).
 
 release-check:  ## Release build of the endpoint for this host (a v* tag builds the static musl binaries in CI).
 	cargo build -p supervictor-endpoint --release --locked
+
+# ---- Agents ------------------------------------------------------------------
+
+mcp:  ## Build the MCP status server (.mcp.json launches it via scripts/mcp.sh).
+	cargo build -p supervictor-mcp --release

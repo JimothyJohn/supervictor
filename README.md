@@ -14,8 +14,12 @@ git clone https://github.com/JimothyJohn/supervictor.git && cd supervictor
 One command, start to finish: it checks the toolchain, writes `.env.dev`, issues the fleet CA and your admin, server and device certificates, builds, runs the test suite, starts the endpoint with mTLS on `https://localhost:8443`, then asks what should post telemetry — a simulated machine on your computer, an ESP32 over USB, or nothing yet. It is idempotent: rerun it after any fix and it skips what already exists. It only prompts on a terminal and only where a choice is ambiguous; `QS_HARDWARE=sim ./Quickstart` answers ahead of time for scripts and CI. `./Quickstart status` and `./Quickstart down` manage what it started.
 
 - `make` is the same path with the usual names (`make help`, `lint`, `test-unit`, `flash`, `deploy`).
-- In Claude Code, `/quickstart` runs it with an agent that reads your serial ports and environment first and fixes what fails.
+- In Claude Code, `/quickstart` runs it with an agent that reads your serial ports and environment first and fixes what fails. `/bring-your-own` is the next step: the endpoint on a server you own (Linux box, VPS, Pi, container, macOS or WSL) and telemetry from a board that is not the bench Olimex — another ESP32, a Linux SBC, or anything that can do mTLS — with a checker that proves the server from a device's point of view before you flash.
 - Rust is the only requirement. Flashing adds `espflash` and the esp toolchain, which `./Quickstart install` sets up.
+
+## Ask the fleet from an agent
+
+`supervictor/mcp` is a Model Context Protocol server: five read-only tools over the admin API — backend status (health, TLS, admin access), fleet summary, per-device status with filters, one device's record and recent uplinks, and bucketed history. The repo's `.mcp.json` registers it for Claude Code (`scripts/mcp.sh` builds it on first use, or `make mcp`); any MCP client can run the same binary. It reads `SUPERVICTOR_URL` (default `https://localhost:8443`), `SUPERVICTOR_CA` and `SUPERVICTOR_ADMIN_CERT`/`_KEY` (default `certs/admins/$USER/`), and every tool takes an `endpoint` argument to ask about staging or production with the same admin certificate.
 
 Open the dashboard by importing `certs/admins/<you>/admin.p12` into your browser (the password printed once when it was issued), or read the same data over curl with the admin certificate.
 
