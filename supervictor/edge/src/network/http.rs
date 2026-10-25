@@ -56,7 +56,9 @@ where
 
     // A payload that doesn't fit the buffer is an error, not an empty POST —
     // silently sending Content-Length: 0 would register a bogus uplink.
-    let json = serde_json_core::to_string::<T, 256>(data).map_err(|_| HttpError::Serialization)?;
+    // 384: full telemetry with a 64-byte id and extreme values is 260 bytes
+    // (models/uplink_tests.rs pins it); headers take ~120 of the 512.
+    let json = serde_json_core::to_string::<T, 384>(data).map_err(|_| HttpError::Serialization)?;
 
     push(&mut request, "Content-Length: ")?;
     push_usize(&mut request, json.len())?;
@@ -272,8 +274,11 @@ mod tests {
         struct Oversized {
             data: &'static str,
         }
-        // 312 chars > the 256-byte serde-json-core buffer in post_request
+        // 390 chars > the 384-byte serde-json-core buffer in post_request
         const LONG: &str = concat!(
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
+            "abcdefghijklmnopqrstuvwxyz",
             "abcdefghijklmnopqrstuvwxyz",
             "abcdefghijklmnopqrstuvwxyz",
             "abcdefghijklmnopqrstuvwxyz",

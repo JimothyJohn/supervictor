@@ -47,6 +47,12 @@ Design rules:
 | `id` | string ≤64 | Device identity, from `DEVICE_NAME` at flash time |
 | `current` | i32 | Primary sensor reading (mA) |
 
+> Since 2026-10-24 the bench firmware and the desktop client fill `seq`,
+> `uptime_s`, `interval_s`, `heap_free`, `rssi_dbm`, `temp_c` and
+> `humidity_pct` on every ping. Until real sensors land the environmental
+> values (and RSSI) come from `supervictor/edge/src/models/sim.rs`, a
+> seeded simulator; `heap_free` and `uptime_s` are real on the ESP32.
+
 ### Device health (optional; firmware fills these every ping)
 
 | Field | Type | Units | Why it's there |

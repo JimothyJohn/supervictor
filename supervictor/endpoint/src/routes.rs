@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -55,6 +55,7 @@ pub fn router_with(store: Arc<dyn DeviceStore>, options: RouterOptions) -> Route
     let fleet_api = Router::new()
         .route(wire::FLEET, get(fleet_status))
         .route(wire::FLEET_SUMMARY, get(fleet_summary))
+        .route(wire::FLEET_HISTORY, get(fleet_history))
         .route_layer(axum::middleware::from_fn(crate::middleware::require_admin))
         .with_state(state.clone());
 
@@ -90,6 +91,27 @@ async fn fleet_summary(
 ) -> Result<Json<crate::fleet::FleetSummary>, crate::error::AppError> {
     let devices = crate::fleet::snapshot_now(state.store.as_ref())?;
     Ok(Json(crate::fleet::summarize(&devices)))
+}
+
+/// `?window=` for the history views; anything but a preset is rejected.
+#[derive(Debug, serde::Deserialize, Default)]
+pub struct HistoryQuery {
+    /// Preset token (`15m`, `1h`, `6h`, `24h`, `7d`); default `1h`.
+    #[serde(default)]
+    pub window: Option<String>,
+}
+
+async fn fleet_history(
+    State(state): State<AppState>,
+    Query(query): Query<HistoryQuery>,
+) -> Result<Json<crate::history::History>, crate::error::AppError> {
+    let window = crate::history::Window::parse(query.window.as_deref())?;
+    let now = crate::time::parse_rfc3339_unix(&crate::time::now_rfc3339()).unwrap_or(0);
+    Ok(Json(crate::history::fleet_history(
+        state.store.as_ref(),
+        window,
+        now,
+    )?))
 }
 
 async fn hello(ClientSubject(subject): ClientSubject) -> Json<HelloResponse> {

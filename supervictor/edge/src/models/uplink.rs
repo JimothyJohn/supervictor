@@ -6,7 +6,13 @@ use serde::{Deserialize, Serialize};
 pub const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Telemetry payload sent from the device to the cloud API.
-#[derive(Debug, Deserialize, Serialize, Clone)]
+///
+/// `no_std` twin of `supervictor_common::models::UplinkMessage`; the field
+/// names are the wire contract (`docs/TELEMETRY.md`) and must match the
+/// constants in `supervictor/common/src/fields.rs`. Everything past
+/// `id`/`current` is optional and left off the wire when `None`, so old
+/// firmware and new endpoints (and vice versa) stay compatible.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct UplinkMessage {
     /// Unique identifier for this device or message.
     pub id: HString<64>,
@@ -16,15 +22,48 @@ pub struct UplinkMessage {
     /// Defaults to empty when parsing pre-fw JSON (backward compatibility).
     #[serde(default)]
     pub fw: HString<16>,
+
+    // --- Device health metadata ---
+    /// Uplink counter since boot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u32>,
+    /// Seconds since boot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uptime_s: Option<u32>,
+    /// Configured uplink period in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_s: Option<u32>,
+    /// Free heap in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heap_free: Option<u32>,
+    /// WiFi RSSI in dBm; absent on wired Ethernet uplinks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rssi_dbm: Option<i8>,
+
+    // --- Environmental readings ---
+    /// Ambient temperature in °C.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temp_c: Option<f32>,
+    /// Relative humidity in %RH.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub humidity_pct: Option<f32>,
 }
 
 impl UplinkMessage {
-    /// Build an uplink stamped with this build's firmware version.
+    /// Build a minimal uplink stamped with this build's firmware version;
+    /// every optional field is absent.
     pub fn new(id: HString<64>, current: i32) -> Self {
         Self {
             id,
             current,
             fw: FIRMWARE_VERSION.try_into().unwrap_or_default(),
+            seq: None,
+            uptime_s: None,
+            interval_s: None,
+            heap_free: None,
+            rssi_dbm: None,
+            temp_c: None,
+            humidity_pct: None,
         }
     }
 }

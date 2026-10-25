@@ -1,5 +1,5 @@
 use crate::config::*;
-use crate::models::uplink::UplinkMessage;
+use crate::models::sim::{seed_from, Hardware, Simulator};
 use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
 use embassy_net::tcp::TcpSocket;
@@ -56,10 +56,19 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }
 
-/// Main application loop: resolves DNS, establishes mTLS, and sends uplink telemetry.
+/// Device identity on the wire: `DEVICE_NAME` at build time (what the
+/// Quickstart flashes with), falling back to the historical bench id.
+pub const DEVICE_ID_ON_WIRE: &str = match option_env!("DEVICE_NAME") {
+    Some(name) => name,
+    None => "1234567890",
+};
+
+/// Main application loop: resolves DNS, establishes mTLS, and sends uplink
+/// telemetry. `seed` (hardware RNG) salts the telemetry simulator so two
+/// boots of the same board don't replay the same trace.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
-pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
+pub async fn app(stack: Stack<'static>, tls: Tls<'static>, seed: u64) {
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;
         if stack.is_link_up() {
@@ -76,7 +85,9 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
         println!("Waiting to get IP address...");
     }
 
-    let uplink = UplinkMessage::new("1234567890".try_into().unwrap(), 100);
+    let device_id: heapless::String<64> = DEVICE_ID_ON_WIRE.try_into().unwrap_or_default();
+    let mut sim = Simulator::new(seed_from(device_id.as_str(), seed));
+    let interval_s = (MAIN_LOOP_DELAY.as_millis() / 1000) as u32;
 
     let mut backoff = BACKOFF_INITIAL;
 
@@ -148,6 +159,14 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
         backoff = BACKOFF_INITIAL;
 
         loop {
+            let uptime_s = embassy_time::Instant::now()
+                .as_secs()
+                .min(u64::from(u32::MAX)) as u32;
+            let hardware = Hardware {
+                heap_free: Some(esp_alloc::HEAP.free().min(u32::MAX as usize) as u32),
+                rssi_dbm: None,
+            };
+            let uplink = sim.uplink(device_id.clone(), uptime_s, interval_s, hardware);
             let request = match post_request(HOST, &uplink, None) {
                 Ok(r) => r,
                 Err(e) => {
@@ -187,7 +206,8 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>) {
                 }
             }
 
-            Timer::after(MAIN_LOOP_DELAY).await;
+            let delay_ms = sim.next_delay_ms(MAIN_LOOP_DELAY.as_millis() as u32);
+            Timer::after(Duration::from_millis(u64::from(delay_ms))).await;
         }
 
         let _ = session.close().await;
