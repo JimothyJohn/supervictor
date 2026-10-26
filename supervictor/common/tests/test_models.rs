@@ -282,6 +282,7 @@ fn device_response_roundtrip() {
         color: None,
         line_style: None,
         marker: None,
+        desired_fw: None,
     };
     let json = serde_json::to_string(&resp).unwrap();
     let back: DeviceResponse = serde_json::from_str(&json).unwrap();
@@ -300,6 +301,7 @@ fn device_response_omits_none_subject_dn() {
         color: None,
         line_style: None,
         marker: None,
+        desired_fw: None,
     };
     let json = serde_json::to_string(&resp).unwrap();
     let val: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -321,6 +323,7 @@ fn device_response_includes_some_subject_dn() {
         color: None,
         line_style: None,
         marker: None,
+        desired_fw: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     assert_eq!(val["subject_dn"], "CN=x");
@@ -338,6 +341,7 @@ fn device_response_field_names() {
         color: None,
         line_style: None,
         marker: None,
+        desired_fw: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     let obj = val.as_object().unwrap();
@@ -476,6 +480,7 @@ fn register_and_response_carry_style_fields_optionally() {
         color: Some("s2".into()),
         line_style: Some(LineStyle::Dashed),
         marker: None,
+        desired_fw: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     assert_eq!(val["color"], "s2");

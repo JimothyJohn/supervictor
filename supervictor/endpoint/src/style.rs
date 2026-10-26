@@ -229,6 +229,7 @@ mod tests {
                 color: color.map(Into::into),
                 ..Default::default()
             },
+            desired_fw: None,
         }
     }
 

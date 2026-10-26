@@ -15,6 +15,7 @@ fn device(id: &str) -> DeviceRecord {
         created_at: "2026-07-01T00:00:00+00:00".into(),
         power_threshold_ma: None,
         style: Default::default(),
+        desired_fw: None,
     }
 }
 

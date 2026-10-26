@@ -41,6 +41,17 @@ pub enum AppError {
         device_id: String,
     },
 
+    /// No firmware image stored for that device and version.
+    FirmwareNotFound {
+        /// Device the image was asked for.
+        device_id: String,
+        /// Version asked for.
+        version: String,
+    },
+
+    /// This deployment has no firmware blob store (`FIRMWARE_DIR` unset).
+    FirmwareUnavailable,
+
     /// Storage backend error (SQLite or DynamoDB), classified.
     Store(crate::store::StoreError),
 
@@ -64,6 +75,10 @@ impl core::fmt::Display for AppError {
             AppError::SubjectMismatch { device_id } => {
                 write!(f, "client certificate does not match device: {device_id}")
             }
+            AppError::FirmwareNotFound { device_id, version } => {
+                write!(f, "no firmware {version} for device {device_id}")
+            }
+            AppError::FirmwareUnavailable => f.write_str("firmware store not configured"),
             AppError::Store(msg) => write!(f, "store error: {msg}"),
             AppError::Config(msg) => write!(f, "config error: {msg}"),
         }
@@ -118,6 +133,20 @@ impl IntoResponse for AppError {
                 StatusCode::FORBIDDEN,
                 ErrorResponse {
                     error: "Client certificate does not match device".into(),
+                    detail: None,
+                },
+            ),
+            AppError::FirmwareNotFound { .. } => (
+                StatusCode::NOT_FOUND,
+                ErrorResponse {
+                    error: "Firmware not found".into(),
+                    detail: None,
+                },
+            ),
+            AppError::FirmwareUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorResponse {
+                    error: "Firmware store not configured".into(),
                     detail: None,
                 },
             ),

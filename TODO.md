@@ -119,10 +119,39 @@ compose/Caddy stack on that box is stopped and disabled, docker disabled.
       rev from `cfbraun/ph-esp32-mac`. If the fork disappears before #4
       merges, builds break — re-pin or vendor.
       **Unblocks:** upstream merging #4 and cutting a release.
-- [ ] OTA update path (prerequisite for cert rotation on deployed devices —
-      see todo/ENTERPRISE.md and ROADMAP.md Phase 2).
-      **Unblocks:** hardware + the esp migration above (A/B partition
-      support lands with the newer esp-hal line).
+- [x] OTA update path (2026-10-25, feat/ota): pull over the uplink's mTLS,
+      A/B slots, sha256 + read-back verify, app-driven rollback after 3
+      unconfirmed boots, `scripts/ota-push.sh`. docs/OTA.md "What shipped".
+      Host-verified (577 tests incl. proptest fault schedules); bench
+      verification is the open item below.
+- [ ] **OTA bench verification** — first OTA on hardware PASSED 2026-10-25
+      23:27Z: poe-iso-rack-03 (ethernet,espnow) 0.1.1 → 0.1.2 in 71 s from
+      target set to the new version reporting; confirmed (39 min up, flat
+      heap, no revert). The first 0.1.1 flash panicked on a 25.7 KB boot
+      stack (fixed a11b7f6 + dram2 heap on every ESP32 build bc26475).
+      Torture run 1 (2026-10-26 01:08Z) FAILED usefully: 04 passed falsely at
+      +2 min (it read the stale pre-OTA fleet row as "back on 0.1.2"), so 05
+      ran while 0.1.3 was in its trial boots and its `espflash reset` — a
+      power-on reset, on which esp-hal zeroes `persistent` RTC statics — wiped
+      the boot record; the firmware took 0.1.3 as confirmed and sat dark for
+      an hour. Fixed on feat/ota: boot_check rebuilds the trial from otadata
+      (`New` slot + no record → Pending), 04 demands a fresh uplink and can
+      EN-reset mid-trial (`EN_RESET_AT`), 05 says what a power-on reset can
+      show (restart, not resume). Rerun order, scripts in the poe-iso worktree:
+      `scratch/06-ota-reflash-rack-03.sh` (yours: USB flash 0.1.5), then
+      `EN_RESET_AT=150 scratch/04-ota-revert-test.sh` (~17 min),
+      `scratch/05-ota-resume-test.sh` (~4 min); then 20 self-swaps. Never leave
+      a serial monitor attached across a reset: the CH340 parks the board in
+      the ROM bootloader (happened 01:52Z; `espflash reset` recovers).
+      needs: a board on USB (rack-03 is, stuck on wrong-CA 0.1.3 until 06 runs); ~30 min of bench time
+      result: OTA proven on hardware; the fleet can be reflashed once over USB and never again
+      est: 2h
+      difficulty: med
+      id: ota-bench
+- [ ] OTA: S3-backed firmware store for the Lambda stages (dev/prod answer
+      503 on the firmware routes until then); signed manifests (O.2);
+      identity in NVS so one image serves the fleet. docs/OTA.md.
+      **Unblocks:** ota-bench green.
 
 ## P3 — Endpoint
 
@@ -213,9 +242,11 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       fresh. Cost: the radio blob is ~34 KB of DRAM, which overflowed the boot
       stack at the 112 KB heap; the espnow build runs 80 KB + a 96 KB second
       heap in `dram2_seg` (esp-hal `.dram2_uninit`), 92 KB used / 88 KB free.
-      Promote the dram2 heap to every classic-ESP32 build once the rack has
-      soaked on it. Next: the mesh identity answer (open question below), then
-      the ESP-NOW protocol (gateway/leaf roles, PMK) on top of this module.
+      dram2 heap promoted to every classic-ESP32 build in feat/ota (22:45Z,
+      after a 3 h soak on rack-02/03; the OTA statics had squeezed the WiFi
+      build's boot stack to 26 KB, now 59-61 KB). Next: the mesh identity
+      answer (open question below), then the ESP-NOW protocol (gateway/leaf
+      roles, PMK) on top of this module.
 
 ## Open questions for Nick
 
@@ -312,3 +343,21 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: rfq-scope
       asked: 2026-10-25
       by: hardware session (docs/hardware-spec)
+- [ ] **OTA enablement: when does the rack take its one USB reflash?** — PR 105 (feat/ota) changes the partition table to the A/B layout; merging is safe (boards on the factory table log `OTA: unavailable` and keep uplinking) but each board needs one more USB flash (`./scripts/flash.sh <device> staging`, ~2 min each) before it can ever OTA. Seven racked boards today. After that, never again.
+      needs: a date, or "merge now, flash as boards come to the bench"
+      result: PR 105 un-drafted; every board on the A/B table; rack-flash.sh becomes the recovery path only
+      options: switch day 2026-10-26, all seven | merge now, flash opportunistically | hold until the bench run (ota-bench) passes
+      est: 30m
+      difficulty: low
+      id: ota-enablement-reflash
+      asked: 2026-10-25
+      by: OTA session (feat/ota)
+- [ ] **OTA resume: must a download survive a power cut, or only a reset?** — the resume record (offset into the inactive slot) lives in RTC fast RAM, which esp-hal zeroes on every power-on/EN reset by design; it survives the 5-min watchdog and software resets. So a PoE switch reboot or power cut mid-download restarts the ~60 s pull from zero (correct, just not a resume), and nothing on the bench can trigger a record-keeping reset from outside, so 'OTA: resuming at' has no hardware proof yet. My pick: accept restart-on-power-cut (one minute, no flash wear), and prove resume by letting the download run past the watchdog once (`UPDATE_DEADLINE` is 200 s inside a 300 s watchdog, so a deliberately slow image: an endpoint knob to throttle one device's image bytes) rather than adding a flash-resident record or a reset endpoint on the board.
+      needs: your pick
+      result: docs/OTA.md states the contract; 05 (or a 07) proves the path that is promised
+      options: accept restart on power cut, prove resume via throttled download | resume must survive power cut (flash-resident record) | drop resume, always restart
+      est: 2h
+      difficulty: med
+      id: ota-resume-proof
+      asked: 2026-10-26
+      by: OTA session (feat/ota)

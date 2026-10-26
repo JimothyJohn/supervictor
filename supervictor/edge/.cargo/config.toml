@@ -1,12 +1,14 @@
+# The partition table is the OTA A/B layout (partitions.csv, relative to
+# this crate: run cargo from supervictor/edge, as the Quickstart does).
 [target.xtensa-esp32-none-elf]
-runner = "espflash flash --monitor"  # espflash v4 auto-detects chip/log-format
+runner = "espflash flash --monitor --partition-table partitions.csv"
 
 # ESP32-C3 (riscv) builds override the default target and pick the matching
 # chip feature, e.g.:
 #   cargo build --bin supervictor-embedded --features wifi,chip-esp32c3 \
 #     --target riscv32imc-unknown-none-elf
 [target.riscv32imc-unknown-none-elf]
-runner = "espflash flash --monitor"
+runner = "espflash flash --monitor --partition-table partitions.csv"
 
 # The esp toolchain ships prebuilt std only for the host; xtensa targets are
 # built from the bundled rust-src. ([unstable] works because the esp channel

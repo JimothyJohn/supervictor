@@ -48,7 +48,20 @@ use esp_radio::wifi::{self, ClientConfig, ModeConfig};
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
 use supervictor::app::tasks::{connection, net_task};
 
-esp_bootloader_esp_idf::esp_app_desc!();
+// Application descriptor: the version is FIRMWARE_VERSION (FW_VERSION at
+// build time, else the crate version) so `espflash board-info` and the
+// OTA manifest agree on what a slot holds.
+esp_bootloader_esp_idf::esp_app_desc!(
+    supervictor::models::uplink::FIRMWARE_VERSION,
+    env!("CARGO_PKG_NAME"),
+    esp_bootloader_esp_idf::BUILD_TIME,
+    esp_bootloader_esp_idf::BUILD_DATE,
+    esp_bootloader_esp_idf::ESP_IDF_COMPATIBLE_VERSION,
+    esp_bootloader_esp_idf::MMU_PAGE_SIZE,
+    0,
+    u16::MAX,
+    esp_bootloader_esp_idf::SECURE_VERSION
+);
 
 /// Halt on fatal init error — loops forever so the watchdog can reset the device.
 async fn halt() -> ! {
@@ -73,7 +86,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     esp_println::logger::init_logger_from_env();
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     // Second heap region in the otherwise unused dram2 segment (config.rs).
-    #[cfg(all(feature = "chip-esp32", feature = "espnow"))]
+    #[cfg(feature = "chip-esp32")]
     esp_alloc::heap_allocator!(#[link_section = ".dram2_uninit"] size: DRAM2_HEAP_SIZE);
 
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
@@ -89,6 +102,27 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         esp_hal::time::Duration::from_secs(WATCHDOG_TIMEOUT_S),
     );
     rwdt.enable();
+
+    // OTA: count this boot against an unconfirmed image (reverts + resets
+    // when the budget is spent), before anything that could wedge. None on
+    // the factory partition table — the board still uplinks.
+    // Buffers and the state machine itself live in statics, not in main's
+    // frame or the app task's future (see `ota::device::Ota`).
+    let ota = supervictor::ota::device::Ota::new(
+        peripherals.FLASH,
+        make_static!(
+            [u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN],
+            [0; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN]
+        ),
+        make_static!(
+            [u8; supervictor::ota::install::SECTOR],
+            [0; supervictor::ota::install::SECTOR]
+        ),
+    );
+    let mut ota = ota.map(|o| &mut *make_static!(supervictor::ota::device::Ota, o));
+    if let Some(o) = ota.as_mut() {
+        o.boot_check();
+    }
 
     // Enable true RNG (needs RNG + ADC1 peripherals for entropy)
     let _trng_source = TrngSource::new(peripherals.RNG, peripherals.ADC1);
@@ -226,7 +260,17 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     };
     tls.set_debug(TLS_DEBUG_LEVEL);
 
-    spawner.spawn(app(stack, tls, rwdt, sim_seed)).ok();
+    spawner
+        .spawn(app(
+            stack,
+            tls,
+            rwdt,
+            sim_seed,
+            ota,
+            make_static!([u8; TCP_RX_BUFFER_SIZE], [0; TCP_RX_BUFFER_SIZE]),
+            make_static!([u8; TCP_TX_BUFFER_SIZE], [0; TCP_TX_BUFFER_SIZE]),
+        ))
+        .ok();
 
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;

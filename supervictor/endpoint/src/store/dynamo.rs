@@ -70,6 +70,9 @@ impl DynamoDeviceStore {
                 item.insert(key.into(), value);
             }
         }
+        if let Some(ref fw) = record.desired_fw {
+            item.insert("desired_fw".into(), AttributeValue::S(fw.clone()));
+        }
         item
     }
 
@@ -150,6 +153,10 @@ impl DynamoDeviceStore {
                     .and_then(|v| v.as_s().ok())
                     .and_then(|s| Marker::parse(s)),
             },
+            desired_fw: item
+                .get("desired_fw")
+                .and_then(|v| v.as_s().ok())
+                .map(|s| s.to_string()),
         })
     }
 }
@@ -309,6 +316,49 @@ impl DeviceStore for DynamoDeviceStore {
                 } else {
                     Err(AppError::Store(StoreError::io(
                         "set_device_threshold",
+                        service_err,
+                    )))
+                }
+            }
+        }
+    }
+
+    fn set_desired_fw(
+        &self,
+        device_id: &str,
+        desired_fw: Option<&str>,
+    ) -> Result<DeviceRecord, AppError> {
+        let base = self
+            .client
+            .update_item()
+            .table_name(&self.devices_table)
+            .key("device_id", AttributeValue::S(device_id.to_string()))
+            .expression_attribute_names("#f", "desired_fw")
+            .condition_expression("attribute_exists(device_id)")
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew);
+        let request = match desired_fw {
+            Some(fw) => base
+                .update_expression("SET #f = :f")
+                .expression_attribute_values(":f", AttributeValue::S(fw.to_string())),
+            None => base.update_expression("REMOVE #f"),
+        };
+
+        match block_on(request.send()) {
+            Ok(out) => {
+                let item = out.attributes().ok_or_else(|| {
+                    AppError::Store(StoreError::io("set_desired_fw", "no attributes returned"))
+                })?;
+                Self::item_to_device(item)
+            }
+            Err(e) => {
+                let service_err = e.into_service_error();
+                if service_err.is_conditional_check_failed_exception() {
+                    Err(AppError::DeviceNotFound {
+                        device_id: device_id.to_string(),
+                    })
+                } else {
+                    Err(AppError::Store(StoreError::io(
+                        "set_desired_fw",
                         service_err,
                     )))
                 }
@@ -510,6 +560,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".into(),
             power_threshold_ma: None,
             style: Default::default(),
+            desired_fw: None,
         }
     }
 

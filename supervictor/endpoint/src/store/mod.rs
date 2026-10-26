@@ -141,6 +141,15 @@ pub trait DeviceStore: Send + Sync {
         device_id: &str,
         threshold_ma: Option<i64>,
     ) -> Result<DeviceRecord, AppError>;
+    /// Set (`Some`) or clear (`None`) the firmware version a device should
+    /// run next; returns the updated record, `DeviceNotFound` for an
+    /// unknown id. The caller validates the version and that an image
+    /// exists — the store only remembers the string.
+    fn set_desired_fw(
+        &self,
+        device_id: &str,
+        desired_fw: Option<&str>,
+    ) -> Result<DeviceRecord, AppError>;
     /// Replace a device's chart style (every part; unset parts clear);
     /// returns the updated record, `DeviceNotFound` for an unknown id.
     fn set_device_style(

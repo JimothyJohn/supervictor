@@ -1,19 +1,104 @@
 use crate::config::*;
 use crate::models::profile::Profile;
 use crate::models::sim::{seed_from, Hardware, Simulator};
+use crate::models::uplink::UplinkAck;
 use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
+use crate::ota::device::Ota;
+use crate::ota::http::{parse_head, HeadError};
 use embassy_net::tcp::TcpSocket;
 #[cfg(feature = "wifi")]
 use embassy_net::Runner;
 use embassy_net::Stack;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 #[cfg(feature = "embedded")]
 use esp_hal::rtc_cntl::Rwdt;
 use esp_println::println;
 #[cfg(feature = "wifi")]
 use esp_radio::wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState};
 use mbedtls_rs::{Session, SessionConfig, Tls};
+
+/// Uplink path from API_PATH at compile time: "/" against a custom domain
+/// (base-path mapping supplies the stage), "/<stage>" against a raw
+/// execute-api URL. Must start with '/'. The OTA routes hang off the same
+/// prefix.
+pub const API_PATH: &str = env!("API_PATH");
+const _: () = assert!(!API_PATH.is_empty() && API_PATH.as_bytes()[0] == b'/');
+
+/// After a failed update attempt, leave the version alone this long
+/// before trying again on a later uplink — the uplink loop must not turn
+/// into a download loop against a broken image or a flaky link.
+const OTA_RETRY_DELAY: Duration = Duration::from_secs(120);
+
+/// How an uplink response read ended.
+enum Ack {
+    /// A framed response: status and the body bytes that arrived.
+    Framed {
+        status: u16,
+        body: heapless::Vec<u8, 1024>,
+    },
+    /// Peer closed before any head.
+    Closed,
+    /// Read error or timeout; the connection is unusable.
+    Broken,
+}
+
+/// Read the uplink response: head, then body to `Content-Length` (or EOF
+/// / buffer full). Any framed head is a completed round-trip; the body is
+/// only inspected on a 2xx.
+async fn read_ack<T>(session: &mut Session<'_, T>) -> Ack
+where
+    T: embedded_io_async::Read + embedded_io_async::Write,
+{
+    let mut buf = [0u8; 1024];
+    let mut filled = 0usize;
+    let head = loop {
+        match parse_head(&buf[..filled]) {
+            Ok(h) => break h,
+            Err(HeadError::Incomplete) if filled < buf.len() => {}
+            Err(_) => return Ack::Broken,
+        }
+        match embassy_time::with_timeout(HTTP_READ_TIMEOUT, session.read(&mut buf[filled..])).await
+        {
+            Ok(Ok(0)) => {
+                return if filled == 0 {
+                    Ack::Closed
+                } else {
+                    Ack::Broken
+                }
+            }
+            Ok(Ok(n)) => filled += n,
+            Ok(Err(e)) => {
+                println!("   Read failed: {:?}", e);
+                return Ack::Broken;
+            }
+            Err(_) => {
+                println!("   Read timed out");
+                return Ack::Broken;
+            }
+        }
+    };
+    let (head, body_start) = head;
+    let want = head.content_length.map(|n| n as usize);
+    while want.is_some_and(|w| filled - body_start < w) && filled < buf.len() {
+        match embassy_time::with_timeout(HTTP_READ_TIMEOUT, session.read(&mut buf[filled..])).await
+        {
+            Ok(Ok(0)) => break,
+            Ok(Ok(n)) => filled += n,
+            _ => break,
+        }
+    }
+    let end = match want {
+        Some(w) => (body_start + w).min(filled),
+        None => filled,
+    };
+    let mut body = heapless::Vec::new();
+    let _ = body.extend_from_slice(&buf[body_start..end]);
+    Ack::Framed {
+        status: head.status,
+        body,
+    }
+}
 
 async fn backoff_delay(backoff: &mut Duration) {
     println!("   retrying in {}ms", backoff.as_millis());
@@ -104,10 +189,21 @@ const fn parse_u32(s: &str) -> u32 {
 
 /// Main application loop: resolves DNS, establishes mTLS, and sends uplink
 /// telemetry. `seed` (hardware RNG) salts the telemetry simulator so two
-/// boots of the same board don't replay the same trace.
+/// boots of the same board don't replay the same trace. `ota` is `None`
+/// on a board still on the factory partition table. The TCP buffers are
+/// statics: the task future is built on the boot stack before it moves
+/// into its pool, and 8 KB of buffers (plus OTA's) overflowed it.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
-pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt, seed: u64) {
+pub async fn app(
+    stack: Stack<'static>,
+    tls: Tls<'static>,
+    mut rwdt: Rwdt,
+    seed: u64,
+    mut ota: Option<&'static mut Ota>,
+    rx_buffer: &'static mut [u8; TCP_RX_BUFFER_SIZE],
+    tx_buffer: &'static mut [u8; TCP_TX_BUFFER_SIZE],
+) {
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;
         if stack.is_link_up() {
@@ -143,13 +239,11 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt, seed:
         SIM_SPEED
     );
 
-    // Uplink path from API_PATH at compile time: "/" against a custom domain
-    // (base-path mapping supplies the stage), "/<stage>" against a raw
-    // execute-api URL. Must start with '/'.
-    const API_PATH: &str = env!("API_PATH");
-    const _: () = assert!(!API_PATH.is_empty() && API_PATH.as_bytes()[0] == b'/');
-
     let mut backoff = BACKOFF_INITIAL;
+    // OTA: the version the endpoint asked for on the last uplink, and when
+    // a failed attempt allows the next one.
+    let mut ota_target: Option<heapless::String<32>> = None;
+    let mut ota_retry_after: Option<Instant> = None;
 
     // Outer loop: (re)establish TCP + TLS session.
     // Inner loop: reuse the session across uplinks — one handshake, many POSTs.
@@ -176,11 +270,9 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt, seed:
 
         let remote_endpoint = (address, AWS_IOT_PORT);
 
-        let mut rx_buffer = [0u8; TCP_RX_BUFFER_SIZE];
-        let mut tx_buffer = [0u8; TCP_TX_BUFFER_SIZE];
         let client_conf = load_certificates();
 
-        let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+        let mut socket = TcpSocket::new(stack, &mut rx_buffer[..], &mut tx_buffer[..]);
         socket.set_timeout(Some(SOCKET_TIMEOUT));
 
         if let Err(e) = socket.connect(remote_endpoint).await {
@@ -263,33 +355,42 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt, seed:
                 break;
             }
 
-            let mut buffer = [0u8; 1024];
-            match embassy_time::with_timeout(HTTP_READ_TIMEOUT, session.read(&mut buffer)).await {
-                Ok(Ok(n)) if n > 0 => {
+            match read_ack(&mut session).await {
+                Ack::Framed { status, body } => {
                     // A completed round-trip is the liveness proof the
                     // watchdog contract wants — feed nowhere else.
                     rwdt.feed();
                     #[cfg(debug_assertions)]
-                    match core::str::from_utf8(&buffer[..n]) {
-                        Ok(s) => println!("Received response:\n---\n{}\n---", s),
-                        Err(_) => println!("   Response not UTF-8 (binary data)"),
+                    match core::str::from_utf8(&body) {
+                        Ok(s) => println!("Received {} response:\n---\n{}\n---", status, s),
+                        Err(_) => println!("   Response {} not UTF-8", status),
                     }
                     #[cfg(not(debug_assertions))]
-                    println!("   Response received ({} bytes)", n);
+                    println!("   Response {} ({} body bytes)", status, body.len());
+                    if (200..300).contains(&status) {
+                        // This firmware phoned home: if it was an OTA
+                        // candidate, it is now the firmware.
+                        if let Some(o) = ota.as_mut() {
+                            o.confirm();
+                        }
+                        let ack = core::str::from_utf8(&body)
+                            .map(UplinkAck::parse)
+                            .unwrap_or_default();
+                        if let Some(desired) = ack.desired_fw {
+                            let due = ota_retry_after.is_none_or(|t| Instant::now() >= t);
+                            if ota.is_some() && Ota::wants(desired.as_str()) && due {
+                                ota_target = Some(desired);
+                                break;
+                            }
+                        }
+                    }
                 }
-                Ok(Ok(_)) => {
-                    // 0-byte read = peer closed the connection (keepalive expired).
+                Ack::Closed => {
+                    // Peer closed the connection (keepalive expired).
                     println!("   Peer closed connection — reconnecting");
                     break;
                 }
-                Ok(Err(e)) => {
-                    println!("   Read failed: {:?}", e);
-                    break;
-                }
-                Err(_) => {
-                    println!("   Read timed out");
-                    break;
-                }
+                Ack::Broken => break,
             }
 
             // ±20 % jitter so boards flashed together don't phase-lock.
@@ -298,5 +399,33 @@ pub async fn app(stack: Stack<'static>, tls: Tls<'static>, mut rwdt: Rwdt, seed:
         }
 
         let _ = session.close().await;
+        drop(session);
+
+        // The uplink session is down and its buffers are free: run the
+        // update on them. On success this reboots; on failure the uplink
+        // loop resumes and leaves the version alone for a while.
+        if let (Some(target), Some(o)) = (ota_target.take(), ota.as_mut()) {
+            match o
+                .update(
+                    stack,
+                    tls.reference(),
+                    &mut rx_buffer[..],
+                    &mut tx_buffer[..],
+                    target.as_str(),
+                )
+                .await
+            {
+                Ok(never) => match never {},
+                Err(e) => {
+                    println!(
+                        "OTA: update to {} failed: {:?} — next try in {}s",
+                        target,
+                        e,
+                        OTA_RETRY_DELAY.as_secs()
+                    );
+                    ota_retry_after = Some(Instant::now() + OTA_RETRY_DELAY);
+                }
+            }
+        }
     }
 }

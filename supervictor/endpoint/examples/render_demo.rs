@@ -100,6 +100,7 @@ fn device(id: &str, status: &str, subject: Option<&str>, created: &str) -> Devic
         created_at: created.into(),
         power_threshold_ma: None,
         style: Default::default(),
+        desired_fw: None,
     }
 }
 

@@ -135,6 +135,12 @@ pub struct FleetDevice {
     pub threshold_ma: i64,
     /// Whether `threshold_ma` is a per-device override.
     pub threshold_overridden: bool,
+    /// Firmware version an operator wants this device on (OTA target).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desired_fw: Option<String>,
+    /// True while `desired_fw` is set and differs from the reported `fw`:
+    /// the rollout is still in flight for this device.
+    pub fw_pending: bool,
 }
 
 /// Aggregate counts, as served by `GET /fleet/summary`.
@@ -192,6 +198,10 @@ pub fn snapshot(
             let staleness = staleness_of(last_uplink.as_deref(), now_unix);
             let device_threshold = device.effective_threshold_ma(threshold_ma);
             let power = power_state(current, staleness, device_threshold);
+            let fw_pending = device
+                .desired_fw
+                .as_deref()
+                .is_some_and(|want| fw.as_deref() != Some(want));
             FleetDevice {
                 device_id: device.device_id,
                 owner_id: device.owner_id,
@@ -203,6 +213,8 @@ pub fn snapshot(
                 power,
                 threshold_ma: device_threshold,
                 threshold_overridden: device.power_threshold_ma.is_some(),
+                fw_pending,
+                desired_fw: device.desired_fw,
             }
         })
         .collect())

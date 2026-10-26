@@ -1,10 +1,76 @@
-# OTA Updates — Roadmap
+# OTA Updates
 
 Expands the Phase-2 OTA bullet in `ROADMAP.md`. Written July 2026 against
-commit `98a80c1` (telemetry wire schema v2). First target: **the PoE boards**
+commit `98a80c1` (telemetry wire schema v2); **implemented 2026-10-25**
+(O.0 + O.1, plus the digest and anti-rollback pieces of O.2) — see "What
+shipped" below, then the original plan. First target: **the PoE boards**
 — stable power (no brownout mid-flash-write), wired uplink (a ~1 MB image is
 seconds, not minutes), and `poe-iso-eth-01` is the hardware-verified
 reference board.
+
+## What shipped (2026-10-25)
+
+Operator view, staging:
+
+```sh
+FW_VERSION=0.2.0 ./scripts/ota-push.sh poe-iso-rack-03 staging
+```
+
+builds that device's image, uploads it (`PUT /devices/{id}/firmware/0.2.0`,
+admin mTLS), sets `desired_fw` (`PUT /devices/{id}/desired_fw`), and polls
+`/fleet` until the `fw` column flips. `fw_pending` on the fleet row is the
+rollout dashboard. The whole path is per device because every image bakes
+in that device's certificate and key.
+
+Device view (`supervictor/edge/src/ota/`):
+
+1. Every uplink response carries `desired_fw` when an operator set one.
+   The device compares it with `FIRMWARE_VERSION` (`FW_VERSION` at build
+   time, else the crate version) and only moves to a strictly newer
+   version — a replayed or stale target is ignored (anti-rollback).
+2. It fetches `…/firmware/{version}/manifest` (`version`, `size`,
+   `sha256`, `chip`), refuses another chip or another version, then opens
+   one `GET …/firmware/{version}` with `Range: bytes=<resume>-` and
+   `If-Match: "<sha256>"` (a re-upload mid-download is a 412, not a splice).
+3. The body streams into the inactive A/B slot in 4 KB sectors; the ESP-IDF
+   header is checked at the first sector, SHA-256 runs as it goes, and
+   `finish` compares size + digest and then **reads the slot back** and
+   hashes it again. Progress (sector-aligned offset + digest prefix) lives
+   in RTC memory, so a reset mid-download resumes from flash that is really
+   there — the watchdog is deliberately *not* fed during a download.
+4. Activate (`otadata` → the new slot, state `New`), record `Pending`
+   with the previous slot, reboot.
+5. **Rollback is app-driven.** The bootloader espflash ships selects slots
+   but never changes `New → PendingVerify → Aborted`, so this firmware
+   counts boots of an unconfirmed image in a checksummed RTC record: the
+   first 2xx uplink marks the slot `Valid`; the third unconfirmed boot
+   flips `otadata` back and resets. With the 5-minute RTC watchdog that
+   bounds a bad image at ~15 minutes.
+
+Partition table (`supervictor/edge/partitions.csv`): `nvs / otadata /
+phy_init / ota_0 / ota_1`, two 0x1F0000 slots; `espflash` writes `ota_0`
+and `scripts/flash.sh` erases `otadata` on every USB flash. A board still
+on the factory table logs `OTA: unavailable` and keeps uplinking; **one USB
+flash per board enables OTA** (`./scripts/flash.sh <device> staging`).
+
+Endpoint (`supervictor/endpoint/src/firmware.rs`): `FIRMWARE_DIR` on disk,
+content-addressed blobs beside a manifest (atomic rename, the manifest is
+the commit marker), image validation on upload (magic, chip, slot fit,
+appended sha256), `Range` + `If-Match` on download. Download is allowed to
+the device's own bound certificate or an admin only. Without
+`FIRMWARE_DIR` (the Lambda stages today) the routes answer 503.
+
+Tests: `supervictor/edge/src/ota/*_tests.rs` (proptest fault schedules:
+random chunking, resets at arbitrary points, byte corruption, overrun,
+lying flash; request-smuggling shapes; random RTC memory never reverting)
+and `supervictor/endpoint/tests/test_firmware_api.rs` (another device's
+certificate, unbound devices, traversal, torn/oversize/wrong-chip images,
+every `Range` shape, concurrent re-uploads against readers).
+
+Not yet: signed manifests (O.2 signing), an S3 store for the Lambda
+stages, generic images with the identity in NVS (would make one image
+serve the fleet), staged rollouts (O.3). The bench exit criteria in O.0
+and O.1 below are the next thing to run.
 
 ## The model: pull, never push
 
@@ -57,9 +123,10 @@ mid-write power cuts with zero bricks.
   over the full slot vs manifest → activate → reboot. Uplink loop stays
   alive during download (it's the health signal).
 - **Confirm = first successful mTLS uplink after boot** → set
-  `OtaImageState::Valid`. Can't reach the cloud on new firmware? Bootloader
-  rolls back on next watchdog reboot. The device's definition of "working"
-  is the only one that matters: can it phone home.
+  `OtaImageState::Valid`. Can't reach the cloud on new firmware? The
+  firmware itself rolls back after three unconfirmed boots (the espflash
+  bootloader has no rollback — see "What shipped"). The device's
+  definition of "working" is the only one that matters: can it phone home.
 
 **Exit criteria:** bench POE-ISO updated end-to-end by flipping
 `desired_fw`, including one deliberately-broken image that auto-rolls back

@@ -218,6 +218,36 @@ pub struct DeviceThresholdRequest {
     pub power_threshold_ma: Option<i64>,
 }
 
+/// Per-device target firmware update (`PUT /devices/{id}/desired_fw`,
+/// admin). `null` or an absent field clears it. Unknown fields are
+/// rejected so a misspelt key cannot silently clear a rollout target.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DesiredFwRequest {
+    /// Version the device should run next; must be an uploaded image for
+    /// that device (`PUT /devices/{id}/firmware/{version}`).
+    #[serde(default)]
+    pub desired_fw: Option<String>,
+}
+
+/// What the endpoint knows about one uploaded firmware image. Served at
+/// `GET /devices/{id}/firmware/{version}/manifest`; the device checks
+/// `chip`, `size` and `sha256` against what it downloads before it
+/// activates the slot. Field names are the `fields::FW_*` constants.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FirmwareManifest {
+    /// Version string (`crate::firmware::Version` shape).
+    pub version: String,
+    /// Image size in bytes.
+    pub size: u32,
+    /// SHA-256 of the whole image, lowercase hex (64 chars).
+    pub sha256: String,
+    /// Chip token (`crate::firmware::ChipId::label`).
+    pub chip: String,
+    /// RFC 3339 upload time.
+    pub uploaded_at: String,
+}
+
 /// Device info returned by the API (endpoint → CLI).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeviceResponse {
@@ -244,4 +274,7 @@ pub struct DeviceResponse {
     /// Stored point marker, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub marker: Option<Marker>,
+    /// Firmware version the device should run next (OTA target), if set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired_fw: Option<String>,
 }

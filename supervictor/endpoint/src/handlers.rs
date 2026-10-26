@@ -129,6 +129,7 @@ pub fn ingest_uplink(
     validate::check_device_id(fields::UPLINK_ID, &uplink.id)?;
     validate::check_levels(&uplink.levels, uplink.levels_ms)?;
 
+    let mut desired_fw = None;
     if let Some(s) = store {
         let device = s.get_device(&uplink.id)?;
         authorize_uplink(
@@ -137,6 +138,7 @@ pub fn ingest_uplink(
             client_subject.as_deref(),
             require_registration,
         )?;
+        desired_fw = device.and_then(|d| d.desired_fw);
     }
 
     // Persist every field the device sent (health metadata, sensor
@@ -166,9 +168,85 @@ pub fn ingest_uplink(
             device_id: uplink.id,
             current: uplink.current,
             client_subject,
+            desired_fw,
         },
         record,
     })
+}
+
+/// Set or clear the firmware version a device should run next from a JSON
+/// body (`{"desired_fw": "0.2.0"}`; `{}`, `null` or an empty body clears).
+/// Setting requires that image to be stored for the device, so a typo
+/// cannot point a fleet at nothing; clearing never needs the blob store.
+pub fn handle_set_desired_fw(
+    device_id: &str,
+    raw_body: Option<&str>,
+    store: &dyn DeviceStore,
+    firmware: Option<&dyn crate::firmware::FirmwareStore>,
+) -> Result<DeviceResponse, AppError> {
+    validate::check_device_id(fields::DEVICE_ID, device_id)?;
+    let invalid = |detail: String| AppError::InvalidPayload {
+        detail,
+        structured: None,
+    };
+    let req: supervictor_common::models::DesiredFwRequest =
+        match raw_body.map(str::trim).filter(|b| !b.is_empty()) {
+            None => Default::default(),
+            Some(body) => {
+                let value: serde_json::Value =
+                    serde_json::from_str(body).map_err(|e| invalid(e.to_string()))?;
+                match value {
+                    serde_json::Value::Null => Default::default(),
+                    serde_json::Value::Object(_) => {
+                        serde_json::from_value(value).map_err(|e| invalid(e.to_string()))?
+                    }
+                    _ => return Err(invalid("body must be a JSON object".into())),
+                }
+            }
+        };
+    if let Some(version) = req.desired_fw.as_deref() {
+        crate::firmware::check_identifiers(device_id, version)?;
+        let firmware = firmware.ok_or(AppError::FirmwareUnavailable)?;
+        if firmware.manifest(device_id, version)?.is_none() {
+            return Err(AppError::FirmwareNotFound {
+                device_id: device_id.to_string(),
+                version: version.to_string(),
+            });
+        }
+    }
+    let saved = store.set_desired_fw(device_id, req.desired_fw.as_deref())?;
+    Ok(DeviceResponse::from(saved))
+}
+
+/// Whether `subject` may read `device`'s firmware: an admin, or the
+/// device itself proving possession of the certificate it is bound to.
+/// An unbound device (no `subject_dn` on record) cannot be matched, so
+/// nobody but an admin reads its image — it bakes in a private key.
+pub fn authorize_firmware_read(
+    device: &DeviceRecord,
+    client_subject: Option<&str>,
+) -> Result<(), AppError> {
+    match client_subject {
+        Some(presented) if crate::middleware::is_admin_subject(presented) => Ok(()),
+        Some(presented)
+            if device
+                .subject_dn
+                .as_deref()
+                .is_some_and(|bound| dn_matches(bound, presented)) =>
+        {
+            Ok(())
+        }
+        presented => {
+            tracing::warn!(
+                device_id = %sanitize_for_log(&device.device_id),
+                presented = %sanitize_for_log(presented.unwrap_or("<none>")),
+                "firmware read rejected: certificate is neither admin nor the device's own"
+            );
+            Err(AppError::SubjectMismatch {
+                device_id: device.device_id.clone(),
+            })
+        }
+    }
 }
 
 /// Register a new device from a JSON request body.
@@ -212,6 +290,7 @@ pub fn handle_register_device(
         created_at: now_rfc3339(),
         power_threshold_ma: req.power_threshold_ma,
         style,
+        desired_fw: None,
     };
 
     let saved = store.put_device(record)?;

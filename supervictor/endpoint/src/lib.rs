@@ -7,6 +7,8 @@
 pub mod config;
 /// Unified error type with HTTP status mapping.
 pub mod error;
+/// OTA firmware images: validation, blob store, `Range` parsing.
+pub mod firmware;
 /// Fleet health: staleness classification and machine-readable snapshots.
 pub mod fleet;
 /// Framework-agnostic request handlers (pure functions).
