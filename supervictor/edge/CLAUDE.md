@@ -56,8 +56,8 @@ no-reset-no-sync` to attach without rebooting the running firmware.
 - Buffer sizes and capacities are defined in `src/config.rs` — check before changing message formats
 - The wire twin `models/uplink.rs` carries an optional `levels` burst: `UPLINK_BURST`
   samples per interval, one byte per register, quantised with `supervictor_common::levels`
-  (the one shared dependency). `uplink_tests::full_uplink_with_max_id_fits_the_request_buffers`
-  pins the JSON (768) / request (1024) buffers in `network/http.rs`.
+  (the one shared dependency); default 50 per 5 s = 10 Hz. `uplink_tests::full_uplink_with_max_id_fits_the_request_buffers`
+  pins the JSON (1536) / request (2048) buffers in `network/http.rs`.
 
 ## Telemetry simulator
 - `src/models/sim.rs` fills the uplink; `src/models/profile.rs` makes it act

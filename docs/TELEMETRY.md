@@ -112,8 +112,8 @@ for exactly this, so the two ends cannot drift.
 | `heap_free` (bytes) | 0 | 524288 | 2 KiB |
 
 The point is bytes per datapoint: a keyed float costs ~15 bytes on the
-wire, a level costs one. So a device can sample ten times between uplinks
-and ship the whole burst:
+wire, a level costs one. So a device can sample fifty times between
+uplinks and ship the whole burst:
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -126,8 +126,13 @@ rejects a malformed burst (ragged length, missing or zero spacing, a byte
 over 255) with 422 and stores nothing (`validate::check_levels`). Stored
 bursts feed the live view (`/ui/live`, sample resolution, last 120 s) and
 are folded into the history bucket means. Default firmware cadence:
-`UPLINK_BURST = 10` samples over the 5 s interval → one every 500 ms
-(`supervictor/edge/src/config.rs`); the desktop client takes `BURST=`.
+`UPLINK_BURST = 50` samples over the 5 s interval → one every 100 ms,
+10 Hz (`supervictor/edge/src/config.rs`); the desktop client takes
+`BURST=`, capped at `LEVELS_SAMPLES_MAX = 50` per uplink. 10 Hz is where
+the SEN0211 clamp stops rewarding speed: its peak detector rises within a
+mains cycle, so a motor start or inrush is resolved, while its decay is a
+10 s RC regardless (HARDWARE.md 6.1). Going faster doubles the firmware
+buffers, the uplink item and the live page's seed again for no new signal.
 Changing a register's range re-scales every stored burst — append new
 registers at the end instead, never reorder. The `current` range was
 6000 mA until 2026-10-25 (changed to the SEN0211 clamp's 20 A full scale
@@ -155,9 +160,9 @@ a future rollup layer, not the raw ping table — this is the guardrail the
 ## Payload budget
 
 Worst case (64-char id, every field at its widest printing, the nine IMU
-floats, a full 12-sample `levels` burst of three-digit bytes) is 660
-bytes. The firmware's buffers are sized for it: 768-byte JSON buffer and
-1024-byte request buffer in `supervictor/edge/src/network/http.rs`, guarded by
+floats, a full 50-sample `levels` burst of three-digit bytes) is 1420
+bytes. The firmware's buffers are sized for it: 1536-byte JSON buffer and
+2048-byte request buffer in `supervictor/edge/src/network/http.rs`, guarded by
 `uplink_tests::full_uplink_with_max_id_fits_the_request_buffers`. Adding a
 field (or growing `LEVELS_SAMPLES_MAX`) means re-checking that test, not
 hoping.

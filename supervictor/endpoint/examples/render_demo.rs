@@ -63,15 +63,17 @@ const DEMO_SCRIPT: &str = r#"
   }
   // One burst per walking device per tick, covering exactly the tick
   // (BURST samples at STEP ms = TICK ms) so bursts neither overlap nor gap.
-  var TICK = 2500, STEP = 500, BURST = TICK / STEP;
+  var TICK = 2500, STEP = 100, BURST = TICK / STEP;
   function burst(id) {
     var w = walks[id], home = homes[id], R = w.length, out = [];
     for (var i = 0; i < BURST; i++) {
       for (var r = 0; r < R; r++) {
-        var step = r === 0 ? 6 : 1;
-        // Bounded walk with a pull back toward the seed's starting level.
-        var lv = w[r] + Math.round((Math.random() - 0.5) * 2 * step - (w[r] - home[r]) / 24);
-        if (r === 0 && Math.random() < 0.03) lv += 40;
+        // Bounded walk with a pull back toward the seed's starting level;
+        // same per-sample tuning as the seeded history (render_demo.rs).
+        var moved = r === 0 ? Math.floor(Math.random() * 7) - 3
+          : (Math.random() < 0.2 ? Math.floor(Math.random() * 3) - 1 : 0);
+        var lv = w[r] + moved - Math.round((w[r] - home[r]) / 120);
+        if (r === 0 && Math.random() < 0.005) lv += 40;
         w[r] = Math.max(1, Math.min(255, lv));
         out.push(w[r]);
       }
@@ -199,8 +201,9 @@ fn demo_rows(id: &str, seed: u64, step_s: u64) -> Vec<UplinkRecord> {
     rows
 }
 
-/// Two minutes of 8-bit samples for the live page: one burst of ten per
-/// 5 s uplink, each register a bounded walk in level space, run through
+/// Two minutes of 8-bit samples for the live page: one burst of fifty per
+/// 5 s uplink (100 ms apart, the firmware default), each register a
+/// bounded walk in level space, run through
 /// the real burst expansion so the demo exercises the same code path.
 fn demo_live_samples(seed: u64, now_ms: u64) -> Vec<live::Sample> {
     let mut state = seed;
@@ -215,13 +218,23 @@ fn demo_live_samples(seed: u64, now_ms: u64) -> Vec<live::Sample> {
     let mut out = Vec::new();
     let mut t = now_ms - live::WINDOW_S * 1_000;
     while t <= now_ms {
-        let mut flat = Vec::with_capacity(10 * METRICS.len());
-        for _ in 0..10 {
+        let mut flat = Vec::with_capacity(50 * METRICS.len());
+        for _ in 0..50 {
             for (r, lv) in level.iter_mut().enumerate() {
-                let step = if r == 0 { 6 } else { 1 };
-                // Bounded walk pulled back toward its home level.
-                *lv += next(2 * step + 1) as i64 - step as i64 - (*lv - home[r]) / 24;
-                if r == 0 && next(40) == 0 {
+                // Bounded walk pulled back toward its home level. Tuned per
+                // 100 ms sample: current wanders ±3 levels, the slow
+                // registers move one level a fifth of the time, the pull
+                // back is a ~12 s time constant, and an inrush spike lands
+                // about every 20 s.
+                let moved = if r == 0 {
+                    next(7) as i64 - 3
+                } else if next(5) == 0 {
+                    next(3) as i64 - 1
+                } else {
+                    0
+                };
+                *lv += moved - (*lv - home[r]) / 120;
+                if r == 0 && next(200) == 0 {
                     *lv += 40;
                 }
                 *lv = (*lv).clamp(1, 255);
@@ -231,7 +244,7 @@ fn demo_live_samples(seed: u64, now_ms: u64) -> Vec<live::Sample> {
         let record = UplinkRecord {
             device_id: "demo".into(),
             received_at: format_rfc3339(t / 1_000, (t % 1_000) as u32 * 1_000_000),
-            payload: serde_json::json!({ "current": 1, "levels": flat, "levels_ms": 500 }),
+            payload: serde_json::json!({ "current": 1, "levels": flat, "levels_ms": 100 }),
         };
         debug_assert_eq!(parse_rfc3339_unix_ms(&record.received_at), Some(t));
         out.extend(live::samples_of(&record));
@@ -461,7 +474,7 @@ fn main() {
     }
 
     // Live page: the last two minutes of the two live devices as 8-bit
-    // bursts (ten samples per 5 s uplink), stamped so the page's clock
+    // bursts (50 samples per 5 s uplink), stamped so the page's clock
     // alignment puts them at "now" on first paint.
     let now_ms = DEMO_NOW * 1_000;
     let live_devices: Vec<LiveDevice> = {

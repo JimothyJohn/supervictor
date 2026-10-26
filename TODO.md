@@ -243,14 +243,6 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       difficulty: low
       id: temp-floor
       asked: 2026-10-24
-- [ ] **Burst: keep 10 samples per 5 s, or 1 Hz?** — default burst is 10 samples per 5 s uplink (`UPLINK_BURST`, 500 ms spacing; desktop `BURST=`). Capacity is 12 samples/uplink before the JSON buffer (768) needs to grow again. 1 Hz (5 samples) leaves headroom for the IMU registers when they land. The burst is plain JSON bytes (`[12,200,…]`, ~3.5 chars/datapoint); base64 would be 1.33 but needs an encoder on the device — not worth it until the burst is the dominant byte count.
-      needs: a rate
-      result: the uplink JSON budget is settled before the IMU registers land
-      options: keep 10 | 1 Hz (5) | grow the buffer
-      est: 30m
-      difficulty: low
-      id: burst-rate
-      asked: 2026-10-24
 - [ ] **Heated machines: does `on` mean producing or powered?** — "producing" needs a min-on-time or a second threshold per device; "powered" is one bar, as shipped. Extruder and molder are the only sim profiles where it matters (P3 item).
       needs: a definition
       result: the power state matches what an operator means by "on"
