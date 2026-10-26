@@ -1,8 +1,9 @@
 //! Live view data: uplinks as timestamped 8-bit register samples.
 //!
 //! The live dashboard wants the newest two minutes at *sample* resolution,
-//! not bucket means: a device that batches ten samples per uplink in a
-//! `levels` burst (`supervictor_common::levels`) shows all ten, spaced
+//! not bucket means: a device that batches its samples per uplink in a
+//! `levels` burst (`supervictor_common::levels`; fifty at the firmware's
+//! 10 Hz default) shows every one, spaced
 //! `levels_ms` apart ending at the receive time. A device without a burst
 //! contributes one sample, quantised from its scalar fields, so old and
 //! new firmware draw on the same strip. Pure functions over store rows;

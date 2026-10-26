@@ -15,7 +15,8 @@
 //!                 the client cert's CN once the device is registered
 //!   INTERVAL_S  - Seconds between uplinks (default 5; jittered ±20 %)
 //!   BURST       - Samples per uplink, sent as an 8-bit `levels` burst
-//!                 (default 10 → one sample every 500 ms; 1 disables)
+//!                 (default 50 → one sample every 100 ms; 1 disables;
+//!                 capped at 50 per uplink)
 //!   SIM_SEED    - u64 seed salt for reproducible telemetry (default: clock)
 //!   SIM_PROFILE - Machine to impersonate: generic (default), extruder,
 //!                 press-brake, cnc, saw, oven, compressor, conveyor, molder,
@@ -92,7 +93,7 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
     if interval_s == 0 {
         return Err("INTERVAL_S must be at least 1".into());
     }
-    let burst: usize = env_or("BURST", "10")
+    let burst: usize = env_or("BURST", "50")
         .parse()
         .map_err(|_| "BURST must be a positive integer")?;
     if burst == 0 {

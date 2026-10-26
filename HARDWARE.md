@@ -280,8 +280,10 @@ row for the kit (`ethernet,sensor-current[,sensor-sht4x]`) in
 moment TODO.md P2 "simulator behind a cargo feature" lands as `sim`, on only
 for `SIM_PROFILE` builds.
 
-**Sampling.** The burst task already samples every 500 ms
-(`UPLINK_BURST = 10` per 5 s uplink). Each slot: 64 ADC reads averaged,
+**Sampling.** The burst task already samples every 100 ms
+(`UPLINK_BURST = 50` per 5 s uplink, 10 Hz; decided 2026-10-25 — the
+module's rise is fast enough to show at that rate, its decay is the 10 s
+RC above whatever the rate). Each slot: 64 ADC reads averaged,
 converted with 6.1, floored per 6.2, quantised into the `current` register.
 The SHT4x high-precision measurement takes ~10 ms; read it once per uplink,
 not per slot, and skip NaN/CRC failures (the serializer turns non-finite

@@ -139,8 +139,12 @@ const _: () = assert!(UPLINK_INTERVAL_S > 0, "UPLINK_INTERVAL_S must be >= 1");
 pub const MAIN_LOOP_DELAY: Duration = Duration::from_secs(UPLINK_INTERVAL_S as u64);
 /// Samples per uplink interval, shipped as an 8-bit `levels` burst (one
 /// byte per register per sample; `models::uplink::LEVELS_SAMPLES_MAX`
-/// caps it). 10 over the default 5 s interval = a sample every 500 ms.
-pub const UPLINK_BURST: usize = 10;
+/// caps it). 50 over the default 5 s interval = a sample every 100 ms
+/// (10 Hz). Decided 2026-10-25: the clamp module's peak detector rises
+/// within a mains cycle, so 10 Hz resolves inrush and a motor start; its
+/// decay is a 10 s RC either way (HARDWARE.md 6.1). Faster than this the
+/// sensor adds nothing and every buffer below doubles again.
+pub const UPLINK_BURST: usize = 50;
 /// Initial backoff delay after a transient failure (DNS, TCP, TLS, HTTP).
 pub const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
 /// Maximum backoff delay — caps exponential growth.
