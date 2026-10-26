@@ -303,6 +303,33 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
   // the two samples around the display instant, so a new sample extends
   // the line smoothly across a frame instead of snapping it forward.
   var LAG_MIN = 100, LAG_MAX = 1000;
+  // A run of points becomes one path: straight segments when samples sit
+  // closer than a few pixels (a curve would be invisible and costs more),
+  // otherwise a monotone cubic through them (Fritsch–Carlson tangents:
+  // passes every sample, never overshoots a peak or trough).
+  var CURVE_PX = 2.5;
+  function trace(ctx, pts, curved) {
+    var n = pts.length;
+    if (!n) return;
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    if (!curved || n < 3) { for (var k = 1; k < n; k++) ctx.lineTo(pts[k][0], pts[k][1]); return; }
+    var dx = [], s = [], m = new Array(n), i;
+    for (i = 0; i < n - 1; i++) {
+      dx.push(pts[i + 1][0] - pts[i][0]);
+      s.push(dx[i] > 0 ? (pts[i + 1][1] - pts[i][1]) / dx[i] : 0);
+    }
+    m[0] = s[0]; m[n - 1] = s[n - 2];
+    for (i = 1; i < n - 1; i++) m[i] = s[i - 1] * s[i] <= 0 ? 0 : (s[i - 1] + s[i]) / 2;
+    for (i = 0; i < n - 1; i++) {
+      if (!s[i]) { m[i] = 0; m[i + 1] = 0; continue; }
+      var a = m[i] / s[i], b = m[i + 1] / s[i], h = a * a + b * b;
+      if (h > 9) { var t = 3 / Math.sqrt(h); m[i] = t * a * s[i]; m[i + 1] = t * b * s[i]; }
+    }
+    for (i = 0; i < n - 1; i++) {
+      var d = dx[i] / 3;
+      ctx.bezierCurveTo(pts[i][0] + d, pts[i][1] + m[i] * d, pts[i + 1][0] - d, pts[i + 1][1] - m[i + 1] * d, pts[i + 1][0], pts[i + 1][1]);
+    }
+  }
   function head(t, l, r, j, tau) {
     if (j <= 0 || j >= t.length) return null;
     var a = l[j - 1][r] | 0, b = l[j][r] | 0;
@@ -348,27 +375,28 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
         ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         ctx.setLineDash(dashes(d.style));
         ctx.beginPath();
-        var up = true, lx, ly, marks = [], i = 0;
+        var runs = [], run = null, marks = [], i = 0;
         while (i < n && d.t[i] < t0 - 2000) i++;
+        var first = i;
         for (; i < n && d.t[i] <= tau; i++) {
           var lv = d.l[i][r] | 0;
-          if (!lv) { up = true; continue; }
+          if (!lv) { run = null; continue; }
           var px = x(d.t[i]), py = y(lv);
-          if (up) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-          up = false; lx = px; ly = py;
+          if (!run) { run = []; runs.push(run); }
+          run.push([px, py]);
           if (d.style.marker && d.style.marker !== 'none') marks.push([px, py]);
         }
         var hv = head(d.t, d.l, r, i, tau);
-        if (hv !== null) {
-          var hx = x(tau), hy = y(hv);
-          if (up) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
-          up = false; lx = hx; ly = hy;
-        }
+        if (hv !== null) { if (!run) { run = []; runs.push(run); } run.push([x(tau), y(hv)]); }
+        var curved = i - first > 1 && pw / (i - first) >= CURVE_PX;
+        for (var q = 0; q < runs.length; q++) trace(ctx, runs[q], curved);
         ctx.stroke();
         ctx.setLineDash([]);
         for (var k = 0; k < marks.length; k++) glyph(ctx, d.style.marker, marks[k][0], marks[k][1], 2.5);
-        if (lx !== undefined) {
-          ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, Math.PI * 2); ctx.fill();
+        var tail = runs.length ? runs[runs.length - 1] : null;
+        if (tail) {
+          var lp = tail[tail.length - 1];
+          ctx.beginPath(); ctx.arc(lp[0], lp[1], 3.5, 0, Math.PI * 2); ctx.fill();
           ctx.strokeStyle = surface; ctx.lineWidth = 2; ctx.stroke();
         }
       });
