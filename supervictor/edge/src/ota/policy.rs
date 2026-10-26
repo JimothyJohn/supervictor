@@ -172,6 +172,26 @@ pub fn on_boot(state: State) -> (BootDecision, State) {
     }
 }
 
+/// Rebuild a lost trial record from otadata. esp-hal zeroes `persistent`
+/// statics on a `ChipPowerOn` reset (power cycle, EN pin, `espflash
+/// reset`), so a board power-cycled during its trial boots would otherwise
+/// read `Idle` and keep an unconfirmed image forever. If the record is
+/// `Idle` but otadata says the running slot is still `New` (set at
+/// activation, cleared only by confirm or revert), start counting from
+/// zero with the other slot as the fallback. Anything else is left alone:
+/// a `Pending` record already counts, a `Resume` record belongs to a
+/// download into the *other* slot, and a `Valid`/`Invalid`/`Undefined`
+/// slot is not on trial.
+pub fn adopt_untracked(state: State, slot_is_new: bool, current_slot: Option<u8>) -> State {
+    match (state, slot_is_new, current_slot) {
+        (State::Idle, true, Some(current @ (0 | 1))) => State::Pending {
+            boots: 0,
+            previous_slot: 1 - current,
+        },
+        _ => state,
+    }
+}
+
 /// The resume record that matches a manifest, if the stored one does.
 pub fn resume_offset(state: State, size: u32, sha256: &[u8; 32]) -> u32 {
     match state {

@@ -179,7 +179,20 @@ impl Ota {
     /// Count this boot against an unconfirmed image; revert and reset when
     /// the budget is spent. Call before anything that could wedge.
     pub fn boot_check(&mut self) -> BootDecision {
-        let (decision, next) = policy::on_boot(rtc_load());
+        let mut state = rtc_load();
+        if state == State::Idle {
+            // A power-on/EN reset wiped the RTC record; otadata still knows
+            // whether this slot was ever confirmed.
+            if let Ok(mut updater) = OtaUpdater::new(&mut self.flash, &mut *self.pt_buf) {
+                let slot_is_new = matches!(updater.current_ota_state(), Ok(OtaImageState::New));
+                let current = updater.selected_partition().ok().and_then(slot_number);
+                state = policy::adopt_untracked(state, slot_is_new, current);
+                if state != State::Idle {
+                    println!("OTA: boot record lost (power-on reset) but this slot is unconfirmed; counting again from otadata");
+                }
+            }
+        }
+        let (decision, next) = policy::on_boot(state);
         rtc_store(next);
         match decision {
             BootDecision::Revert { previous_slot } => {

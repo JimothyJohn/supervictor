@@ -158,3 +158,44 @@ proptest! {
         prop_assert_eq!(resume_offset(s, size, &sha), offset);
     }
 }
+
+#[test]
+fn a_lost_record_is_rebuilt_from_an_unconfirmed_slot() {
+    // A power-on reset zeroed RTC memory; otadata still says the running
+    // slot is `New`. The trial starts over with the other slot as fallback.
+    assert_eq!(
+        adopt_untracked(State::Idle, true, Some(0)),
+        State::Pending {
+            boots: 0,
+            previous_slot: 1
+        }
+    );
+    assert_eq!(
+        adopt_untracked(State::Idle, true, Some(1)),
+        State::Pending {
+            boots: 0,
+            previous_slot: 0
+        }
+    );
+    // ...and the usual budget applies from there.
+    let mut state = adopt_untracked(State::Idle, true, Some(0));
+    for _ in 0..MAX_PENDING_BOOTS {
+        state = on_boot(state).1;
+    }
+    assert_eq!(on_boot(state).0, BootDecision::Revert { previous_slot: 1 });
+}
+
+#[test]
+fn adopt_untracked_leaves_everything_else_alone() {
+    assert_eq!(adopt_untracked(State::Idle, false, Some(0)), State::Idle);
+    assert_eq!(adopt_untracked(State::Idle, true, None), State::Idle);
+    assert_eq!(adopt_untracked(State::Idle, true, Some(2)), State::Idle);
+    let p = State::Pending {
+        boots: 2,
+        previous_slot: 1,
+    };
+    assert_eq!(adopt_untracked(p, true, Some(0)), p);
+    assert_eq!(adopt_untracked(p, false, Some(0)), p);
+    let r = resume_state(8192, 100_000, &[7; 32]);
+    assert_eq!(adopt_untracked(r, true, Some(0)), r);
+}

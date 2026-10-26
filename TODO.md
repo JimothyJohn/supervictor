@@ -129,11 +129,21 @@ compose/Caddy stack on that box is stopped and disabled, docker disabled.
       target set to the new version reporting; confirmed (39 min up, flat
       heap, no revert). The first 0.1.1 flash panicked on a 25.7 KB boot
       stack (fixed a11b7f6 + dram2 heap on every ESP32 build bc26475).
-      Remaining torture set, scripts in the poe-iso worktree:
-      `scratch/04-ota-revert-test.sh` (wrong-CA image → 3-boot revert,
-      ~16 min) and `scratch/05-ota-resume-test.sh` (hard reset mid-download
-      → 'OTA: resuming at'); then 20 self-swaps.
-      needs: a board on USB (rack-03 is); ~25 min of bench time
+      Torture run 1 (2026-10-26 01:08Z) FAILED usefully: 04 passed falsely at
+      +2 min (it read the stale pre-OTA fleet row as "back on 0.1.2"), so 05
+      ran while 0.1.3 was in its trial boots and its `espflash reset` — a
+      power-on reset, on which esp-hal zeroes `persistent` RTC statics — wiped
+      the boot record; the firmware took 0.1.3 as confirmed and sat dark for
+      an hour. Fixed on feat/ota: boot_check rebuilds the trial from otadata
+      (`New` slot + no record → Pending), 04 demands a fresh uplink and can
+      EN-reset mid-trial (`EN_RESET_AT`), 05 says what a power-on reset can
+      show (restart, not resume). Rerun order, scripts in the poe-iso worktree:
+      `scratch/06-ota-reflash-rack-03.sh` (yours: USB flash 0.1.5), then
+      `EN_RESET_AT=150 scratch/04-ota-revert-test.sh` (~17 min),
+      `scratch/05-ota-resume-test.sh` (~4 min); then 20 self-swaps. Never leave
+      a serial monitor attached across a reset: the CH340 parks the board in
+      the ROM bootloader (happened 01:52Z; `espflash reset` recovers).
+      needs: a board on USB (rack-03 is, stuck on wrong-CA 0.1.3 until 06 runs); ~30 min of bench time
       result: OTA proven on hardware; the fleet can be reflashed once over USB and never again
       est: 2h
       difficulty: med
@@ -296,4 +306,13 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       difficulty: low
       id: ota-enablement-reflash
       asked: 2026-10-25
+      by: OTA session (feat/ota)
+- [ ] **OTA resume: must a download survive a power cut, or only a reset?** — the resume record (offset into the inactive slot) lives in RTC fast RAM, which esp-hal zeroes on every power-on/EN reset by design; it survives the 5-min watchdog and software resets. So a PoE switch reboot or power cut mid-download restarts the ~60 s pull from zero (correct, just not a resume), and nothing on the bench can trigger a record-keeping reset from outside, so 'OTA: resuming at' has no hardware proof yet. My pick: accept restart-on-power-cut (one minute, no flash wear), and prove resume by letting the download run past the watchdog once (`UPDATE_DEADLINE` is 200 s inside a 300 s watchdog, so a deliberately slow image: an endpoint knob to throttle one device's image bytes) rather than adding a flash-resident record or a reset endpoint on the board.
+      needs: your pick
+      result: docs/OTA.md states the contract; 05 (or a 07) proves the path that is promised
+      options: accept restart on power cut, prove resume via throttled download | resume must survive power cut (flash-resident record) | drop resume, always restart
+      est: 2h
+      difficulty: med
+      id: ota-resume-proof
+      asked: 2026-10-26
       by: OTA session (feat/ota)
