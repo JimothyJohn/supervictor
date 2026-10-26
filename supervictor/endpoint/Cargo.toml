@@ -13,7 +13,7 @@ dynamo = ["aws-sdk-dynamodb", "aws-config"]
 tls = ["rustls", "tokio-rustls", "rustls-pki-types", "x509-parser"]
 # Server-rendered fleet dashboard (docs plan: maud templates + SSE).
 # Disable for API-only deployments: --no-default-features --features sqlite
-ui = ["maud", "futures-core"]
+ui = ["maud"]
 
 [dependencies]
 axum = "0.8"
@@ -26,9 +26,10 @@ tower-http = { version = "0.7", features = ["trace", "compression-gzip"] }
 rusqlite = { version = "0.40", features = ["bundled"], optional = true }
 # maud: compile-time-checked, auto-escaping HTML. Proc-macro stack (syn/quote)
 # is already in tree via serde derive. futures-core: trait-only crate (Stream
-# for the SSE adapter), already in tree via hyper/tokio ecosystem.
+# for the SSE adapter and the stalled firmware body), already in tree via
+# hyper/tokio ecosystem.
 maud = { version = "0.27", features = ["axum"], optional = true }
-futures-core = { version = "0.3", optional = true }
+futures-core = "0.3"
 aws-sdk-dynamodb = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
 supervictor-common = { path = "../common", features = ["alloc"] }

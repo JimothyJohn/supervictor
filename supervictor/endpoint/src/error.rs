@@ -52,6 +52,12 @@ pub enum AppError {
     /// This deployment has no firmware blob store (`FIRMWARE_DIR` unset).
     FirmwareUnavailable,
 
+    /// No download fault is armed for that device.
+    FirmwareFaultNotArmed {
+        /// Device asked about.
+        device_id: String,
+    },
+
     /// Storage backend error (SQLite or DynamoDB), classified.
     Store(crate::store::StoreError),
 
@@ -79,6 +85,9 @@ impl core::fmt::Display for AppError {
                 write!(f, "no firmware {version} for device {device_id}")
             }
             AppError::FirmwareUnavailable => f.write_str("firmware store not configured"),
+            AppError::FirmwareFaultNotArmed { device_id } => {
+                write!(f, "no firmware fault armed for {device_id}")
+            }
             AppError::Store(msg) => write!(f, "store error: {msg}"),
             AppError::Config(msg) => write!(f, "config error: {msg}"),
         }
@@ -147,6 +156,13 @@ impl IntoResponse for AppError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 ErrorResponse {
                     error: "Firmware store not configured".into(),
+                    detail: None,
+                },
+            ),
+            AppError::FirmwareFaultNotArmed { .. } => (
+                StatusCode::NOT_FOUND,
+                ErrorResponse {
+                    error: "No firmware fault armed".into(),
                     detail: None,
                 },
             ),

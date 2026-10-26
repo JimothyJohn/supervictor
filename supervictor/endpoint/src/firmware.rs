@@ -10,14 +10,22 @@
 //! Self-hosted the store is a directory (`FIRMWARE_DIR`); the Lambda path
 //! has no blob store yet and answers 503 on these routes (TODO.md).
 
+use std::collections::HashMap;
 use std::fs;
+use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::task::{Context, Poll};
+use std::time::Duration;
+
+use axum::body::Bytes;
 
 use sha2::{Digest, Sha256};
 use supervictor_common::firmware::{self, ChipId, ImageHeader};
-use supervictor_common::models::FirmwareManifest;
+use supervictor_common::models::{FirmwareFault, FirmwareManifest};
 
 use crate::error::AppError;
 use crate::middleware::sanitize_for_log;
@@ -477,6 +485,68 @@ pub fn parse_range(header: Option<&str>, total: u64) -> RangeOutcome {
             _ => RangeOutcome::Whole,
         },
         (true, true) => RangeOutcome::Whole,
+    }
+}
+
+// ── Bench fault injection ───────────────────────────────────────────────
+
+/// Armed one-shot download faults per device (`PUT /devices/{id}/firmware_fault`).
+/// Process memory on purpose: a bench knob, never fleet state.
+pub type FaultTable = Arc<Mutex<HashMap<String, FirmwareFault>>>;
+
+/// A new, empty fault table.
+pub fn fault_table() -> FaultTable {
+    Arc::new(Mutex::new(HashMap::new()))
+}
+
+/// Lock the table, surviving a poisoned mutex (the data is a plain map).
+pub fn faults(table: &FaultTable) -> MutexGuard<'_, HashMap<String, FirmwareFault>> {
+    table.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// An image body that pauses once. `body` is the bytes of the range being
+/// served, starting at image offset `start`; the pause lands at the fault's
+/// absolute `stall_at` (before the first byte if the range starts after it,
+/// after the last if it ends before it). Total length and order are
+/// untouched, so `Content-Length` and the digest stay honest: only time is
+/// injected, which is what makes the device's read timeout fire.
+pub struct StalledBody {
+    head: Option<Bytes>,
+    sleep: Option<Pin<Box<tokio::time::Sleep>>>,
+    tail: Option<Bytes>,
+}
+
+impl StalledBody {
+    /// Split `body` (served from image offset `start`) at the fault.
+    pub fn new(body: Bytes, start: u64, fault: FirmwareFault) -> Self {
+        let cut = fault.stall_at.saturating_sub(start).min(body.len() as u64) as usize;
+        let tail = body.slice(cut..);
+        let head = body.slice(..cut);
+        StalledBody {
+            head: (!head.is_empty()).then_some(head),
+            sleep: Some(Box::pin(tokio::time::sleep(Duration::from_secs(
+                fault.stall_secs,
+            )))),
+            tail: (!tail.is_empty()).then_some(tail),
+        }
+    }
+}
+
+impl futures_core::Stream for StalledBody {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+        if let Some(head) = this.head.take() {
+            return Poll::Ready(Some(Ok(head)));
+        }
+        if let Some(sleep) = this.sleep.as_mut() {
+            match sleep.as_mut().poll(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(()) => this.sleep = None,
+            }
+        }
+        Poll::Ready(this.tail.take().map(Ok))
     }
 }
 

@@ -31,6 +31,8 @@ pub struct AppState {
     pub events: crate::ui::sse::EventSender,
     /// OTA image blob store; `None` makes the firmware routes answer 503.
     pub firmware: Option<Arc<dyn crate::firmware::FirmwareStore>>,
+    /// Bench-only one-shot download faults (`firmware_fault`), in memory.
+    pub faults: crate::firmware::FaultTable,
 }
 
 /// Runtime policy knobs the router needs beyond the store.
@@ -79,6 +81,7 @@ pub fn router_with_firmware(
         #[cfg(feature = "ui")]
         events: crate::ui::sse::channel(),
         firmware,
+        faults: crate::firmware::fault_table(),
     };
 
     // Fleet health API: admin mTLS only — it enumerates the device inventory.
@@ -99,6 +102,12 @@ pub fn router_with_firmware(
             put(put_firmware)
                 .delete(delete_firmware)
                 .layer(DefaultBodyLimit::max(crate::firmware::MAX_IMAGE_BYTES)),
+        )
+        // Bench only: stall a device's next download once (docs/OTA.md
+        // "Contract and bench proof"). Admin, like everything that steers OTA.
+        .route(
+            wire::DEVICE_FIRMWARE_FAULT_PATTERN,
+            put(set_firmware_fault).get(get_firmware_fault),
         )
         .route_layer(axum::middleware::from_fn(crate::middleware::require_admin))
         .with_state(state.clone());
@@ -304,6 +313,69 @@ async fn delete_firmware(
     }
 }
 
+/// Arm (`{"stall_at": N, "stall_secs": S}` → 200 with the fault) or clear
+/// (`null`, `{}` or an empty body → 204) the one-shot stall on a device's
+/// next image download. Unknown keys are rejected so a typo cannot clear.
+async fn set_firmware_fault(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    body: String,
+) -> Result<Response, crate::error::AppError> {
+    use supervictor_common::models::FirmwareFault;
+    crate::validate::check_device_id(supervictor_common::fields::DEVICE_ID, &device_id)?;
+    state
+        .store
+        .get_device(&device_id)?
+        .ok_or_else(|| crate::error::AppError::DeviceNotFound {
+            device_id: device_id.clone(),
+        })?;
+    let invalid = |detail: String| crate::error::AppError::InvalidPayload {
+        detail,
+        structured: None,
+    };
+    let fault: Option<FirmwareFault> = match body.trim() {
+        "" | "null" | "{}" => None,
+        text => {
+            let value: serde_json::Value =
+                serde_json::from_str(text).map_err(|e| invalid(e.to_string()))?;
+            if !value.is_object() {
+                return Err(invalid("body must be a JSON object".into()));
+            }
+            Some(serde_json::from_value(value).map_err(|e| invalid(e.to_string()))?)
+        }
+    };
+    let mut table = crate::firmware::faults(&state.faults);
+    match fault {
+        Some(fault) => {
+            table.insert(device_id.clone(), fault);
+            tracing::info!(
+                device_id = %crate::middleware::sanitize_for_log(&device_id),
+                stall_at = fault.stall_at,
+                stall_secs = fault.stall_secs,
+                "firmware download fault armed"
+            );
+            Ok((StatusCode::OK, Json(fault)).into_response())
+        }
+        None => {
+            table.remove(&device_id);
+            Ok(StatusCode::NO_CONTENT.into_response())
+        }
+    }
+}
+
+/// The fault armed for a device, or 404.
+async fn get_firmware_fault(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+) -> Result<Json<supervictor_common::models::FirmwareFault>, crate::error::AppError> {
+    crate::validate::check_device_id(supervictor_common::fields::DEVICE_ID, &device_id)?;
+    crate::firmware::faults(&state.faults)
+        .get(&device_id)
+        .copied()
+        .map(Json)
+        .ok_or(crate::error::AppError::FirmwareFaultNotArmed { device_id })
+}
+
 async fn get_firmware_manifest(
     State(state): State<AppState>,
     Path((device_id, version)): Path<(String, String)>,
@@ -392,7 +464,21 @@ async fn get_firmware(
             "blob shorter than its manifest",
         )));
     }
-    let mut resp = (status, body).into_response();
+    // One-shot bench stall: same bytes, same length, a pause in the middle.
+    let fault = crate::firmware::faults(&state.faults).remove(&device_id);
+    let mut resp = match fault {
+        Some(fault) => {
+            tracing::info!(
+                device_id = %crate::middleware::sanitize_for_log(&device_id),
+                stall_at = fault.stall_at,
+                stall_secs = fault.stall_secs,
+                "firmware download: stalling once as armed"
+            );
+            let stalled = crate::firmware::StalledBody::new(Bytes::from(body), start, fault);
+            (status, axum::body::Body::from_stream(stalled)).into_response()
+        }
+        None => (status, body).into_response(),
+    };
     let h = resp.headers_mut();
     h.insert(
         header::CONTENT_TYPE,

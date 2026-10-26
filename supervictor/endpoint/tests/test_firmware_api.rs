@@ -970,3 +970,175 @@ async fn concurrent_uploads_and_downloads_never_expose_a_torn_image() {
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
 }
+
+// ── Bench fault injection: a one-shot stall on the next download ───────
+
+async fn arm(server: &TestServer, device: &str, body: &str) -> axum_test::TestResponse {
+    let (n, v) = dn(ADMIN_DN);
+    server
+        .put(&format!("/devices/{device}/firmware_fault"))
+        .add_header(n, v)
+        .text(body.to_string())
+        .await
+}
+
+async fn armed(server: &TestServer, device: &str) -> axum_test::TestResponse {
+    let (n, v) = dn(ADMIN_DN);
+    server
+        .get(&format!("/devices/{device}/firmware_fault"))
+        .add_header(n, v)
+        .await
+}
+
+#[tokio::test]
+async fn firmware_fault_is_admin_only_validated_and_clearable() {
+    let r = rig();
+    seed(r.store.as_ref(), "d1", Some(DEV1_DN));
+    let good = r#"{"stall_at":64,"stall_secs":0}"#;
+
+    // Nobody but an admin steers a download.
+    let resp = r.server.put("/devices/d1/firmware_fault").text(good).await;
+    assert_eq!(resp.status_code(), 403);
+    let (n, v) = dn(DEV1_DN);
+    let resp = r
+        .server
+        .put("/devices/d1/firmware_fault")
+        .add_header(n.clone(), v.clone())
+        .text(good)
+        .await;
+    assert_eq!(resp.status_code(), 403, "a device cannot stall itself");
+    let resp = r
+        .server
+        .get("/devices/d1/firmware_fault")
+        .add_header(n, v)
+        .await;
+    assert_eq!(resp.status_code(), 403);
+
+    // Unknown device, bad shapes.
+    assert_eq!(arm(&r.server, "ghost", good).await.status_code(), 404);
+    for bad in [
+        "[1,2]",
+        "7",
+        r#"{"stall_at":64}"#,
+        r#"{"stall_at":-1,"stall_secs":0}"#,
+        r#"{"stall_at":64,"stall_secs":0,"typo":1}"#,
+        r#"{"stall_at":"64","stall_secs":0}"#,
+        "not json",
+    ] {
+        let resp = arm(&r.server, "d1", bad).await;
+        assert!(
+            resp.status_code().is_client_error() && resp.status_code() != 403,
+            "{bad}: {}",
+            resp.status_code()
+        );
+        assert_eq!(
+            armed(&r.server, "d1").await.status_code(),
+            404,
+            "{bad} armed something"
+        );
+    }
+
+    // Arm, read back, clear three ways.
+    assert_eq!(armed(&r.server, "d1").await.status_code(), 404);
+    let resp = arm(&r.server, "d1", good).await;
+    assert_eq!(resp.status_code(), 200, "{}", resp.text());
+    assert_eq!(
+        resp.json::<serde_json::Value>(),
+        serde_json::json!({"stall_at":64,"stall_secs":0})
+    );
+    assert_eq!(armed(&r.server, "d1").await.status_code(), 200);
+    for clear in ["null", "{}", ""] {
+        arm(&r.server, "d1", good).await;
+        assert_eq!(
+            arm(&r.server, "d1", clear).await.status_code(),
+            204,
+            "{clear:?}"
+        );
+        assert_eq!(armed(&r.server, "d1").await.status_code(), 404, "{clear:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_stalled_download_delivers_the_exact_bytes_once_then_disarms() {
+    let r = rig();
+    seed(r.store.as_ref(), "d1", Some(DEV1_DN));
+    let img = image(ChipId::Esp32, 4000, 3);
+    assert_eq!(
+        upload(&r.server, "d1", "0.2.0", &img).await.status_code(),
+        201
+    );
+
+    // Whole download, stall in the middle: same bytes, same framing.
+    assert_eq!(
+        arm(&r.server, "d1", r#"{"stall_at":1000,"stall_secs":0}"#)
+            .await
+            .status_code(),
+        200
+    );
+    let resp = get_range(&r.server, None).await;
+    assert_eq!(resp.status_code(), 200);
+    assert_eq!(
+        resp.header("content-length").to_str().unwrap(),
+        img.len().to_string()
+    );
+    assert_eq!(resp.as_bytes().as_ref(), &img[..], "stalled body differs");
+    assert_eq!(
+        armed(&r.server, "d1").await.status_code(),
+        404,
+        "a fault fires once"
+    );
+
+    // Resumed range that starts after the stall point: the pause comes
+    // first, the bytes are still exactly the range.
+    assert_eq!(
+        arm(&r.server, "d1", r#"{"stall_at":100,"stall_secs":0}"#)
+            .await
+            .status_code(),
+        200
+    );
+    let resp = get_range(&r.server, Some("bytes=500-")).await;
+    assert_eq!(resp.status_code(), 206);
+    assert_eq!(resp.as_bytes().as_ref(), &img[500..]);
+
+    // Stall point past the end: nothing to pause, bytes intact, fault consumed.
+    assert_eq!(
+        arm(&r.server, "d1", r#"{"stall_at":999999,"stall_secs":0}"#)
+            .await
+            .status_code(),
+        200
+    );
+    let resp = get_range(&r.server, Some("bytes=0-99")).await;
+    assert_eq!(resp.status_code(), 206);
+    assert_eq!(resp.as_bytes().as_ref(), &img[..100]);
+    assert_eq!(armed(&r.server, "d1").await.status_code(), 404);
+
+    // The next download is unstalled and untouched.
+    let resp = get_range(&r.server, None).await;
+    assert_eq!(resp.as_bytes().as_ref(), &img[..]);
+}
+
+#[tokio::test]
+async fn the_stall_really_waits() {
+    let r = rig();
+    seed(r.store.as_ref(), "d1", Some(DEV1_DN));
+    let img = image(ChipId::Esp32, 300, 9);
+    assert_eq!(
+        upload(&r.server, "d1", "0.2.0", &img).await.status_code(),
+        201
+    );
+    assert_eq!(
+        arm(&r.server, "d1", r#"{"stall_at":50,"stall_secs":1}"#)
+            .await
+            .status_code(),
+        200
+    );
+    let started = std::time::Instant::now();
+    let resp = get_range(&r.server, None).await;
+    assert_eq!(resp.status_code(), 200);
+    assert_eq!(resp.as_bytes().as_ref(), &img[..]);
+    assert!(
+        started.elapsed() >= std::time::Duration::from_secs(1),
+        "no pause: {:?}",
+        started.elapsed()
+    );
+}

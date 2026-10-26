@@ -72,6 +72,35 @@ stages, generic images with the identity in NVS (would make one image
 serve the fleet), staged rollouts (O.3). The bench exit criteria in O.0
 and O.1 below are the next thing to run.
 
+## Contract and bench proof (2026-10-26)
+
+- **A power cut is a restart, not a resume.** Both RTC records (trial-boot
+  count, download progress) live in `#[ram(persistent)]` memory, which
+  esp-hal zeroes on a power-on reset — a power cycle, the EN pin,
+  `espflash reset`, a PoE switch reboot. A board power-cycled mid-download
+  pulls the image again from zero (~60 s on PoE). A board power-cycled
+  during its trial boots rebuilds the trial from otadata
+  (`policy::adopt_untracked`): a slot still `New` with no record is on
+  trial, the other slot is the fallback. Watchdog (`SysRtcWdt`) and
+  software resets keep both records. Decided 2026-10-26 (TODO
+  `ota-resume-proof`): no flash-resident resume record.
+- **Resume is proven without a reset.** `PUT /devices/{id}/firmware_fault`
+  (admin, body `{"stall_at": N, "stall_secs": 15}`, one-shot, in memory)
+  makes the device's next image download pause after `N` bytes for longer
+  than its 10 s read timeout. The device drops the connection, keeps its
+  resume record, and the next uplink retries with `Range` + `If-Match`:
+  serial prints `OTA: resuming at N'` and the fleet reports the new version.
+  `scratch/07-ota-resume-proof.sh` runs it on rack-03; the endpoint tests
+  pin the bytes-and-framing invariant.
+- **The partition table is frozen.** `supervictor/edge/partitions.csv`
+  (nvs / otadata / phy_init / ota_0 / ota_1 on 4 MB) changes only with a USB
+  flash of every board. The rack takes that flash once, after PR 105 lands;
+  `ota::partitions_tests` pins the layout so the next change is deliberate.
+- **Bench rules.** Never leave a serial monitor attached across an expected
+  reset (CH340 + GPIO0 strap → ROM bootloader); treat `espflash reset` as a
+  power cut in any test design; the revert test passes only on a *new*
+  uplink of the old version.
+
 ## The model: pull, never push
 
 There is no "flash a device at IP X." Devices are DHCP/NAT'd, run no
