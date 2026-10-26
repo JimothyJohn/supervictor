@@ -124,13 +124,16 @@ compose/Caddy stack on that box is stopped and disabled, docker disabled.
       unconfirmed boots, `scripts/ota-push.sh`. docs/OTA.md "What shipped".
       Host-verified (577 tests incl. proptest fault schedules); bench
       verification is the open item below.
-- [ ] **OTA bench verification** — flash one board with the new partition
-      table (one USB flash; `scratch/01-flash-rack03-ota.sh`), then
-      `scratch/02-ota-push-rack03.sh` pushes 0.1.2 and watches /fleet flip.
-      Then the torture set from docs/OTA.md O.0/O.1: `espflash reset`
-      mid-download (resume), a build that panics at boot (3-boot revert,
-      ~15 min), 20 self-swaps.
-      needs: staging endpoint with FIRMWARE_DIR (scratch/03-install-staging-ota.sh) and a board on USB
+- [ ] **OTA bench verification** — first OTA on hardware PASSED 2026-10-25
+      23:27Z: poe-iso-rack-03 (ethernet,espnow) 0.1.1 → 0.1.2 in 71 s from
+      target set to the new version reporting; confirmed (39 min up, flat
+      heap, no revert). The first 0.1.1 flash panicked on a 25.7 KB boot
+      stack (fixed a11b7f6 + dram2 heap on every ESP32 build bc26475).
+      Remaining torture set, scripts in the poe-iso worktree:
+      `scratch/04-ota-revert-test.sh` (wrong-CA image → 3-boot revert,
+      ~16 min) and `scratch/05-ota-resume-test.sh` (hard reset mid-download
+      → 'OTA: resuming at'); then 20 self-swaps.
+      needs: a board on USB (rack-03 is); ~25 min of bench time
       result: OTA proven on hardware; the fleet can be reflashed once over USB and never again
       est: 2h
       difficulty: med
