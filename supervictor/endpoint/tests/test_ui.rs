@@ -1231,7 +1231,32 @@ async fn live_page_has_a_meter_per_device_per_register_and_a_strip_per_register(
     // Legend for 2+ devices, span buttons, and no inline user data in scripts.
     assert!(html.contains("class=\"legend\""));
     assert!(html.contains("data-span=\"60\""));
-    assert!(html.contains("aria-valuenow=\"200\""));
+    // The raw 8-bit level is never a readout: no level span, and the ARIA
+    // range is the register's real units, not 1..=255.
+    assert!(
+        !html.contains("meter-level"),
+        "raw level span must not render"
+    );
+    assert!(
+        !html.contains("aria-valuemax=\"255\""),
+        "ARIA range must be in real units"
+    );
+    let v = f64::from(REGISTERS[0].dequantize(200).unwrap());
+    assert!(
+        html.contains(&format!("aria-valuenow=\"{v}\"")),
+        "aria-valuenow should be the dequantised value, got no {v} in page"
+    );
+    assert!(
+        html.contains(&format!(
+            "aria-valuetext=\"{expected} {}\"",
+            REGISTERS[0].unit
+        )),
+        "aria-valuetext is the readout plus unit"
+    );
+    assert!(
+        html.contains(&format!("aria-valuemax=\"{}\"", REGISTERS[0].hi)),
+        "aria-valuemax is the register's full scale"
+    );
 }
 
 #[tokio::test]

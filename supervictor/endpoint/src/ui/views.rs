@@ -203,8 +203,9 @@ pub const LIVE_SCRIPT: &str = r#"
 })();
 "#;
 
-/// The live page: a register bank of 8-bit meters and one scrolling strip
-/// per register, drawn on canvas at 10 fps from the samples seeded in
+/// The live page: a register bank of meters (real units; the 8-bit level
+/// is only the bar width) and one scrolling strip per register, drawn on
+/// canvas at 10 fps from the samples seeded in
 /// `#live[data-live]` plus whatever `sv:uplink` / `sv:snapshot` deliver.
 /// Levels are the y axis (1..=255 maps onto each register's fixed range,
 /// 0 breaks the line), so the scale never jumps as data arrives; tick
@@ -265,8 +266,8 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
       var r = parseInt(m.dataset.register, 10), lv = last[r] | 0, v = deq(r, lv);
       m.style.setProperty('--lv', lv);
       m.querySelector('.meter-value').textContent = v === null ? '–' : fmt(v);
-      m.querySelector('.meter-level').textContent = lv ? String(lv) : '–';
-      if (lv) m.setAttribute('aria-valuenow', lv); else m.removeAttribute('aria-valuenow');
+      if (v === null) { m.removeAttribute('aria-valuenow'); m.removeAttribute('aria-valuetext'); }
+      else { m.setAttribute('aria-valuenow', v); m.setAttribute('aria-valuetext', fmt(v) + ' ' + REG[r].unit); }
     });
   }
   function ingest(ev) {
@@ -680,26 +681,27 @@ fn verdict_block(v: &Verdict) -> Markup {
     }
 }
 
-/// One 8-bit meter for register `i` of a live device: the bar is
-/// level/255 in the device's colour, the text is the dequantised value and
-/// the raw level. `extra` is a second class (`hero-meter` / `mini`) for the
-/// glance; the bank's meters carry none so the live script finds them all
-/// by `.meter`.
+/// One meter for register `i` of a live device: the bar is level/255 in
+/// the device's colour, the text is the value in the register's unit. The
+/// raw 8-bit level only drives the bar width (`--lv`); the readout and the
+/// ARIA range are in real units. `extra` is a second class (`hero-meter` /
+/// `mini`) for the glance; the bank's meters carry none so the live script
+/// finds them all by `.meter`.
 fn meter(d: &live::LiveDevice, i: usize, r: &live::RegisterInfo, extra: &str) -> Markup {
     let level = d.latest().map(|s| s.l[i]).unwrap_or(0);
-    let value = METRICS[i].dequantize(level);
+    let value = METRICS[i].dequantize(level).map(f64::from);
+    let text = value.map(charts::fmt_value);
     html! {
         div class={ "meter" @if !extra.is_empty() { " " (extra) } } data-register=(i) style={ "--lv:" (level) } role="meter"
-            aria-label={ (d.device_id) " " (r.label) } aria-valuemin="1" aria-valuemax="255"
-            aria-valuenow=[(level > 0).then_some(level)] {
+            aria-label={ (d.device_id) " " (r.label) } aria-valuemin=(r.lo) aria-valuemax=(r.hi)
+            aria-valuenow=[value] aria-valuetext=[text.as_ref().map(|t| format!("{t} {}", r.unit))] {
             span .meter-bar.(d.style.color.class()) style=[d.style.color.custom_hex().map(|h| format!("--c:{h}"))] {}
             span .meter-value {
-                @match value {
-                    Some(v) => (charts::fmt_value(f64::from(v))),
+                @match text {
+                    Some(t) => (t),
                     None => "–",
                 }
             }
-            span .meter-level { @if level > 0 { (level) } @else { "–" } }
         }
     }
 }
@@ -888,9 +890,10 @@ pub const LIVE_SPANS: [u64; 3] = [30, 60, 120];
 /// Span selected on load.
 pub const LIVE_DEFAULT_SPAN: u64 = 60;
 
-/// `GET /ui/live` — register bank (one 8-bit meter per device per
-/// register, newest sample: the bar is level/255, the text is the value in
-/// the column's unit and the raw level) and one scrolling strip per register.
+/// `GET /ui/live` — register bank (one meter per device per register,
+/// newest sample: the bar is level/255, the text is the value in the
+/// column's unit; the raw level is never shown) and one scrolling strip per
+/// register.
 pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
     let data = serde_json::to_string(snapshot).unwrap_or_else(|_| "{}".into());
     let samples: usize = snapshot.devices.iter().map(|d| d.samples.len()).sum();
