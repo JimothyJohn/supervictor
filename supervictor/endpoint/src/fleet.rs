@@ -15,9 +15,12 @@ pub const FRESH_SECS: u64 = 15 * 60;
 /// Seconds since last uplink below which a device is "stale" (beyond: "dark").
 pub const DARK_SECS: u64 = 2 * 60 * 60;
 /// Default current (mA) at or above which a device counts as powered on
-/// (`POWER_THRESHOLD_MA`). The simulator's dropouts read 0 and its
-/// quietest baseline is 200, so 100 splits them.
-pub const DEFAULT_POWER_THRESHOLD_MA: i64 = 100;
+/// (`POWER_THRESHOLD_MA`). 1000 mA is the SEN0211 clamp's ADC floor
+/// (HARDWARE.md §6.2): below it a kit device reads noise, not a machine,
+/// so the fleet default calls that "off" (decided 2026-10-26). Machines
+/// that idle above it get a per-device `power_threshold_ma`; the
+/// simulator profiles set theirs in `scripts/sim-fleet.sh`.
+pub const DEFAULT_POWER_THRESHOLD_MA: i64 = 1000;
 
 /// How recently a device has been heard from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

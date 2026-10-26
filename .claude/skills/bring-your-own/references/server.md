@@ -18,7 +18,7 @@ rather than silently disabling a check.
 | `STORE_BACKEND` | `sqlite` | `sqlite` or `dynamo` (needs the `dynamo` build feature) |
 | `SQLITE_DB_PATH` | `:memory:` | set a real path or every restart forgets the fleet |
 | `REQUIRE_REGISTRATION` | `false` | `true` turns away certificates that are not registered, active and bound; flip it once every device is registered with its `subject_dn` |
-| `POWER_THRESHOLD_MA` | `100` | fleet default for "powered on" (per-device override via `PUT /devices/{id}/threshold`) |
+| `POWER_THRESHOLD_MA` | `1000` | fleet default for "powered on": the clamp's ~1 A ADC floor (per-device override via `PUT /devices/{id}/threshold`) |
 | `WATCHDOG_INTERVAL_SECS` | `300` | logs dark-device transitions; `0` disables |
 | `UPLINK_TTL_DAYS` | `30` | DynamoDB row expiry; SQLite keeps everything |
 | `LOG_LEVEL` | `info` | tracing filter; logs are JSON |

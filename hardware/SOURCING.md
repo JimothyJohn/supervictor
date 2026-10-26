@@ -16,7 +16,8 @@ are exact search strings and a browser settles them in minutes.
 1. **Buy the three missing kit parts today** (SHT41, one cable, the line
    splitter; ~$30) and finish the jumper-wire bring-up in `HARDWARE.md` §8.
    Everything else waits on that data.
-2. **Scope B, the 2-layer sensor hat, is the prototype to build.** It keeps
+2. **Scope B, the 2-layer sensor hat, is the prototype to build** (decided
+   2026-10-26; the RFQ is hat-only). It keeps
    the Olimex board as the certified, stocked, isolated core and costs a few
    thousand dollars end to end. Design it in KiCad in-house or at Sierra
    Circuits; build it at CircuitHub or Sierra.
@@ -147,7 +148,7 @@ wall-clock from the start of the step. Cash excludes tax and shipping.
 |---|------|-----------|------|----------|----------------------|
 | 0 | Order the missing kit parts (§2 cart) | 30 min | $30, +$20 splitter, +$100–210 meter if none on the bench | 2–5 days (US stock) | Parts on the bench |
 | 1 | Jumper-wire bring-up, `HARDWARE.md` §8 steps 1–7 (firmware `sensor-current` / `sensor-sht4x` in parallel) | 1–2 days of bench time spread over the week, plus a 24 h soak | $0 | 1–2 weeks | Steps 3 and 6 pass; §11 decisions made (register scale, threshold) |
-| 2 | Pick the scope, fill the bracketed parts of the RFQ, attach the files | 1–2 h | $0 | 1 day | RFQ sent to 3 vendors |
+| 2 | ~~Pick the scope~~ (Scope B, decided 2026-10-26); fill the bracketed parts of RFQ §12 (greeting, call times, signature), attach the files | 1 h | $0 | 1 day | RFQ sent to 3 vendors |
 | 3 | Quotes: two 30-minute calls, questions back and forth | 3–5 h over the period | $0 | 5–10 business days | Signed quote, PO |
 | 4B | Scope B layout from the `hardware/hat/` package: KiCad here (`brew install --cask kicad`, you review) **or** Sierra's layout stage | 2–3 h review | $0 in-house; $1,500–4,000 at a shop (schematic and BOM are already done, so quote layout + DFM only) | 1–2 weeks | Gerbers released |
 | 5B | Scope B build, 5 boards, CircuitHub or Sierra turnkey | 1 h ordering | $400–1,000 (setup/stencil $100–500, boards $20–40 each, parts ~$15 each) | 1–2 weeks | Boards on the bench |

@@ -67,7 +67,7 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   threshold is `on`, below is `off`, no reading or a dark / never device is
   `unknown`. The threshold is the device's own `power_threshold_ma`
   (`DeviceRecord::effective_threshold_ma`) when set, else the fleet default
-  `POWER_THRESHOLD_MA` (100, any i64). Surfaces on `/fleet` (`current`,
+  `POWER_THRESHOLD_MA` (1000, the clamp's ADC floor; any i64). Surfaces on `/fleet` (`current`,
   `power`, `threshold_ma`, `threshold_overridden`), `/fleet/summary` (`on`,
   `off`), `/fleet/history` (`power` timeline per device threshold;
   `threshold_ma` there is the fleet default), the fleet table (`≥ N` beside
