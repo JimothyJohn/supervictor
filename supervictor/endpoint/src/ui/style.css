@@ -311,8 +311,8 @@ select {
 .bank table { min-width: 46rem; }
 .bank th .unit { color: var(--muted); }
 .bank td { vertical-align: middle; white-space: nowrap; }
-/* One 8-bit meter: the bar is level/255 of the cell, in the device's slot
-   colour; the text is the dequantised value and the raw level. */
+/* One meter: the bar is level/255 of the cell, in the device's slot
+   colour; the text is the value in the register's unit (never the raw level). */
 .meter {
   --lv: 0;
   position: relative; display: block; min-width: 7rem; height: 1.6rem;
@@ -330,7 +330,6 @@ select {
 .meter-bar.s-other { background: var(--s-other); }
 .meter-bar.custom { background: var(--c); }
 .meter-value { position: absolute; left: 0.4rem; top: 0; line-height: 1.6rem; font-size: 0.78rem; }
-.meter-level { position: absolute; right: 0.4rem; top: 0; line-height: 1.6rem; font-size: 0.7rem; color: var(--muted); }
 .strips { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; margin-top: 0.75rem; }
 .strips .wide { grid-column: 1 / -1; }
 figure.strip {
@@ -405,13 +404,11 @@ figure.chart.narrow { padding: 0.6rem 0.6rem 0.4rem; }
 .live-card .mini-label { display: block; color: var(--muted); font-size: 0.68rem; margin-bottom: 0.15rem; }
 .live-card .meter.hero-meter { height: 2.2rem; }
 .live-card .hero-meter .meter-value { font-size: 1.1rem; line-height: 2.2rem; }
-.live-card .meter-level { display: none; }
 .minis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin-top: 0.6rem; }
 .mini { min-width: 0; }
 .meter.mini { min-width: 0; height: 1.2rem; border: 0; border-radius: 0; background: transparent; }
 .meter.mini .meter-bar { top: auto; bottom: 0; height: 2px; opacity: 0.8; }
 .meter.mini .meter-value { left: 0; line-height: 1.1rem; font-size: 0.85rem; }
-.meter.mini .meter-level { display: none; }
 .live-card.tick, .glance-list li.tick { animation: sv-tick 0.6s ease-out; }
 @media (prefers-reduced-motion: reduce) { .live-card.tick, .glance-list li.tick { animation: none; } }
 #view-toggle {
