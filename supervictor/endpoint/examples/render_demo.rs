@@ -46,8 +46,10 @@ const DEMO_SCRIPT: &str = r#"
   });
   var rows = Array.prototype.slice.call(document.querySelectorAll('tr[data-device]'));
   if (!rows.length) return;
-  // Live page: keep each device's walk going with a synthetic burst every
-  // TICK ms that covers exactly that tick, like the firmware does.
+  // Live page: keep each device's walk going with one synthetic sample
+  // every STEP ms, so the strips advance smoothly instead of leaping a
+  // burst at a time. (The firmware ships 50 of these per 5 s uplink; the
+  // page draws either the same way.)
   var live = document.getElementById('live');
   var seed = null;
   if (live) { try { seed = JSON.parse(live.dataset.live); } catch (_) { seed = null; } }
@@ -61,38 +63,38 @@ const DEMO_SCRIPT: &str = r#"
       if (last) { walks[d.device_id] = last.slice(); homes[d.device_id] = first.slice(); }
     });
   }
-  // One burst per walking device per tick, covering exactly the tick
-  // (BURST samples at STEP ms = TICK ms) so bursts neither overlap nor gap.
-  var TICK = 2500, STEP = 100, BURST = TICK / STEP;
-  function burst(id) {
+  // Every ROW_EVERY samples a random fleet row is marked fresh, the old
+  // per-uplink cadence.
+  var STEP = 100, ROW_EVERY = 25, ticks = 0;
+  function sample(id) {
     var w = walks[id], home = homes[id], R = w.length, out = [];
-    for (var i = 0; i < BURST; i++) {
-      for (var r = 0; r < R; r++) {
-        // Bounded walk with a pull back toward the seed's starting level;
-        // same per-sample tuning as the seeded history (render_demo.rs).
-        var moved = r === 0 ? Math.floor(Math.random() * 7) - 3
-          : (Math.random() < 0.2 ? Math.floor(Math.random() * 3) - 1 : 0);
-        var lv = w[r] + moved - Math.round((w[r] - home[r]) / 120);
-        if (r === 0 && Math.random() < 0.005) lv += 40;
-        w[r] = Math.max(1, Math.min(255, lv));
-        out.push(w[r]);
-      }
+    for (var r = 0; r < R; r++) {
+      // Bounded walk with a pull back toward the seed's starting level;
+      // same per-sample tuning as the seeded history (render_demo.rs).
+      var moved = r === 0 ? Math.floor(Math.random() * 7) - 3
+        : (Math.random() < 0.2 ? Math.floor(Math.random() * 3) - 1 : 0);
+      var lv = w[r] + moved - Math.round((w[r] - home[r]) / 120);
+      if (r === 0 && Math.random() < 0.005) lv += 40;
+      w[r] = Math.max(1, Math.min(255, lv));
+      out.push(w[r]);
     }
     return out;
   }
   setInterval(function () {
-    var row = rows[Math.floor(Math.random() * rows.length)];
-    var id = row.getAttribute('data-device');
-    var last = row.querySelector('.last-uplink');
-    if (last) last.textContent = new Date().toISOString().replace(/\.\d+Z$/, '+00:00');
-    var badge = row.querySelector('.staleness');
-    if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
+    ticks += 1;
+    if (ticks % ROW_EVERY === 0) {
+      var row = rows[Math.floor(Math.random() * rows.length)];
+      var last = row.querySelector('.last-uplink');
+      if (last) last.textContent = new Date().toISOString().replace(/\.\d+Z$/, '+00:00');
+      var badge = row.querySelector('.staleness');
+      if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
+    }
     Object.keys(walks).forEach(function (wid) {
       document.dispatchEvent(new CustomEvent('sv:uplink', { detail: {
-        device_id: wid, t_ms: seed.now_ms + (Date.now() - loaded), levels: burst(wid), levels_ms: STEP
+        device_id: wid, t_ms: seed.now_ms + (Date.now() - loaded), levels: sample(wid), levels_ms: STEP
       } }));
     });
-  }, TICK);
+  }, STEP);
 })();
 "#;
 
