@@ -100,9 +100,9 @@
       <h3>Decide <span class="tag you">blocks firmware</span></h3>
       <ul class="check">
         <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>Current register full scale → 20 A <span class="tag have">decided</span></b><span class="meta">2026-10-25. Step 78.7 mA; the ~1 A floor is level 14; above ~17 A the ADC compresses. Lands in levels.rs on its own PR.</span></div></li>
-        <li><div class="box"></div><div><b>Power threshold for kit devices: 1000 mA?</b><span class="meta">The endpoint default of 100 mA is below the clamp's ~1 A floor. Per-device field already exists.</span></div></li>
-        <li><div class="box"></div><div><b>Calibration gain: compile-time env or NVS?</b><span class="meta">Compile-time matches how everything else is baked; NVS survives OTA. Pick one.</span></div></li>
-        <li><div class="box"></div><div><b>Which scope to RFQ: hat (B) only, or hat + integrated node (C)?</b><span class="meta">Recommendation is B now, C at 25+ units. SOURCING.md §1</span></div></li>
+        <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>Power threshold for kit devices → 1000 mA <span class="tag have">decided</span></b><span class="meta">2026-10-26. The fleet default now sits at the clamp's ~1 A ADC floor; machines that idle above it get a per-device threshold.</span></div></li>
+        <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>Calibration gain → compile-time <code>CURRENT_GAIN_PPM</code> <span class="tag have">decided</span></b><span class="meta">2026-10-26. Baked at flash time from the rack inventory; no NVS path. HARDWARE.md §7.</span></div></li>
+        <li><div class="box" style="background:var(--green);border-color:var(--green)"></div><div><b>RFQ scope → hat (B) only <span class="tag have">decided</span></b><span class="meta">2026-10-26. The integrated node waits for 25+ units. RFQ §1, SOURCING.md §1.</span></div></li>
       </ul>
     </div>
     <div class="card">

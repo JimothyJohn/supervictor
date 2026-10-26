@@ -38,7 +38,7 @@ pub struct Config {
     /// Staleness watchdog tick interval in seconds; 0 disables it.
     pub watchdog_interval_secs: u64,
     /// Current (mA) at or above which a device counts as powered on
-    /// (`POWER_THRESHOLD_MA`, default 100).
+    /// (`POWER_THRESHOLD_MA`, default 1000: the clamp's ADC floor).
     pub power_threshold_ma: i64,
     /// Days before an uplink row expires (DynamoDB TTL); 0 keeps rows forever.
     pub uplink_ttl_days: u32,

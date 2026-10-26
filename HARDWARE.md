@@ -225,7 +225,7 @@ per-chip reference voltage varies. Consequences for this kit:
 | ADC floor | 150 mV → **≈1.06 A** | Below about 1 A the reading is noise-shaped, not zero |
 | ADC linear top | 2450 mV → **≈17.3 A** | Above it readings compress; 20 A is not reachable linearly |
 | `current` register full scale | 20 000 mA → 2.83 V (level 255) | Decided 2026-10-25: matches the probe; levels above ~17 A are compressed by the ADC, step 78.7 mA |
-| `POWER_THRESHOLD_MA` default | 100 mA → 14 mV | **Unreadable** with this sensor; see section 11 |
+| `POWER_THRESHOLD_MA` default | 1000 mA → 141 mV | **Decided 2026-10-26:** the fleet default sits at the ADC floor, so a kit device under ~1 A reads off; machines that idle above it get a per-device `power_threshold_ma` |
 | 12-bit count at 11 dB | ≈0.8 mV ≈ **5.4 mA** | Resolution is not the problem, accuracy is |
 | Stack accuracy | ±1 % probe, ±4 % module, ADC gain error | Budget ±5–6 % of reading after a one-point calibration |
 
@@ -234,8 +234,9 @@ sample slot (Espressif's own recommendation alongside an optional 100 nF at
 the pin, which the module's output filter already approximates), treat
 anything under the floor as 0 mA, and clamp the published value to the
 register range. Calibrate once per board against a known load (a resistive
-heater of known wattage, or a clamp meter on the same conductor) and store
-the gain in NVS or bake it at flash time like `DEVICE_NAME`.
+heater of known wattage, or a clamp meter on the same conductor) and bake
+the gain at flash time like `DEVICE_NAME` (`CURRENT_GAIN_PPM`, section 7;
+decided 2026-10-26, no NVS path).
 
 ### 6.3 Power budget
 
@@ -290,7 +291,9 @@ floats into `null`, which the endpoint rejects).
 **Calibration knob.** `CURRENT_GAIN_PPM` compile-time env (default
 1 000 000) applied after 6.1, baked like `UPLINK_INTERVAL_S`; per-board
 value lives in a new column of `certs/rack-inventory.tsv` so `flash.sh`
-carries it. NVS is the upgrade path once OTA exists and reflashing stops.
+carries it. **Decided 2026-10-26: compile-time is the only path.** A
+recalibration is a rebuild (OTA once that lands, USB until then); no NVS
+write path, no second source of truth.
 
 ## 8. Bring-up checklist
 
@@ -355,12 +358,13 @@ dark fleet row maps to a cable.
 - ~~`current` register full scale~~ **Decided 2026-10-25: 20 A** (step
   78.7 mA; `supervictor/common/src/levels.rs`, its own PR). The 60 A sim
   profiles still pin at 255; the floor of ~1 A is level 14.
-- **`POWER_THRESHOLD_MA`.** 100 mA is below the sensor floor. Proposal:
-  default 1000 mA for kit devices, settable per device
-  (`power_threshold_ma` already exists on the device record).
-- **Where calibration lives.** Compile-time `CURRENT_GAIN_PPM` (simple,
-  matches how everything else is baked) vs NVS (survives OTA). Compile-time
-  for v0 is my pick.
+- ~~`POWER_THRESHOLD_MA`~~ **Decided 2026-10-26: fleet default 1000 mA**
+  (`fleet::DEFAULT_POWER_THRESHOLD_MA`), per-device `power_threshold_ma`
+  for machines that idle above it. The simulator profiles already set
+  theirs (`scripts/sim-fleet.sh`).
+- ~~Where calibration lives~~ **Decided 2026-10-26: compile-time
+  `CURRENT_GAIN_PPM`**, baked like `UPLINK_INTERVAL_S`, per board from
+  `certs/rack-inventory.tsv`. No NVS path.
 - ~~Buy the SHT40 now?~~ **Decided 2026-10-25: ordering the SHT41 (Adafruit
   5776) and cable from Adafruit.**
 

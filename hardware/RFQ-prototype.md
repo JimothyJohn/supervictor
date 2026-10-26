@@ -4,7 +4,9 @@ Request for quotation. Send this file plus the attachments listed in
 section 10 to a design/build vendor; it is written so the vendor can quote
 without a discovery call. Companion: `HARDWARE.md` (the dev kit this board
 productises) and `hardware/SOURCING.md` (vendor shortlist, budget and
-schedule). Issued 2026-10-25.
+schedule). Issued 2026-10-25; **scope fixed 2026-10-26: Scope B, the sensor
+hat, only.** Scope C (the integrated node) stays described in sections 5–6
+for context and a later request; it is not quoted here.
 
 ## 1. Who we are and what we want
 
@@ -15,16 +17,17 @@ an Olimex ESP32-POE-ISO with a DFRobot SEN0211 clamp module on jumper wires.
 We want that turned into a board we can order in tens, then hundreds, with
 the same firmware and pin map.
 
-Two scopes are quoted separately; we may order either or both.
+One scope is quoted: **B, the sensor hat**. Scope C is listed so the hat is
+understood as step one toward it; do not quote it.
 
 | Scope | What it is | Qty for this RFQ |
 |-------|------------|------------------|
 | **B — Sensor hat (SV-HAT-A)** | A 2-layer daughterboard that plugs onto the Olimex ESP32-POE-ISO EXT1/EXT2 headers and carries the clamp conditioning chain, a 3.5 mm jack and an SHT41. No RF, no PoE, no MCU. **Design package supplied:** `hardware/hat/` (schematic, netlist, BOM with MPNs, placement, outline, test procedure); you do the layout, DFM and build. | 5 assembled, option for 25 |
-| **C — Integrated node** | One board: ESP32-WROOM-32E, 100 Mb Ethernet PHY, 802.3af isolated PoE PD, USB-UART for flashing, the clamp chain, the SHT40. Derived from the Olimex ESP32-POE-ISO open-hardware design (section 6). | 10 assembled, option for 25 |
+| C — Integrated node (*not in this RFQ*) | One board: ESP32-WROOM-32E, 100 Mb Ethernet PHY, 802.3af isolated PoE PD, USB-UART for flashing, the clamp chain, the SHT40. Derived from the Olimex ESP32-POE-ISO open-hardware design (section 6). A separate request once the hat and the dev kit sell in tens. | — |
 
-Both scopes: **design (schematic, layout, DFM) and build (fab, turnkey
-parts, assembly, basic test)**. If you only build, quote the build line and
-say so; we will source the design elsewhere.
+Scope B: **layout and DFM from our design package, then build (fab,
+turnkey parts, assembly, basic test)**. If you only build, quote the build
+line and say so; we will have the layout done elsewhere.
 
 ## 2. Fixed interface: the pin map the firmware already uses
 
@@ -132,10 +135,10 @@ Gerbers. Confirm in your quote that this is acceptable.
    place, assembly drawings, 3D STEP.
 3. BOM with manufacturer part numbers, approved alternates, and DigiKey/
    Mouser part numbers. Turnkey parts sourcing by you; we do not consign.
-4. Assembled, inspected boards: Scope B 5 (option 25), Scope C 10 (option
-   25). Lead-free, no conformal coat.
+4. Assembled, inspected boards: Scope B 5 (option 25). Lead-free, no
+   conformal coat.
 5. Test report per board (section 8), serial numbers on a label.
-6. One unassembled bare board per scope for reference.
+6. One unassembled bare board for reference.
 
 ## 8. Acceptance tests (we supply the firmware image)
 
@@ -150,7 +153,10 @@ Gerbers. Confirm in your quote that this is acceptable.
 | 7 | SHT40 | I²C ACK at 0x44 and a plausible reading (15–35 °C, 10–90 %RH) in the uplink |
 | 8 | Soak (2 units of 10) | 24 h on PoE: sequence numbers contiguous, free-heap flat, no watchdog reboot |
 
-We provide: firmware image per scope, a staging endpoint and device
+Tests 2, 3 and 5 as written are for Scope C; for the hat, run 4–8 with the
+hat mounted on an ESP32-POE-ISO we supply with the firmware.
+
+We provide: firmware image, a staging endpoint and device
 certificates, a 3.5 mm test lead and signal generator settings. Test 6 can
 be done with a function generator; no clamp needed.
 
@@ -162,8 +168,7 @@ be done with a function generator; no clamp needed.
   shipped.
 - State whether design is in-house or a named partner; we want one
   contract.
-- IP: we own the Scope B design outright; Scope C is CERN OHL v1.2 as
-  above. No exclusivity either way.
+- IP: we own the Scope B design outright. No exclusivity.
 - Payment terms: propose; 50/50 NRE is fine. Net 30 on builds.
 - Location: United States; shipping to a US address.
 
@@ -183,6 +188,10 @@ be done with a function generator; no clamp needed.
 
 ## 11. Questions we need answered in the quote
 
+Questions 2, 4 and 5 are for this RFQ. Questions 1, 3 and 6 concern the
+integrated node; answer them only if you want to be considered for that
+later request.
+
 1. Have you built an 802.3af PD with an isolated converter before? Name a
    comparable board (NDA-safe description is fine).
 2. KiCad in-house, or will you convert to Altium? (We need KiCad back.)
@@ -195,21 +204,20 @@ be done with a function generator; no clamp needed.
 
 ## 12. Cover email (copy, edit the bracketed parts)
 
-> Subject: RFQ — PoE IoT sensor node, design + 10 prototypes (KiCad, ESP32, 802.3af)
+> Subject: RFQ — 2-layer sensor hat for an ESP32 PoE board, layout + 5 prototypes (KiCad)
 >
 > Hi [name],
 >
-> We are looking for a US shop to design and build prototypes of a small
-> PoE-powered ESP32 sensor node. The attached RFQ has the full
-> specification, a fixed pin map, the open-hardware reference design we
-> want to derive from (Olimex ESP32-POE-ISO, CERN OHL 1.2), acceptance
-> tests, and quantities (10 assembled, option 25; plus a separate 2-layer
-> sensor hat at 5). Firmware is ours and already runs on the reference
-> board, so no firmware work is expected from you.
+> We are looking for a US shop to lay out and build a small 2-layer sensor
+> daughterboard for the Olimex ESP32-POE-ISO. The attached RFQ has the
+> specification and a complete design package (schematic, netlist, BOM with
+> manufacturer part numbers, placement, outline, test procedure); what
+> remains is layout, DFM and a build of 5 (option 25). Firmware is ours and
+> already runs on the reference board, so no firmware work is expected.
 >
-> Could you quote NRE and per-unit separately, with lead times, and answer
-> the six questions in section 11? If a 30-minute call helps, I am
-> available [days/times, timezone].
+> Could you quote NRE (layout + DFM) and per-unit separately, with lead
+> times, and answer questions 2, 4 and 5 in section 11? If a 30-minute call
+> helps, I am available [days/times, timezone].
 >
 > Thanks,
 > [Nick, company, phone]

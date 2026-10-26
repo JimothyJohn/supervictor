@@ -107,7 +107,7 @@ async fn fleet_judges_power_against_each_devices_threshold() {
     };
     let bench = by_id("bench-01");
     assert_eq!(bench["power"], "on", "{bench}");
-    assert_eq!(bench["threshold_ma"], 100);
+    assert_eq!(bench["threshold_ma"], 1000, "fleet default");
     assert_eq!(bench["threshold_overridden"], false);
     let press = by_id("press-01");
     assert_eq!(press["power"], "off", "{press}");
@@ -428,7 +428,7 @@ async fn fleet_reports_staleness_and_fw() {
     assert_eq!(
         by_id("fresh-dev")["power"],
         "off",
-        "5 mA is under the 100 mA default"
+        "5 mA is under the 1000 mA default"
     );
     assert_eq!(by_id("silent-dev")["staleness"], "unknown");
     assert_eq!(by_id("silent-dev")["power"], "unknown");

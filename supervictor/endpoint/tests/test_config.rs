@@ -37,7 +37,10 @@ fn env_var_parsing() {
     assert_eq!(cfg.messages_table, "messages");
     assert_eq!(cfg.sqlite_db_path, ":memory:");
     assert!(!cfg.require_registration, "open ingest by default");
-    assert_eq!(cfg.power_threshold_ma, 100, "default power threshold");
+    assert_eq!(
+        cfg.power_threshold_ma, 1000,
+        "default power threshold: the clamp floor"
+    );
 
     // --- POWER_THRESHOLD_MA: any integer, whitespace tolerated, junk fails boot ---
     for (raw, expected) in [("250", 250), (" 0 ", 0), ("-5", -5)] {

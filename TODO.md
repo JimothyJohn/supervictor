@@ -307,7 +307,7 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       difficulty: low
       id: rack-board-inventory
       asked: 2026-10-25
-- [ ] **Which local-preview path failed on the new phone UI?** — PR 96 (phone glance layer) is on dev. The mobile-UI session left a Quickstart stack running in `../supervictor-mobile` (endpoint :8443 with a multi-name server cert, extruder sim, `.logs/`), a demo http server on :8000 serving `scratch/demo` + `supervictor-ca.pem`, and `scratch/01-trust-fleet-ca.sh` for the Studio's keychain. Nick said "not working" without saying which step: Studio browser (CA trust not yet run; server cert verified by curl on every address), the phone's CA profile / full-trust toggle, the phone identity (.p12 from 2026-10-24), or the phone being on 10.0.0.x rather than 192.168.3.x. Full state in that worktree's `.claude/handoff.md`.
+- [x] **Which local-preview path failed on the new phone UI?** — PR 96 (phone glance layer) is on dev. The mobile-UI session left a Quickstart stack running in `../supervictor-mobile` (endpoint :8443 with a multi-name server cert, extruder sim, `.logs/`), a demo http server on :8000 serving `scratch/demo` + `supervictor-ca.pem`, and `scratch/01-trust-fleet-ca.sh` for the Studio's keychain. Nick said "not working" without saying which step: Studio browser (CA trust not yet run; server cert verified by curl on every address), the phone's CA profile / full-trust toggle, the phone identity (.p12 from 2026-10-24), or the phone being on 10.0.0.x rather than 192.168.3.x. Full state in that worktree's `.claude/handoff.md`.
       needs: the exact symptom (which URL, which device, what error text)
       result: a working preview path written into scripts/ or the README, and the stack torn down
       options: Studio browser | phone CA trust | phone identity | network | something else
@@ -316,7 +316,9 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: mobile-preview-failed
       asked: 2026-10-25
       by: mobile-UI session (feat/ui-mobile-glance)
-- [ ] **Kit power threshold: default 1000 mA for clamp devices?** — `POWER_THRESHOLD_MA` defaults to 100 mA, below the SEN0211 clamp's ~1 A ADC floor (HARDWARE.md §6.2), so a kit device reads "on" from noise. Per-device `power_threshold_ma` already exists on the record.
+      answer: the phone couldn't access the page
+      notes: resolved 2026-10-26: moot — PR 96 is on dev and staging already serves the glance UI, so the phone path is staging + scripts/iphone-cert.sh (Let's Encrypt cert, no CA profile; AirDrop the identity). The local stack in ../supervictor-mobile is torn down by scratch/teardown-mobile-preview.sh (yours; kill was denied to me)
+- [x] **Kit power threshold: default 1000 mA for clamp devices?** — `POWER_THRESHOLD_MA` defaults to 100 mA, below the SEN0211 clamp's ~1 A ADC floor (HARDWARE.md §6.2), so a kit device reads "on" from noise. Per-device `power_threshold_ma` already exists on the record.
       needs: a number, or "per device only"
       result: kit devices show off when the machine is off; the default documented in HARDWARE.md and the endpoint config
       options: 1000 mA default | keep 100, set per device | other number
@@ -325,7 +327,9 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: kit-power-threshold
       asked: 2026-10-25
       by: hardware session (docs/hardware-spec, feat/current-register-20a)
-- [ ] **Clamp calibration gain: compile-time or NVS?** — one-point gain per board. Compile-time `CURRENT_GAIN_PPM` baked like `UPLINK_INTERVAL_S` (simple, a reflash to change, a column in certs/rack-inventory.tsv) or NVS (survives OTA, needs a write path). My pick: compile-time for v0. HARDWARE.md §7, §11.
+      answer: 1000 mA default
+      notes: done 2026-10-26 (chore/decisions-20261026): fleet::DEFAULT_POWER_THRESHOLD_MA = 1000; HARDWARE.md §6.2/§11, server.md, endpoint CLAUDE.md updated; sim profiles keep their own thresholds
+- [x] **Clamp calibration gain: compile-time or NVS?** — one-point gain per board. Compile-time `CURRENT_GAIN_PPM` baked like `UPLINK_INTERVAL_S` (simple, a reflash to change, a column in certs/rack-inventory.tsv) or NVS (survives OTA, needs a write path). My pick: compile-time for v0. HARDWARE.md §7, §11.
       needs: your pick
       result: the firmware's `sensor-current` feature has one calibration path, not two
       options: compile-time env | NVS | compile-time now, NVS after OTA
@@ -334,7 +338,9 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: clamp-calibration-location
       asked: 2026-10-25
       by: hardware session (docs/hardware-spec)
-- [ ] **Prototype scope to RFQ: hat only, or hat + integrated node?** — SV-HAT-A (`hardware/hat/`, ~$0.5–5k, 6–10 weeks) vs also the CERN-OHL derivative of the Olimex POE-ISO (~$12–30k, 12–20 weeks). Recommendation: hat now, node at 25+ units. hardware/SOURCING.md §1, §5.
+      answer: compile-time env
+      notes: done 2026-10-26: HARDWARE.md §6.2/§7/§11 name CURRENT_GAIN_PPM as the only path; the firmware feature itself (sensor-current) is still to be written and will read it like UPLINK_INTERVAL_S
+- [x] **Prototype scope to RFQ: hat only, or hat + integrated node?** — SV-HAT-A (`hardware/hat/`, ~$0.5–5k, 6–10 weeks) vs also the CERN-OHL derivative of the Olimex POE-ISO (~$12–30k, 12–20 weeks). Recommendation: hat now, node at 25+ units. hardware/SOURCING.md §1, §5.
       needs: your pick, then the bracketed parts of hardware/RFQ-prototype.md §12
       result: RFQ sent to three shops; quotes replace the blog-number estimates
       options: hat only | hat + node | neither yet
@@ -343,6 +349,8 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: rfq-scope
       asked: 2026-10-25
       by: hardware session (docs/hardware-spec)
+      answer: hat only
+      notes: done 2026-10-26: RFQ-prototype.md is hat-only (Scope C kept as context, cover email rewritten); SOURCING.md §1/§5 and hardware/index.html record the decision. Still yours: the bracketed parts of §12 and sending it
 - [ ] **OTA enablement: when does the rack take its one USB reflash?** — PR 105 (feat/ota) changes the partition table to the A/B layout; merging is safe (boards on the factory table log `OTA: unavailable` and keep uplinking) but each board needs one more USB flash (`./scripts/flash.sh <device> staging`, ~2 min each) before it can ever OTA. Seven racked boards today. After that, never again.
       needs: a date, or "merge now, flash as boards come to the bench"
       result: PR 105 un-drafted; every board on the A/B table; rack-flash.sh becomes the recovery path only
