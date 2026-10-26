@@ -138,9 +138,12 @@ compose/Caddy stack on that box is stopped and disabled, docker disabled.
       (`New` slot + no record → Pending), 04 demands a fresh uplink and can
       EN-reset mid-trial (`EN_RESET_AT`), 05 says what a power-on reset can
       show (restart, not resume). Rerun order, scripts in the poe-iso worktree:
-      `scratch/06-ota-reflash-rack-03.sh` (yours: USB flash 0.1.5), then
-      `EN_RESET_AT=150 scratch/04-ota-revert-test.sh` (~17 min),
-      `scratch/05-ota-resume-test.sh` (~4 min); then 20 self-swaps. Never leave
+      `scratch/03-install-staging-ota.sh` (yours: re-install the feat/ota
+      endpoint, it gained the `firmware_fault` route), `scratch/06-ota-reflash-rack-03.sh`
+      (yours: USB flash 0.1.5), then `EN_RESET_AT=150 scratch/04-ota-revert-test.sh`
+      (~17 min), `scratch/05-ota-resume-test.sh` (~4 min, power-cut restart),
+      `scratch/07-ota-resume-proof.sh` (~4 min, stalled download → 'OTA: resuming
+      at'); then 20 self-swaps. Never leave
       a serial monitor attached across a reset: the CH340 parks the board in
       the ROM bootloader (happened 01:52Z; `espflash reset` recovers).
       needs: a board on USB (rack-03 is, stuck on wrong-CA 0.1.3 until 06 runs); ~30 min of bench time
@@ -229,6 +232,17 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
 - [ ] POE-ISO (`poe-iso-eth-01`): `./scripts/flash.sh poe-iso-eth-01 staging`
       over USB (re-identify the port by MAC e0:5a:1b:66:50:40 — hub positions
       moved), then rack it. Isolated board, USB + Ethernet together is fine.
+- [ ] **A/B reflash of the rack (the last USB flash)** — decided 2026-10-26:
+      once PR 105 is on dev, every board gets `./scripts/rack-flash.sh staging`
+      (or `flash.sh <device> staging`) from a checkout on dev so it carries
+      `partitions.csv`; after that OTA (`scripts/ota-push.sh`) is the only
+      update path and the table is frozen (`ota::partitions_tests`).
+      needs: PR 105 merged (ota-bench green); boards on USB one at a time (~2 min each)
+      result: seven boards on the A/B table; rack-flash.sh is the recovery path only
+      depends: ota-bench
+      est: 1h
+      difficulty: low
+      id: ab-reflash-rack
 - [ ] Each additional board: `./scripts/rack-flash.sh staging` does the whole
       loop (cert, `POST /devices`, flash, cabling prompt, uplink poll) and
       records it in `certs/rack-inventory.tsv`. Names by board type and
@@ -298,7 +312,7 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: rfq-scope
       asked: 2026-10-25
       by: hardware session (docs/hardware-spec)
-- [ ] **OTA enablement: when does the rack take its one USB reflash?** — PR 105 (feat/ota) changes the partition table to the A/B layout; merging is safe (boards on the factory table log `OTA: unavailable` and keep uplinking) but each board needs one more USB flash (`./scripts/flash.sh <device> staging`, ~2 min each) before it can ever OTA. Seven racked boards today. After that, never again.
+- [x] **OTA enablement: when does the rack take its one USB reflash?** — PR 105 (feat/ota) changes the partition table to the A/B layout; merging is safe (boards on the factory table log `OTA: unavailable` and keep uplinking) but each board needs one more USB flash (`./scripts/flash.sh <device> staging`, ~2 min each) before it can ever OTA. Seven racked boards today. After that, never again.
       needs: a date, or "merge now, flash as boards come to the bench"
       result: PR 105 un-drafted; every board on the A/B table; rack-flash.sh becomes the recovery path only
       options: switch day 2026-10-26, all seven | merge now, flash opportunistically | hold until the bench run (ota-bench) passes
@@ -307,7 +321,9 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: ota-enablement-reflash
       asked: 2026-10-25
       by: OTA session (feat/ota)
-- [ ] **OTA resume: must a download survive a power cut, or only a reset?** — the resume record (offset into the inactive slot) lives in RTC fast RAM, which esp-hal zeroes on every power-on/EN reset by design; it survives the 5-min watchdog and software resets. So a PoE switch reboot or power cut mid-download restarts the ~60 s pull from zero (correct, just not a resume), and nothing on the bench can trigger a record-keeping reset from outside, so 'OTA: resuming at' has no hardware proof yet. My pick: accept restart-on-power-cut (one minute, no flash wear), and prove resume by letting the download run past the watchdog once (`UPDATE_DEADLINE` is 200 s inside a 300 s watchdog, so a deliberately slow image: an endpoint knob to throttle one device's image bytes) rather than adding a flash-resident record or a reset endpoint on the board.
+      answer: That's fine, we can flash them all via USB again, but please never again.
+      notes: decided 2026-10-26: one more USB flash of every board, then never again — partitions.csv is frozen (ota::partitions_tests pins it, docs/OTA.md "Contract"). Sequence: 03 → 06 → 04 → 05 → 07 on rack-03, un-draft PR 105, then rack-flash.sh from a checkout on dev for the other six (switch-day card ab-reflash-rack)
+- [x] **OTA resume: must a download survive a power cut, or only a reset?** — the resume record (offset into the inactive slot) lives in RTC fast RAM, which esp-hal zeroes on every power-on/EN reset by design; it survives the 5-min watchdog and software resets. So a PoE switch reboot or power cut mid-download restarts the ~60 s pull from zero (correct, just not a resume), and nothing on the bench can trigger a record-keeping reset from outside, so 'OTA: resuming at' has no hardware proof yet. My pick: accept restart-on-power-cut (one minute, no flash wear), and prove resume by letting the download run past the watchdog once (`UPDATE_DEADLINE` is 200 s inside a 300 s watchdog, so a deliberately slow image: an endpoint knob to throttle one device's image bytes) rather than adding a flash-resident record or a reset endpoint on the board.
       needs: your pick
       result: docs/OTA.md states the contract; 05 (or a 07) proves the path that is promised
       options: accept restart on power cut, prove resume via throttled download | resume must survive power cut (flash-resident record) | drop resume, always restart
@@ -316,3 +332,5 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: ota-resume-proof
       asked: 2026-10-26
       by: OTA session (feat/ota)
+      answer: accept restart on power cut, prove resume via throttled download
+      notes: decided 2026-10-26: power cut = restart from zero; resume proven via a one-shot server stall (`PUT /devices/{id}/firmware_fault`, feat/ota) — `scratch/07-ota-resume-proof.sh` after the staging endpoint is re-installed (03). docs/OTA.md "Contract and bench proof"

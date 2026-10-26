@@ -37,6 +37,13 @@ pub const DEVICE_FIRMWARE_PATTERN: &str = "/devices/{device_id}/firmware/{versio
 pub const DEVICE_FIRMWARE_MANIFEST_PATTERN: &str =
     "/devices/{device_id}/firmware/{version}/manifest";
 
+/// Bench-only fault injection on a device's next image download — PUT
+/// (admin mTLS) with `{"stall_at": <byte offset>, "stall_secs": <s>}` arms
+/// a one-shot stall, `null`/`{}` clears it; GET (admin) reads the armed
+/// fault or 404. In-memory: a restart forgets it. Axum pattern:
+/// /devices/{device_id}/firmware_fault
+pub const DEVICE_FIRMWARE_FAULT_PATTERN: &str = "/devices/{device_id}/firmware_fault";
+
 /// Fleet status — GET (admin mTLS). Machine-readable per-device health.
 pub const FLEET: &str = "/fleet";
 

@@ -32,4 +32,6 @@ mod http_tests;
 #[cfg(test)]
 mod install_tests;
 #[cfg(test)]
+mod partitions_tests;
+#[cfg(test)]
 mod policy_tests;

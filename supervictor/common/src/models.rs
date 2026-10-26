@@ -230,6 +230,20 @@ pub struct DesiredFwRequest {
     pub desired_fw: Option<String>,
 }
 
+/// A one-shot fault on a device's next firmware download (bench proof of
+/// resume, docs/OTA.md): the image body stops after `stall_at` bytes
+/// (absolute offset into the image) for `stall_secs`, then completes.
+/// Longer than the device's read timeout, the stall makes it drop the
+/// connection, keep its resume record and retry with `Range`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FirmwareFault {
+    /// Image offset at which the body pauses.
+    pub stall_at: u64,
+    /// How long it pauses before the rest is sent.
+    pub stall_secs: u64,
+}
+
 /// What the endpoint knows about one uploaded firmware image. Served at
 /// `GET /devices/{id}/firmware/{version}/manifest`; the device checks
 /// `chip`, `size` and `sha256` against what it downloads before it
