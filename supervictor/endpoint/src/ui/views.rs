@@ -205,7 +205,7 @@ pub const LIVE_SCRIPT: &str = r#"
 
 /// The live page: a register bank of meters (real units; the 8-bit level
 /// is only the bar width) and one scrolling strip per register, drawn on
-/// canvas at 10 fps from the samples seeded in
+/// canvas every animation frame from the samples seeded in
 /// `#live[data-live]` plus whatever `sv:uplink` / `sv:snapshot` deliver.
 /// Levels are the y axis (1..=255 maps onto each register's fixed range,
 /// 0 breaks the line), so the scale never jumps as data arrives; tick
@@ -298,6 +298,18 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
     });
   });
   var strips = [].slice.call(root.querySelectorAll('figure.strip'));
+  // The head of each line trails real time by one sample interval (that
+  // device's last spacing, held to 0.1–1 s) and is interpolated between
+  // the two samples around the display instant, so a new sample extends
+  // the line smoothly across a frame instead of snapping it forward.
+  var LAG_MIN = 100, LAG_MAX = 1000;
+  function head(t, l, r, j, tau) {
+    if (j <= 0 || j >= t.length) return null;
+    var a = l[j - 1][r] | 0, b = l[j][r] | 0;
+    if (!a || !b) return null;
+    var span = t[j] - t[j - 1];
+    return span > 0 ? a + (b - a) * (tau - t[j - 1]) / span : b;
+  }
   function draw() {
     var now = Date.now() - skew, t1 = now, t0 = now - span * 1000;
     var grid = css('--border'), muted = css('--muted'), surface = css('--surface'), colors = {};
@@ -328,20 +340,29 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
       }
       ctx.save(); ctx.beginPath(); ctx.rect(ml - 1, 0, pw + 2, H); ctx.clip();
       order.forEach(function (id) {
-        var d = devices[id];
+        var d = devices[id], n = d.t.length;
+        if (!n) return;
+        var lag = n >= 2 ? Math.min(LAG_MAX, Math.max(LAG_MIN, d.t[n - 1] - d.t[n - 2])) : LAG_MIN;
+        var tau = now - lag;
         var color = colors[id] || (colors[id] = paint(d.style));
         ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         ctx.setLineDash(dashes(d.style));
         ctx.beginPath();
-        var up = true, lx, ly, marks = [];
-        for (var i = 0; i < d.t.length; i++) {
-          if (d.t[i] < t0 - 2000) continue;
+        var up = true, lx, ly, marks = [], i = 0;
+        while (i < n && d.t[i] < t0 - 2000) i++;
+        for (; i < n && d.t[i] <= tau; i++) {
           var lv = d.l[i][r] | 0;
           if (!lv) { up = true; continue; }
-          var px = x(Math.min(d.t[i], t1)), py = y(lv);
+          var px = x(d.t[i]), py = y(lv);
           if (up) ctx.moveTo(px, py); else ctx.lineTo(px, py);
           up = false; lx = px; ly = py;
           if (d.style.marker && d.style.marker !== 'none') marks.push([px, py]);
+        }
+        var hv = head(d.t, d.l, r, i, tau);
+        if (hv !== null) {
+          var hx = x(tau), hy = y(hv);
+          if (up) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
+          up = false; lx = hx; ly = hy;
         }
         ctx.stroke();
         ctx.setLineDash([]);
@@ -360,8 +381,8 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
       root.querySelectorAll('button[data-span]').forEach(function (o) { o.classList.toggle('active', o === b); });
     });
   });
-  setInterval(function () { if (document.visibilityState === 'visible') draw(); }, 100);
-  draw();
+  function frame() { if (document.visibilityState === 'visible') draw(); requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
 })();
 "#;
 
