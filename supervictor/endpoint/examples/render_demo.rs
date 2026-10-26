@@ -46,8 +46,8 @@ const DEMO_SCRIPT: &str = r#"
   });
   var rows = Array.prototype.slice.call(document.querySelectorAll('tr[data-device]'));
   if (!rows.length) return;
-  // Live page: keep each device's walk going with a synthetic burst of
-  // ten 8-bit samples every five seconds, like the firmware does.
+  // Live page: keep each device's walk going with a synthetic burst every
+  // TICK ms that covers exactly that tick, like the firmware does.
   var live = document.getElementById('live');
   var seed = null;
   if (live) { try { seed = JSON.parse(live.dataset.live); } catch (_) { seed = null; } }
