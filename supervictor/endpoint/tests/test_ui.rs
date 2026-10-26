@@ -387,8 +387,8 @@ async fn threshold_form_sets_and_clears_the_override() {
         .text();
     assert!(html.contains("power threshold"), "{html}");
     assert!(html.contains(r#"value="12000""#), "{html}");
-    assert!(html.contains("fleet default 100 mA"), "{html}");
-    assert!(html.contains(r#"placeholder="100""#), "{html}");
+    assert!(html.contains("fleet default 1000 mA"), "{html}");
+    assert!(html.contains(r#"placeholder="1000""#), "{html}");
     let (name, value) = dn(ADMIN_DN);
     let fleet_html = server.get("/ui").add_header(name, value).await.text();
     assert!(fleet_html.contains("≥ 12000"), "{fleet_html}");
@@ -536,7 +536,7 @@ async fn fleet_rows_carry_their_power_threshold() {
     let (name, value) = dn(ADMIN_DN);
     let html = server.get("/ui").add_header(name, value).await.text();
     assert!(
-        html.contains(r#"data-device="bench-01" data-threshold="100""#),
+        html.contains(r#"data-device="bench-01" data-threshold="1000""#),
         "{html}"
     );
     assert!(
@@ -674,7 +674,7 @@ async fn history_page_renders_tiles_status_chart_and_a_chart_per_metric() {
         html.contains("class=\"threshold\""),
         "threshold line on the current chart"
     );
-    assert!(html.contains("on ≥ 100 mA"));
+    assert!(html.contains("on ≥ 1000 mA"));
     assert!(html.contains("powered on") && html.contains("powered off"));
     for key in ["current", "temp_c", "humidity_pct", "rssi_dbm", "heap_free"] {
         assert!(
@@ -1076,7 +1076,7 @@ async fn device_page_has_window_filters_and_metric_charts() {
         html.contains("badge power off"),
         "55 mA fresh reading is off: {html}"
     );
-    assert!(html.contains("55 mA, threshold 100 mA"));
+    assert!(html.contains("55 mA, threshold 1000 mA"));
     assert_eq!(
         deep(&html).matches("class=\"threshold\"").count(),
         1,
@@ -1232,7 +1232,32 @@ async fn live_page_has_a_meter_per_device_per_register_and_a_strip_per_register(
     // Legend for 2+ devices, span buttons, and no inline user data in scripts.
     assert!(html.contains("class=\"legend\""));
     assert!(html.contains("data-span=\"60\""));
-    assert!(html.contains("aria-valuenow=\"200\""));
+    // The raw 8-bit level is never a readout: no level span, and the ARIA
+    // range is the register's real units, not 1..=255.
+    assert!(
+        !html.contains("meter-level"),
+        "raw level span must not render"
+    );
+    assert!(
+        !html.contains("aria-valuemax=\"255\""),
+        "ARIA range must be in real units"
+    );
+    let v = f64::from(REGISTERS[0].dequantize(200).unwrap());
+    assert!(
+        html.contains(&format!("aria-valuenow=\"{v}\"")),
+        "aria-valuenow should be the dequantised value, got no {v} in page"
+    );
+    assert!(
+        html.contains(&format!(
+            "aria-valuetext=\"{expected} {}\"",
+            REGISTERS[0].unit
+        )),
+        "aria-valuetext is the readout plus unit"
+    );
+    assert!(
+        html.contains(&format!("aria-valuemax=\"{}\"", REGISTERS[0].hi)),
+        "aria-valuemax is the register's full scale"
+    );
 }
 
 #[tokio::test]
@@ -1405,7 +1430,7 @@ async fn every_page_has_a_phone_glance_ahead_of_the_deep_layer() {
     assert!(glance.contains("<span class=\"verdict-head\">1 off</span>"));
     assert!(glance.contains("1 on · 1 off · 1 never heard · 1 inactive"));
     assert_eq!(glance.matches("class=\"glance-row\"").count(), 4);
-    assert_eq!(glance.matches("data-threshold=\"100\"").count(), 4);
+    assert_eq!(glance.matches("data-threshold=\"1000\"").count(), 4);
     assert!(glance.contains("<li class=\"inactive\" data-device=\"retired\""));
     assert!(glance.contains("<span class=\"badge inactive\">inactive</span>"));
     assert_eq!(glance.matches("class=\"when fresh\">just now<").count(), 2);
@@ -1428,7 +1453,7 @@ async fn every_page_has_a_phone_glance_ahead_of_the_deep_layer() {
     assert!(glance.contains("<div class=\"hero on\">"), "{glance}");
     assert!(glance.contains("<span class=\"hero-state\">on</span>"));
     assert!(glance.contains("<span class=\"hero-current\">1500 mA</span>"));
-    assert!(glance.contains("on ≥ 100 mA"));
+    assert!(glance.contains("on ≥ 1000 mA"));
     assert!(glance.contains("<dd class=\"when fresh\">just now</dd>"));
     assert!(glance.contains("1 in 6h"));
     assert!(glance.contains("class=\"active\" href=\"/ui/devices/pump?window=6h\""));

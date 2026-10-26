@@ -38,8 +38,9 @@ impl UplinkAck {
     }
 }
 
-/// Most samples one `levels` burst can carry.
-pub const LEVELS_SAMPLES_MAX: usize = 12;
+/// Most samples one `levels` burst can carry: the default 10 Hz burst over
+/// the default 5 s interval (`config::UPLINK_BURST`), no slack.
+pub const LEVELS_SAMPLES_MAX: usize = 50;
 /// Capacity of the flat `levels` array (`LEVELS_SAMPLES_MAX` samples of
 /// `levels::COUNT` bytes). Sized into the JSON buffer in `network/http.rs`;
 /// `uplink_tests::full_uplink_with_max_id_fits_the_request_buffers` pins it.

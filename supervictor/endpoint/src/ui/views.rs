@@ -203,8 +203,9 @@ pub const LIVE_SCRIPT: &str = r#"
 })();
 "#;
 
-/// The live page: a register bank of 8-bit meters and one scrolling strip
-/// per register, drawn on canvas at 10 fps from the samples seeded in
+/// The live page: a register bank of meters (real units; the 8-bit level
+/// is only the bar width) and one scrolling strip per register, drawn on
+/// canvas every animation frame from the samples seeded in
 /// `#live[data-live]` plus whatever `sv:uplink` / `sv:snapshot` deliver.
 /// Levels are the y axis (1..=255 maps onto each register's fixed range,
 /// 0 breaks the line), so the scale never jumps as data arrives; tick
@@ -252,10 +253,17 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
     if (a >= 10) return v.toFixed(1);
     return v.toFixed(2);
   }
+  // Samples stay time-ordered: a burst is back-dated from its receive
+  // time, so its first samples can land before the previous burst's last
+  // ones (receive jitter, or a feed whose bursts overlap). Appending those
+  // would send the stroke backwards and the line would double back over
+  // itself. A sample at an already-held instant replaces it.
   function push(id, t, l) {
-    var d = devices[id];
-    d.t.push(t); d.l.push(l);
-    var cut = t - KEEP_MS - 10000;
+    var d = devices[id], i = d.t.length;
+    while (i > 0 && d.t[i - 1] > t) i--;
+    if (i > 0 && d.t[i - 1] === t) { d.l[i - 1] = l; }
+    else { d.t.splice(i, 0, t); d.l.splice(i, 0, l); }
+    var cut = d.t[d.t.length - 1] - KEEP_MS - 10000;
     while (d.t.length && d.t[0] < cut) { d.t.shift(); d.l.shift(); }
   }
   function updateMeters(id) {
@@ -265,8 +273,8 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
       var r = parseInt(m.dataset.register, 10), lv = last[r] | 0, v = deq(r, lv);
       m.style.setProperty('--lv', lv);
       m.querySelector('.meter-value').textContent = v === null ? '–' : fmt(v);
-      m.querySelector('.meter-level').textContent = lv ? String(lv) : '–';
-      if (lv) m.setAttribute('aria-valuenow', lv); else m.removeAttribute('aria-valuenow');
+      if (v === null) { m.removeAttribute('aria-valuenow'); m.removeAttribute('aria-valuetext'); }
+      else { m.setAttribute('aria-valuenow', v); m.setAttribute('aria-valuetext', fmt(v) + ' ' + REG[r].unit); }
     });
   }
   function ingest(ev) {
@@ -290,6 +298,45 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
     });
   });
   var strips = [].slice.call(root.querySelectorAll('figure.strip'));
+  // The head of each line trails real time by one sample interval (that
+  // device's last spacing, held to 0.1–1 s) and is interpolated between
+  // the two samples around the display instant, so a new sample extends
+  // the line smoothly across a frame instead of snapping it forward.
+  var LAG_MIN = 100, LAG_MAX = 1000;
+  // A run of points becomes one path: straight segments when samples sit
+  // closer than a few pixels (a curve would be invisible and costs more),
+  // otherwise a monotone cubic through them (Fritsch–Carlson tangents:
+  // passes every sample, never overshoots a peak or trough).
+  var CURVE_PX = 2.5;
+  function trace(ctx, pts, curved) {
+    var n = pts.length;
+    if (!n) return;
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    if (!curved || n < 3) { for (var k = 1; k < n; k++) ctx.lineTo(pts[k][0], pts[k][1]); return; }
+    var dx = [], s = [], m = new Array(n), i;
+    for (i = 0; i < n - 1; i++) {
+      dx.push(pts[i + 1][0] - pts[i][0]);
+      s.push(dx[i] > 0 ? (pts[i + 1][1] - pts[i][1]) / dx[i] : 0);
+    }
+    m[0] = s[0]; m[n - 1] = s[n - 2];
+    for (i = 1; i < n - 1; i++) m[i] = s[i - 1] * s[i] <= 0 ? 0 : (s[i - 1] + s[i]) / 2;
+    for (i = 0; i < n - 1; i++) {
+      if (!s[i]) { m[i] = 0; m[i + 1] = 0; continue; }
+      var a = m[i] / s[i], b = m[i + 1] / s[i], h = a * a + b * b;
+      if (h > 9) { var t = 3 / Math.sqrt(h); m[i] = t * a * s[i]; m[i + 1] = t * b * s[i]; }
+    }
+    for (i = 0; i < n - 1; i++) {
+      var d = dx[i] / 3;
+      ctx.bezierCurveTo(pts[i][0] + d, pts[i][1] + m[i] * d, pts[i + 1][0] - d, pts[i + 1][1] - m[i + 1] * d, pts[i + 1][0], pts[i + 1][1]);
+    }
+  }
+  function head(t, l, r, j, tau) {
+    if (j <= 0 || j >= t.length) return null;
+    var a = l[j - 1][r] | 0, b = l[j][r] | 0;
+    if (!a || !b) return null;
+    var span = t[j] - t[j - 1];
+    return span > 0 ? a + (b - a) * (tau - t[j - 1]) / span : b;
+  }
   function draw() {
     var now = Date.now() - skew, t1 = now, t0 = now - span * 1000;
     var grid = css('--border'), muted = css('--muted'), surface = css('--surface'), colors = {};
@@ -320,26 +367,36 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
       }
       ctx.save(); ctx.beginPath(); ctx.rect(ml - 1, 0, pw + 2, H); ctx.clip();
       order.forEach(function (id) {
-        var d = devices[id];
+        var d = devices[id], n = d.t.length;
+        if (!n) return;
+        var lag = n >= 2 ? Math.min(LAG_MAX, Math.max(LAG_MIN, d.t[n - 1] - d.t[n - 2])) : LAG_MIN;
+        var tau = now - lag;
         var color = colors[id] || (colors[id] = paint(d.style));
         ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         ctx.setLineDash(dashes(d.style));
         ctx.beginPath();
-        var up = true, lx, ly, marks = [];
-        for (var i = 0; i < d.t.length; i++) {
-          if (d.t[i] < t0 - 2000) continue;
+        var runs = [], run = null, marks = [], i = 0;
+        while (i < n && d.t[i] < t0 - 2000) i++;
+        var first = i;
+        for (; i < n && d.t[i] <= tau; i++) {
           var lv = d.l[i][r] | 0;
-          if (!lv) { up = true; continue; }
-          var px = x(Math.min(d.t[i], t1)), py = y(lv);
-          if (up) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-          up = false; lx = px; ly = py;
+          if (!lv) { run = null; continue; }
+          var px = x(d.t[i]), py = y(lv);
+          if (!run) { run = []; runs.push(run); }
+          run.push([px, py]);
           if (d.style.marker && d.style.marker !== 'none') marks.push([px, py]);
         }
+        var hv = head(d.t, d.l, r, i, tau);
+        if (hv !== null) { if (!run) { run = []; runs.push(run); } run.push([x(tau), y(hv)]); }
+        var curved = i - first > 1 && pw / (i - first) >= CURVE_PX;
+        for (var q = 0; q < runs.length; q++) trace(ctx, runs[q], curved);
         ctx.stroke();
         ctx.setLineDash([]);
         for (var k = 0; k < marks.length; k++) glyph(ctx, d.style.marker, marks[k][0], marks[k][1], 2.5);
-        if (lx !== undefined) {
-          ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, Math.PI * 2); ctx.fill();
+        var tail = runs.length ? runs[runs.length - 1] : null;
+        if (tail) {
+          var lp = tail[tail.length - 1];
+          ctx.beginPath(); ctx.arc(lp[0], lp[1], 3.5, 0, Math.PI * 2); ctx.fill();
           ctx.strokeStyle = surface; ctx.lineWidth = 2; ctx.stroke();
         }
       });
@@ -352,8 +409,8 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
       root.querySelectorAll('button[data-span]').forEach(function (o) { o.classList.toggle('active', o === b); });
     });
   });
-  setInterval(function () { if (document.visibilityState === 'visible') draw(); }, 100);
-  draw();
+  function frame() { if (document.visibilityState === 'visible') draw(); requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
 })();
 "#;
 
@@ -680,26 +737,27 @@ fn verdict_block(v: &Verdict) -> Markup {
     }
 }
 
-/// One 8-bit meter for register `i` of a live device: the bar is
-/// level/255 in the device's colour, the text is the dequantised value and
-/// the raw level. `extra` is a second class (`hero-meter` / `mini`) for the
-/// glance; the bank's meters carry none so the live script finds them all
-/// by `.meter`.
+/// One meter for register `i` of a live device: the bar is level/255 in
+/// the device's colour, the text is the value in the register's unit. The
+/// raw 8-bit level only drives the bar width (`--lv`); the readout and the
+/// ARIA range are in real units. `extra` is a second class (`hero-meter` /
+/// `mini`) for the glance; the bank's meters carry none so the live script
+/// finds them all by `.meter`.
 fn meter(d: &live::LiveDevice, i: usize, r: &live::RegisterInfo, extra: &str) -> Markup {
     let level = d.latest().map(|s| s.l[i]).unwrap_or(0);
-    let value = METRICS[i].dequantize(level);
+    let value = METRICS[i].dequantize(level).map(f64::from);
+    let text = value.map(charts::fmt_value);
     html! {
         div class={ "meter" @if !extra.is_empty() { " " (extra) } } data-register=(i) style={ "--lv:" (level) } role="meter"
-            aria-label={ (d.device_id) " " (r.label) } aria-valuemin="1" aria-valuemax="255"
-            aria-valuenow=[(level > 0).then_some(level)] {
+            aria-label={ (d.device_id) " " (r.label) } aria-valuemin=(r.lo) aria-valuemax=(r.hi)
+            aria-valuenow=[value] aria-valuetext=[text.as_ref().map(|t| format!("{t} {}", r.unit))] {
             span .meter-bar.(d.style.color.class()) style=[d.style.color.custom_hex().map(|h| format!("--c:{h}"))] {}
             span .meter-value {
-                @match value {
-                    Some(v) => (charts::fmt_value(f64::from(v))),
+                @match text {
+                    Some(t) => (t),
                     None => "–",
                 }
             }
-            span .meter-level { @if level > 0 { (level) } @else { "–" } }
         }
     }
 }
@@ -888,9 +946,10 @@ pub const LIVE_SPANS: [u64; 3] = [30, 60, 120];
 /// Span selected on load.
 pub const LIVE_DEFAULT_SPAN: u64 = 60;
 
-/// `GET /ui/live` — register bank (one 8-bit meter per device per
-/// register, newest sample: the bar is level/255, the text is the value in
-/// the column's unit and the raw level) and one scrolling strip per register.
+/// `GET /ui/live` — register bank (one meter per device per register,
+/// newest sample: the bar is level/255, the text is the value in the
+/// column's unit; the raw level is never shown) and one scrolling strip per
+/// register.
 pub fn live_page(snapshot: &live::Snapshot, subject: &str) -> Markup {
     let data = serde_json::to_string(snapshot).unwrap_or_else(|_| "{}".into());
     let samples: usize = snapshot.devices.iter().map(|d| d.samples.len()).sum();

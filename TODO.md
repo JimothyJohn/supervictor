@@ -264,19 +264,56 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
 
 ## Open questions for Nick
 
-- 2026-10-24: mTLS identity never reaches the Lambda. dev.supervictor.advin.io exists (PR 74) and API Gateway enforces the client cert, but the Lambda Web Adapter serializes `lambda_http`'s typed request context, whose REST v1 identity struct has no `clientCert` (aws_lambda_events 0.14 and 1.2; `catch-all-fields` off), and REST parameter mapping needs a non-proxy integration. After PR 75 (no fallback to the client-supplied `x-ssl-client-subject-dn`, which anyone could forge on dev and prod) every Lambda request is anonymous, so bound devices 403 there. Pick one: (a) drop the adapter and run axum under `lambda_http` with `catch-all-fields`, read `identity.other["clientCert"]["subjectDN"]`; (b) move to an HTTP API v2, whose typed context carries `authentication.clientCert` through the adapter; (c) a REQUEST Lambda authorizer that copies `$context.identity.clientCert.subjectDN` into the authorizer context. I'd take (a): Rust-native, no sidecar, REST stays. Bench boards sit on staging (in-binary TLS, unaffected) until then.
-- 2026-10-24: when real sensors land, does the telemetry simulator (`sim.rs` + the machine profiles in `profile.rs`) move behind a cargo feature (`sim`, off by default) so a production board can never report invented readings, or stay as the fallback for fields a board lacks? I'd put it behind a feature once the first real sensor ships (P2 item).
-- 2026-10-24: 8-bit register levels (PR 85) fix each register's full scale in `supervictor/common/src/levels.rs`: temp -20..60 °C, humidity 0..100 %RH, rssi -100..-20 dBm, heap 0..512 KiB (1..=255 = range, 0 = no reading; 0.39 %/step). Current was answered 2026-10-25 (20 A, the SEN0211 probe range). Still open: is -20 °C a low enough temperature floor?
-- 2026-10-24: default burst is 10 samples per 5 s uplink (`UPLINK_BURST`, 500 ms spacing; desktop `BURST=`). Capacity is 12 samples/uplink before the JSON buffer (768) needs to grow again. Keep 10, or go to 1 Hz (5 samples) to leave headroom for the IMU registers when they land? The burst is plain JSON bytes (`[12,200,…]`, ~3.5 chars/datapoint); base64 would be 1.33 but needs an encoder on the device — not worth it until the burst is the dominant byte count.
-- 2026-10-25: heated machines — should `on` mean "producing" (needs a min-on-time or a second threshold per device) or stay "powered" (one bar, as shipped)? Extruder and molder are the only sim profiles where it matters (P3 item).
-- 2026-10-25: mesh identity model — my pick: the PoE gateway's cert vouches for
-  its ESP-NOW children (device record gains `gateway_id`), link encryption via
-  a shared ESP-NOW PMK baked at flash time like SSID. Bench-grade, not
-  per-leaf certs. Yes/no before the mesh protocol starts.
-- 2026-10-25: board inventory for the rack — how many ESP32-POE2 vs
-  ESP32-POE-ISO, and are any POE-ISO the WROVER variant (PSRAM → RMII clock on
-  GPIO0 like the POE2; needs its own feature or a PSRAM flag)?
-- [ ] **Which local-preview path failed on the new phone UI?** — PR 96 (phone glance layer) is on dev. The mobile-UI session left a Quickstart stack running in `../supervictor-mobile` (endpoint :8443 with a multi-name server cert, extruder sim, `.logs/`), a demo http server on :8000 serving `scratch/demo` + `supervictor-ca.pem`, and `scratch/01-trust-fleet-ca.sh` for the Studio's keychain. Nick said "not working" without saying which step: Studio browser (CA trust not yet run; server cert verified by curl on every address), the phone's CA profile / full-trust toggle, the phone identity (.p12 from 2026-10-24), or the phone being on 10.0.0.x rather than 192.168.3.x. Full state in that worktree's `.claude/handoff.md`.
+- [ ] **mTLS identity never reaches the Lambda** — dev.supervictor.advin.io exists (PR 74) and API Gateway enforces the client cert, but the Lambda Web Adapter serializes `lambda_http`'s typed request context, whose REST v1 identity struct has no `clientCert` (aws_lambda_events 0.14 and 1.2; `catch-all-fields` off), and REST parameter mapping needs a non-proxy integration. After PR 75 (no fallback to the client-supplied `x-ssl-client-subject-dn`, which anyone could forge on dev and prod) every Lambda request is anonymous, so bound devices 403 there. (a) drop the adapter and run axum under `lambda_http` with `catch-all-fields`, read `identity.other["clientCert"]["subjectDN"]`; (b) move to an HTTP API v2, whose typed context carries `authentication.clientCert` through the adapter; (c) a REQUEST Lambda authorizer that copies `$context.identity.clientCert.subjectDN` into the authorizer context. I'd take (a): Rust-native, no sidecar, REST stays. Bench boards sit on staging (in-binary TLS, unaffected) until then.
+      needs: a letter
+      result: bound devices authenticate on dev and prod, not just staging
+      options: a lambda_http catch-all | b HTTP API v2 | c REQUEST authorizer
+      est: 1d
+      difficulty: med
+      id: lambda-mtls-identity
+      asked: 2026-10-24
+- [ ] **Telemetry simulator behind a cargo feature once real sensors land?** — `sim.rs` + the machine profiles in `profile.rs` are compiled in unconditionally and fill temp/humidity/rssi with plausible fakes. Move behind `sim` (off by default) so a production board can never report invented readings, or keep as the fallback for fields a board lacks? I'd put it behind a feature once the first real sensor ships (P2 item).
+      needs: yes/no
+      result: a production build cannot invent readings
+      options: feature off by default | keep as fallback
+      est: 2h
+      difficulty: low
+      id: sim-behind-feature
+      asked: 2026-10-24
+- [ ] **Is -20 °C a low enough temperature floor?** — 8-bit register levels (PR 85) fix each register's full scale in `supervictor/common/src/levels.rs`: temp -20..60 °C, humidity 0..100 %RH, rssi -100..-20 dBm, heap 0..512 KiB (1..=255 = range, 0 = no reading; 0.39 %/step). Current was answered 2026-10-25 (20 A, the SEN0211 probe range).
+      needs: a floor in °C
+      result: the temp register scale is final before boards ship
+      options: -20 | -40 | other
+      est: 30m
+      difficulty: low
+      id: temp-floor
+      asked: 2026-10-24
+- [ ] **Heated machines: does `on` mean producing or powered?** — "producing" needs a min-on-time or a second threshold per device; "powered" is one bar, as shipped. Extruder and molder are the only sim profiles where it matters (P3 item).
+      needs: a definition
+      result: the power state matches what an operator means by "on"
+      options: powered (as shipped) | producing (second threshold) | producing (min-on-time)
+      est: 3h
+      difficulty: med
+      id: heated-on-meaning
+      asked: 2026-10-25
+- [ ] **Mesh identity model: gateway vouches for its ESP-NOW children?** — my pick: the PoE gateway's cert vouches for its ESP-NOW children (device record gains `gateway_id`), link encryption via a shared ESP-NOW PMK baked at flash time like SSID. Bench-grade, not per-leaf certs. The coexistence spike is a GO (PR 103); the mesh protocol starts on this answer.
+      needs: yes/no
+      result: the ESP-NOW protocol (gateway/leaf roles, PMK) gets built on the spike module
+      options: yes, gateway vouches + shared PMK | no, per-leaf certs | other
+      est: 2d
+      difficulty: high
+      id: mesh-identity-model
+      asked: 2026-10-25
+      by: coexistence-spike session (feat/espnow-coexist)
+- [ ] **Board inventory for the rack** — how many ESP32-POE2 vs ESP32-POE-ISO, and are any POE-ISO the WROVER variant (PSRAM → RMII clock on GPIO0 like the POE2; needs its own feature or a PSRAM flag)? rack-flash.sh refuses a WROVER POE-ISO until this is known.
+      needs: counts, and WROVER yes/no
+      result: every rack board has a verified board feature
+      options: no WROVER | some WROVER (count)
+      est: 1h
+      difficulty: low
+      id: rack-board-inventory
+      asked: 2026-10-25
+- [x] **Which local-preview path failed on the new phone UI?** — PR 96 (phone glance layer) is on dev. The mobile-UI session left a Quickstart stack running in `../supervictor-mobile` (endpoint :8443 with a multi-name server cert, extruder sim, `.logs/`), a demo http server on :8000 serving `scratch/demo` + `supervictor-ca.pem`, and `scratch/01-trust-fleet-ca.sh` for the Studio's keychain. Nick said "not working" without saying which step: Studio browser (CA trust not yet run; server cert verified by curl on every address), the phone's CA profile / full-trust toggle, the phone identity (.p12 from 2026-10-24), or the phone being on 10.0.0.x rather than 192.168.3.x. Full state in that worktree's `.claude/handoff.md`.
       needs: the exact symptom (which URL, which device, what error text)
       result: a working preview path written into scripts/ or the README, and the stack torn down
       options: Studio browser | phone CA trust | phone identity | network | something else
@@ -285,7 +322,9 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: mobile-preview-failed
       asked: 2026-10-25
       by: mobile-UI session (feat/ui-mobile-glance)
-- [ ] **Kit power threshold: default 1000 mA for clamp devices?** — `POWER_THRESHOLD_MA` defaults to 100 mA, below the SEN0211 clamp's ~1 A ADC floor (HARDWARE.md §6.2), so a kit device reads "on" from noise. Per-device `power_threshold_ma` already exists on the record.
+      answer: the phone couldn't access the page
+      notes: resolved 2026-10-26: moot — PR 96 is on dev and staging already serves the glance UI, so the phone path is staging + scripts/iphone-cert.sh (Let's Encrypt cert, no CA profile; AirDrop the identity). The local stack in ../supervictor-mobile is torn down by scratch/teardown-mobile-preview.sh (yours; kill was denied to me)
+- [x] **Kit power threshold: default 1000 mA for clamp devices?** — `POWER_THRESHOLD_MA` defaults to 100 mA, below the SEN0211 clamp's ~1 A ADC floor (HARDWARE.md §6.2), so a kit device reads "on" from noise. Per-device `power_threshold_ma` already exists on the record.
       needs: a number, or "per device only"
       result: kit devices show off when the machine is off; the default documented in HARDWARE.md and the endpoint config
       options: 1000 mA default | keep 100, set per device | other number
@@ -294,7 +333,9 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: kit-power-threshold
       asked: 2026-10-25
       by: hardware session (docs/hardware-spec, feat/current-register-20a)
-- [ ] **Clamp calibration gain: compile-time or NVS?** — one-point gain per board. Compile-time `CURRENT_GAIN_PPM` baked like `UPLINK_INTERVAL_S` (simple, a reflash to change, a column in certs/rack-inventory.tsv) or NVS (survives OTA, needs a write path). My pick: compile-time for v0. HARDWARE.md §7, §11.
+      answer: 1000 mA default
+      notes: done 2026-10-26 (chore/decisions-20261026): fleet::DEFAULT_POWER_THRESHOLD_MA = 1000; HARDWARE.md §6.2/§11, server.md, endpoint CLAUDE.md updated; sim profiles keep their own thresholds
+- [x] **Clamp calibration gain: compile-time or NVS?** — one-point gain per board. Compile-time `CURRENT_GAIN_PPM` baked like `UPLINK_INTERVAL_S` (simple, a reflash to change, a column in certs/rack-inventory.tsv) or NVS (survives OTA, needs a write path). My pick: compile-time for v0. HARDWARE.md §7, §11.
       needs: your pick
       result: the firmware's `sensor-current` feature has one calibration path, not two
       options: compile-time env | NVS | compile-time now, NVS after OTA
@@ -303,7 +344,9 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: clamp-calibration-location
       asked: 2026-10-25
       by: hardware session (docs/hardware-spec)
-- [ ] **Prototype scope to RFQ: hat only, or hat + integrated node?** — SV-HAT-A (`hardware/hat/`, ~$0.5–5k, 6–10 weeks) vs also the CERN-OHL derivative of the Olimex POE-ISO (~$12–30k, 12–20 weeks). Recommendation: hat now, node at 25+ units. hardware/SOURCING.md §1, §5.
+      answer: compile-time env
+      notes: done 2026-10-26: HARDWARE.md §6.2/§7/§11 name CURRENT_GAIN_PPM as the only path; the firmware feature itself (sensor-current) is still to be written and will read it like UPLINK_INTERVAL_S
+- [x] **Prototype scope to RFQ: hat only, or hat + integrated node?** — SV-HAT-A (`hardware/hat/`, ~$0.5–5k, 6–10 weeks) vs also the CERN-OHL derivative of the Olimex POE-ISO (~$12–30k, 12–20 weeks). Recommendation: hat now, node at 25+ units. hardware/SOURCING.md §1, §5.
       needs: your pick, then the bracketed parts of hardware/RFQ-prototype.md §12
       result: RFQ sent to three shops; quotes replace the blog-number estimates
       options: hat only | hat + node | neither yet
@@ -312,6 +355,8 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: rfq-scope
       asked: 2026-10-25
       by: hardware session (docs/hardware-spec)
+      answer: hat only
+      notes: done 2026-10-26: RFQ-prototype.md is hat-only (Scope C kept as context, cover email rewritten); SOURCING.md §1/§5 and hardware/index.html record the decision. Still yours: the bracketed parts of §12 and sending it
 - [x] **OTA enablement: when does the rack take its one USB reflash?** — PR 105 (feat/ota) changes the partition table to the A/B layout; merging is safe (boards on the factory table log `OTA: unavailable` and keep uplinking) but each board needs one more USB flash (`./scripts/flash.sh <device> staging`, ~2 min each) before it can ever OTA. Seven racked boards today. After that, never again.
       needs: a date, or "merge now, flash as boards come to the bench"
       result: PR 105 un-drafted; every board on the A/B table; rack-flash.sh becomes the recovery path only

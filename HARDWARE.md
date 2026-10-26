@@ -7,7 +7,11 @@ that order. Performance and novelty are explicitly not goals.
 
 Companion documents: `docs/TELEMETRY.md` (wire schema and register ranges),
 `TESTRIG.md` (which board is on which port, gitignored), `TODO.md` P2 (the
-firmware items this kit unblocks). Written 2026-10-25 against `dev` b80f32d.
+firmware items this kit unblocks), `hardware/SOURCING.md` (where to buy
+each part, US design/build shops, budget and schedule per step),
+`hardware/bom-devkit.csv` (cart-ready BOM) and
+`hardware/RFQ-prototype.md` (the package a design/build vendor needs).
+Written 2026-10-25 against `dev` b80f32d.
 
 ## 1. The kit in one paragraph
 
@@ -195,7 +199,11 @@ does not need it). No LiPo. No microSD.
 ### 6.1 Clamp signal chain
 
 - Probe: 0–20 A RMS → 0–1 V AC, ±1 %, 50 Hz–1 kHz, 13 × 13 mm window.
-- Module: 0–1 V AC in → 0.2–2.8 V DC out, ±4 %, 3.3–5.5 V supply.
+- Module: 0–1 V AC in → 0.2–2.8 V DC out, ±4 %, 3.3–5.5 V supply. Inside
+  (DFRobot schematic V1.0): a 3.0 V LDO (RT9193-30), an LMV321 at 2× gain,
+  a 1N5819W peak detector into **10 µF with a 1 MΩ bleed**. That RC is a
+  10 s time constant: when the load switches off the output decays, it does
+  not drop. Expect ~30 s (3τ) before a reading falls below the floor.
 - DFRobot's reference conversion (the one in `uplink/lib/uplink/src/uplink.h`),
   rewritten in millivolts and milliamps:
 
@@ -216,8 +224,8 @@ per-chip reference voltage varies. Consequences for this kit:
 |----------|-------|---------|
 | ADC floor | 150 mV → **≈1.06 A** | Below about 1 A the reading is noise-shaped, not zero |
 | ADC linear top | 2450 mV → **≈17.3 A** | Above it readings compress; 20 A is not reachable linearly |
-| `current` register full scale | 6000 mA → 849 mV | Comfortably inside the linear window |
-| `POWER_THRESHOLD_MA` default | 100 mA → 14 mV | **Unreadable** with this sensor; see section 11 |
+| `current` register full scale | 20 000 mA → 2.83 V (level 255) | Decided 2026-10-25: matches the probe; levels above ~17 A are compressed by the ADC, step 78.7 mA |
+| `POWER_THRESHOLD_MA` default | 1000 mA → 141 mV | **Decided 2026-10-26:** the fleet default sits at the ADC floor, so a kit device under ~1 A reads off; machines that idle above it get a per-device `power_threshold_ma` |
 | 12-bit count at 11 dB | ≈0.8 mV ≈ **5.4 mA** | Resolution is not the problem, accuracy is |
 | Stack accuracy | ±1 % probe, ±4 % module, ADC gain error | Budget ±5–6 % of reading after a one-point calibration |
 
@@ -226,8 +234,9 @@ sample slot (Espressif's own recommendation alongside an optional 100 nF at
 the pin, which the module's output filter already approximates), treat
 anything under the floor as 0 mA, and clamp the published value to the
 register range. Calibrate once per board against a known load (a resistive
-heater of known wattage, or a clamp meter on the same conductor) and store
-the gain in NVS or bake it at flash time like `DEVICE_NAME`.
+heater of known wattage, or a clamp meter on the same conductor) and bake
+the gain at flash time like `DEVICE_NAME` (`CURRENT_GAIN_PPM`, section 7;
+decided 2026-10-26, no NVS path).
 
 ### 6.3 Power budget
 
@@ -272,8 +281,10 @@ row for the kit (`ethernet,sensor-current[,sensor-sht4x]`) in
 moment TODO.md P2 "simulator behind a cargo feature" lands as `sim`, on only
 for `SIM_PROFILE` builds.
 
-**Sampling.** The burst task already samples every 500 ms
-(`UPLINK_BURST = 10` per 5 s uplink). Each slot: 64 ADC reads averaged,
+**Sampling.** The burst task already samples every 100 ms
+(`UPLINK_BURST = 50` per 5 s uplink, 10 Hz; decided 2026-10-25 — the
+module's rise is fast enough to show at that rate, its decay is the 10 s
+RC above whatever the rate). Each slot: 64 ADC reads averaged,
 converted with 6.1, floored per 6.2, quantised into the `current` register.
 The SHT4x high-precision measurement takes ~10 ms; read it once per uplink,
 not per slot, and skip NaN/CRC failures (the serializer turns non-finite
@@ -282,7 +293,9 @@ floats into `null`, which the endpoint rejects).
 **Calibration knob.** `CURRENT_GAIN_PPM` compile-time env (default
 1 000 000) applied after 6.1, baked like `UPLINK_INTERVAL_S`; per-board
 value lives in a new column of `certs/rack-inventory.tsv` so `flash.sh`
-carries it. NVS is the upgrade path once OTA exists and reflashing stops.
+carries it. **Decided 2026-10-26: compile-time is the only path.** A
+recalibration is a rebuild (OTA once that lands, USB until then); no NVS
+write path, no second source of truth.
 
 ## 8. Bring-up checklist
 
@@ -297,8 +310,9 @@ Each step has a pass criterion; do not skip ahead on a fail.
 3. **Known resistive load.** Clamp one conductor of a heater/kettle of
    known wattage via the splitter. Pass: reading within ±10 % of P/V before
    calibration; set `CURRENT_GAIN_PPM` so it lands within ±3 %.
-4. **Zero-return.** Switch the load off. Pass: `current` returns to 0 mA
-   within two uplinks and the power badge flips (threshold per section 11).
+4. **Zero-return.** Switch the load off. Pass: `current` decays below the
+   floor within ~30 s (the module's 10 s peak-hold, section 6.1) and the
+   power badge flips (threshold per section 11).
 5. **Inductive load.** A motor (shop vac, drill press). Pass: steady-state
    value plausible against the nameplate; inrush visible in the levels
    burst and the register pins at 255 rather than wrapping.
@@ -343,19 +357,18 @@ dark fleet row maps to a cable.
 
 ## 11. Open decisions for Nick
 
-- **`current` register full scale (6 A) vs the 20 A probe.** With the
-  SEN0211 the linear window is ≈1–17 A. Either raise the register to 20 A
-  (step 78 mA; changes the stored-burst scale, do it before real bursts
-  ship) or swap the probe for the 5 A SEN0287 on the same module for
-  small loads. The 60 A sim profiles will pin at 255 either way.
-- **`POWER_THRESHOLD_MA`.** 100 mA is below the sensor floor. Proposal:
-  default 1000 mA for kit devices, settable per device
-  (`power_threshold_ma` already exists on the device record).
-- **Where calibration lives.** Compile-time `CURRENT_GAIN_PPM` (simple,
-  matches how everything else is baked) vs NVS (survives OTA). Compile-time
-  for v0 is my pick.
-- **Buy the SHT40 now or keep `temp_c` simulated until after OTA?** Six
-  dollars; I would order it now so the `sim` feature flip happens once.
+- ~~`current` register full scale~~ **Decided 2026-10-25: 20 A** (step
+  78.7 mA; `supervictor/common/src/levels.rs`, its own PR). The 60 A sim
+  profiles still pin at 255; the floor of ~1 A is level 14.
+- ~~`POWER_THRESHOLD_MA`~~ **Decided 2026-10-26: fleet default 1000 mA**
+  (`fleet::DEFAULT_POWER_THRESHOLD_MA`), per-device `power_threshold_ma`
+  for machines that idle above it. The simulator profiles already set
+  theirs (`scripts/sim-fleet.sh`).
+- ~~Where calibration lives~~ **Decided 2026-10-26: compile-time
+  `CURRENT_GAIN_PPM`**, baked like `UPLINK_INTERVAL_S`, per board from
+  `certs/rack-inventory.tsv`. No NVS path.
+- ~~Buy the SHT40 now?~~ **Decided 2026-10-25: ordering the SHT41 (Adafruit
+  5776) and cable from Adafruit.**
 
 ## 12. Later, deliberately not now
 

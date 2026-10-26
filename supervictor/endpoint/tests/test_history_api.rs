@@ -88,7 +88,7 @@ async fn power_timeline_uses_per_device_thresholds() {
         .await;
     assert_eq!(resp.status_code(), 200);
     let body: serde_json::Value = resp.json();
-    assert_eq!(body["threshold_ma"], 100, "fleet default still reported");
+    assert_eq!(body["threshold_ma"], 1000, "fleet default still reported");
     let last = body["power"].as_array().unwrap().last().unwrap().clone();
     assert_eq!(last["on"], 1, "{last}");
     assert_eq!(last["off"], 1, "{last}");
@@ -231,7 +231,7 @@ async fn history_defaults_to_one_hour_and_buckets_every_device() {
 
     // Firmware-shaped payload through the real ingest route, twice in the
     // current bucket, so the bucket mean is checkable.
-    for current in [100, 300] {
+    for current in [1000, 3000] {
         let resp = server
             .post("/")
             .text(format!(
@@ -276,7 +276,7 @@ async fn history_defaults_to_one_hour_and_buckets_every_device() {
     assert_eq!(a["uplinks"], 2);
     let last = &a["points"][BUCKETS - 1];
     assert_eq!(last["count"], 2);
-    assert_eq!(last["current"], 200.0, "mean of 100 and 300: {last}");
+    assert_eq!(last["current"], 2000.0, "mean of 1000 and 3000: {last}");
     assert_eq!(last["temp_c"], 24.5);
     assert_eq!(last["rssi_dbm"], -61.0);
     assert_eq!(last["heap_free"], 90000.0);
@@ -287,11 +287,11 @@ async fn history_defaults_to_one_hour_and_buckets_every_device() {
     assert_eq!(silent["uplinks"], 0);
     assert!(silent["points"][0]["current"].is_null());
 
-    assert_eq!(h["threshold_ma"], 100);
+    assert_eq!(h["threshold_ma"], 1000, "fleet default");
     let power = h["power"].as_array().unwrap();
     assert_eq!(power.len(), BUCKETS);
     let p = &power[BUCKETS - 1];
-    assert_eq!(p["on"], 1, "a-dev mean 200 mA >= 100: {p}");
+    assert_eq!(p["on"], 1, "a-dev mean 2000 mA >= 1000: {p}");
     assert_eq!(p["off"], 0, "{p}");
     assert_eq!(p["unknown"], 1, "b-dev never reported: {p}");
     assert_eq!(power[0]["unknown"], 2, "nobody had reported an hour ago");
