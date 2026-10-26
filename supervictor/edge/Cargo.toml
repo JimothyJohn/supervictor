@@ -160,7 +160,7 @@ embedded-storage = { version = "0.3.1", optional = true }
 # OTA image digests, software: mbedtls-rs-sys owns the SHA peripheral on
 # the chips where it is used, and the download must hash while TLS runs.
 # Already in the lock through esp-hal and mbedtls-rs-sys; no new crate.
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 # ring is the provider desktop_main installs; default features would compile
 # the aws-lc-rs provider (a large C build) alongside it for nothing. The ring
 # flag used to arrive via reqwest's feature unification (reqwest is now
