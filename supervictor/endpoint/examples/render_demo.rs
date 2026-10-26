@@ -55,28 +55,29 @@ const DEMO_SCRIPT: &str = r#"
   if (live) { try { seed = JSON.parse(live.dataset.live); } catch (_) { seed = null; } }
   // The page aligns its clock to the seed's now_ms, so synthetic events
   // must be stamped on that virtual clock, not the real one.
-  var walks = {}, homes = {}, loaded = Date.now();
+  var walks = {}, vels = {}, homes = {}, loaded = Date.now();
   if (seed) {
     seed.devices.forEach(function (d) {
       var first = d.samples.length ? d.samples[0].l : null;
       var last = d.samples.length ? d.samples[d.samples.length - 1].l : null;
-      if (last) { walks[d.device_id] = last.slice(); homes[d.device_id] = first.slice(); }
+      if (last) { walks[d.device_id] = last.slice(); vels[d.device_id] = last.map(function () { return 0; }); homes[d.device_id] = first.slice(); }
     });
   }
   // Every ROW_EVERY samples a random fleet row is marked fresh, the old
   // per-uplink cadence.
   var STEP = 100, ROW_EVERY = 25, ticks = 0;
   function sample(id) {
-    var w = walks[id], home = homes[id], R = w.length, out = [];
+    var w = walks[id], v = vels[id], home = homes[id], R = w.length, out = [];
     for (var r = 0; r < R; r++) {
-      // Bounded walk with a pull back toward the seed's starting level;
-      // same per-sample tuning as the seeded history (render_demo.rs).
-      var moved = r === 0 ? Math.floor(Math.random() * 7) - 3
-        : (Math.random() < 0.2 ? Math.floor(Math.random() * 3) - 1 : 0);
-      var lv = w[r] + moved - Math.round((w[r] - home[r]) / 120);
+      // Smooth wander: velocity with momentum driven by noise, pulled back
+      // toward the seed's starting level; an inrush spike on current about
+      // every 20 s. Same tuning as the seeded history (demo_live_samples).
+      var sigma = r === 0 ? 0.6 : 0.06;
+      v[r] = v[r] * 0.9 + (Math.random() - 0.5) * sigma;
+      var lv = w[r] + v[r] - (w[r] - home[r]) / 120;
       if (r === 0 && Math.random() < 0.005) lv += 40;
       w[r] = Math.max(1, Math.min(255, lv));
-      out.push(w[r]);
+      out.push(Math.round(w[r]));
     }
     return out;
   }
@@ -216,32 +217,30 @@ fn demo_live_samples(seed: u64, now_ms: u64) -> Vec<live::Sample> {
             .wrapping_add(1_442_695_040_888_963_407);
         (state >> 33) % n
     };
-    let home: Vec<i64> = vec![60 + (seed % 7) as i64 * 15, 140, 110, 120, 200];
+    let home: Vec<f64> = vec![60.0 + (seed % 7) as f64 * 15.0, 140.0, 110.0, 120.0, 200.0];
     let mut level = home.clone();
+    let mut vel = vec![0.0f64; home.len()];
     let mut out = Vec::new();
     let mut t = now_ms - live::WINDOW_S * 1_000;
     while t <= now_ms {
         let mut flat = Vec::with_capacity(50 * METRICS.len());
         for _ in 0..50 {
-            for (r, lv) in level.iter_mut().enumerate() {
-                // Bounded walk pulled back toward its home level. Tuned per
-                // 100 ms sample: current wanders ±3 levels, the slow
-                // registers move one level a fifth of the time, the pull
-                // back is a ~12 s time constant, and an inrush spike lands
-                // about every 20 s.
-                let moved = if r == 0 {
-                    next(7) as i64 - 3
-                } else if next(5) == 0 {
-                    next(3) as i64 - 1
-                } else {
-                    0
-                };
-                *lv += moved - (*lv - home[r]) / 120;
+            for r in 0..home.len() {
+                // Smooth wander per 100 ms sample: a velocity with momentum
+                // driven by noise, pulled back toward home on a ~12 s time
+                // constant. The current register also takes an instant
+                // inrush spike about every 20 s that the pull-back then
+                // decays — the SEN0211 module's own shape. Mirrored in
+                // DEMO_SCRIPT's sample().
+                let sigma = if r == 0 { 0.6 } else { 0.06 };
+                let noise = (next(1_000) as f64 / 1_000.0 - 0.5) * sigma;
+                vel[r] = vel[r] * 0.9 + noise;
+                level[r] += vel[r] - (level[r] - home[r]) / 120.0;
                 if r == 0 && next(200) == 0 {
-                    *lv += 40;
+                    level[r] += 40.0;
                 }
-                *lv = (*lv).clamp(1, 255);
-                flat.push(*lv as u8);
+                level[r] = level[r].clamp(1.0, 255.0);
+                flat.push(level[r].round() as u8);
             }
         }
         let record = UplinkRecord {
