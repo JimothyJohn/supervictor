@@ -4659,7 +4659,7 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "esp-storage",
- "esp32 0.39.0",
+ "esp32 0.40.2",
  "heapless 0.9.3",
  "mbedtls-rs",
  "ph-esp32-mac",
