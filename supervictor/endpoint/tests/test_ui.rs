@@ -1513,3 +1513,63 @@ async fn every_page_has_a_phone_glance_ahead_of_the_deep_layer() {
     assert_eq!(html.matches("class=\"strip deep\"").count(), COUNT - 1);
     assert!(html.contains("class=\"current\" href=\"/ui/live\" aria-current=\"page\""));
 }
+
+/// The history tiles describe what "on" was judged against: the fleet
+/// default while nobody overrides it, "per-device thresholds" as soon as
+/// one device carries its own (the default alone would misdescribe it).
+#[tokio::test]
+async fn history_tiles_name_per_device_thresholds_once_one_is_set() {
+    use supervictor_endpoint::fleet::DEFAULT_POWER_THRESHOLD_MA;
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "bench-01", "active");
+    seed_device(store.as_ref(), "press-01", "active");
+    seed_device(store.as_ref(), "retired", "inactive");
+    let now = supervictor_endpoint::time::now_rfc3339();
+    seed_uplink(store.as_ref(), "bench-01", &now, 9_000);
+    seed_uplink(store.as_ref(), "press-01", &now, 9_000);
+
+    let get = || async {
+        let (name, value) = dn(ADMIN_DN);
+        server
+            .get("/ui/history")
+            .add_header(name, value)
+            .await
+            .text()
+    };
+    // Only the tiles are under test: the power chart keeps its own
+    // "on = current ≥ N mA" note (fleet default by design).
+    let tiles = |html: &str| -> String {
+        let at = html.find("<section class=\"tiles\">").expect("tiles");
+        let end = html[at..].find("</section>").expect("tiles end");
+        html[at..at + end].to_string()
+    };
+    let html = tiles(&get().await);
+    let default_note = format!("current ≥ {DEFAULT_POWER_THRESHOLD_MA} mA");
+    assert!(html.contains(&default_note), "{html}");
+    assert!(!html.contains("per-device thresholds"), "{html}");
+
+    // One override (press-01 idles above the default): the tiles say so,
+    // counting only active devices.
+    store
+        .set_device_threshold("press-01", Some(12_000))
+        .unwrap();
+    store.set_device_threshold("retired", Some(5)).unwrap();
+    let html = tiles(&get().await);
+    let note = format!(
+        "per-device thresholds — 1 of 2 set, fleet default {DEFAULT_POWER_THRESHOLD_MA} mA"
+    );
+    assert!(html.contains(&note), "{html}");
+    assert!(html.contains("below their thresholds"), "{html}");
+    assert!(!html.contains(&default_note), "{html}");
+
+    // The API summary carries the same count.
+    let (name, value) = dn(ADMIN_DN);
+    let summary: serde_json::Value = server
+        .get("/fleet/summary")
+        .add_header(name, value)
+        .await
+        .json();
+    assert_eq!(summary["threshold_overrides"], 1, "{summary}");
+    assert_eq!(summary["on"], 1, "bench-01 at 9 A: {summary}");
+    assert_eq!(summary["off"], 1, "press-01 under 12 A: {summary}");
+}

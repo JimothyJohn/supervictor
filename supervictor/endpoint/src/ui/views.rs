@@ -612,6 +612,9 @@ pub fn summarize_rows(rows: &[FleetRow]) -> FleetSummary {
                 PowerState::Off => summary.off += 1,
                 PowerState::Unknown => {}
             }
+            if row.device.power_threshold_ma.is_some() {
+                summary.threshold_overrides += 1;
+            }
         } else {
             summary.inactive += 1;
         }
@@ -871,8 +874,16 @@ pub fn history_page(
             (device_chips(history, window, selection))
             section .tiles {
                 (charts::stat_tile("active devices", &summary.active.to_string(), &format!("{} registered, {} inactive", summary.total, summary.inactive), ""))
-                (charts::stat_tile("powered on", &summary.on.to_string(), &format!("current ≥ {} mA", history.threshold_ma), "on"))
-                (charts::stat_tile("powered off", &summary.off.to_string(), &format!("current < {} mA", history.threshold_ma), "off"))
+                // The tiles judge each device against its own threshold when
+                // one is set; the fleet default alone would misdescribe them.
+                @let (on_note, off_note) = if summary.threshold_overrides > 0 {
+                    (format!("per-device thresholds — {} of {} set, fleet default {} mA", summary.threshold_overrides, summary.active, history.threshold_ma),
+                     "below their thresholds".to_string())
+                } else {
+                    (format!("current ≥ {} mA", history.threshold_ma), format!("current < {} mA", history.threshold_ma))
+                };
+                (charts::stat_tile("powered on", &summary.on.to_string(), &on_note, "on"))
+                (charts::stat_tile("powered off", &summary.off.to_string(), &off_note, "off"))
                 (charts::stat_tile("fresh", &summary.fresh.to_string(), "heard from in the last 15 min", "fresh"))
                 (charts::stat_tile("stale", &summary.stale.to_string(), "quiet 15 min – 2 h", "stale"))
                 (charts::stat_tile("dark", &summary.dark.to_string(), "silent over 2 h", "dark"))
@@ -1358,6 +1369,7 @@ mod tests {
             never: 0,
             on,
             off,
+            threshold_overrides: 0,
         }
     }
 
