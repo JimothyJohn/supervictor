@@ -186,10 +186,11 @@ compose/Caddy stack on that box is stopped and disabled, docker disabled.
       serve a `<main>` fragment or push bucket deltas over the SSE stream
       and patch client-side.
       **Unblocks:** more than a handful of concurrent live tabs.
-- [ ] Threshold also on the `/fleet` summary tiles: "powered on ≥ N mA" on
+- [x] Threshold also on the `/fleet` summary tiles: "powered on ≥ N mA" on
       /ui/history still prints the fleet default; with per-device bars the
       caption should say "per-device thresholds" when any override exists.
       **Unblocks:** nothing — small follow-up.
+      notes: done 2026-10-26 (feat/history-threshold-caption): the tiles say "per-device thresholds — n of m set, fleet default N mA" once any active device overrides; `/fleet/summary` gains `threshold_overrides`
 
 ## P4 — CI/CD & release
 

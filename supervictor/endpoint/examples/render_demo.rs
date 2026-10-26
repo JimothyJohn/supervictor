@@ -409,6 +409,7 @@ fn main() {
         never: 1,
         on: 2,
         off: 0,
+        threshold_overrides: 0,
     };
     // The two reporting devices start selected so the demo has traces.
     let selected: Vec<String> = vec!["factory-01".into(), "factory-02".into()];

@@ -123,6 +123,10 @@ async fn fleet_judges_power_against_each_devices_threshold() {
         .json();
     assert_eq!(summary["on"], 2, "{summary}");
     assert_eq!(summary["off"], 1, "{summary}");
+    assert_eq!(
+        summary["threshold_overrides"], 2,
+        "press-01 and exact-01 carry their own: {summary}"
+    );
 }
 
 #[tokio::test]

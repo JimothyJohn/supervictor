@@ -163,6 +163,9 @@ pub struct FleetSummary {
     pub dark: usize,
     /// Active devices that have never uplinked.
     pub never: usize,
+    /// Active devices judged against their own `power_threshold_ma`
+    /// rather than the fleet default.
+    pub threshold_overrides: usize,
     /// Active devices whose last current is at or above the threshold.
     pub on: usize,
     /// Active devices whose last current is below the threshold.
@@ -243,6 +246,9 @@ pub fn summarize(devices: &[FleetDevice]) -> FleetSummary {
                 PowerState::On => summary.on += 1,
                 PowerState::Off => summary.off += 1,
                 PowerState::Unknown => {}
+            }
+            if device.threshold_overridden {
+                summary.threshold_overrides += 1;
             }
         } else {
             summary.inactive += 1;
