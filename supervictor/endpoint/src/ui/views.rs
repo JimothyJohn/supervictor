@@ -253,10 +253,17 @@ pub const LIVE_PAGE_SCRIPT: &str = r#"
     if (a >= 10) return v.toFixed(1);
     return v.toFixed(2);
   }
+  // Samples stay time-ordered: a burst is back-dated from its receive
+  // time, so its first samples can land before the previous burst's last
+  // ones (receive jitter, or a feed whose bursts overlap). Appending those
+  // would send the stroke backwards and the line would double back over
+  // itself. A sample at an already-held instant replaces it.
   function push(id, t, l) {
-    var d = devices[id];
-    d.t.push(t); d.l.push(l);
-    var cut = t - KEEP_MS - 10000;
+    var d = devices[id], i = d.t.length;
+    while (i > 0 && d.t[i - 1] > t) i--;
+    if (i > 0 && d.t[i - 1] === t) { d.l[i - 1] = l; }
+    else { d.t.splice(i, 0, t); d.l.splice(i, 0, l); }
+    var cut = d.t[d.t.length - 1] - KEEP_MS - 10000;
     while (d.t.length && d.t[0] < cut) { d.t.shift(); d.l.shift(); }
   }
   function updateMeters(id) {
