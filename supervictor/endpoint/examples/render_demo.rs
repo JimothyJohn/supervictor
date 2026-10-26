@@ -46,8 +46,8 @@ const DEMO_SCRIPT: &str = r#"
   });
   var rows = Array.prototype.slice.call(document.querySelectorAll('tr[data-device]'));
   if (!rows.length) return;
-  // Live page: keep each device's walk going with a synthetic burst of
-  // ten 8-bit samples every five seconds, like the firmware does.
+  // Live page: keep each device's walk going with a synthetic burst every
+  // TICK ms that covers exactly that tick, like the firmware does.
   var live = document.getElementById('live');
   var seed = null;
   if (live) { try { seed = JSON.parse(live.dataset.live); } catch (_) { seed = null; } }
@@ -61,9 +61,12 @@ const DEMO_SCRIPT: &str = r#"
       if (last) { walks[d.device_id] = last.slice(); homes[d.device_id] = first.slice(); }
     });
   }
+  // One burst per walking device per tick, covering exactly the tick
+  // (BURST samples at STEP ms = TICK ms) so bursts neither overlap nor gap.
+  var TICK = 2500, STEP = 500, BURST = TICK / STEP;
   function burst(id) {
     var w = walks[id], home = homes[id], R = w.length, out = [];
-    for (var i = 0; i < 10; i++) {
+    for (var i = 0; i < BURST; i++) {
       for (var r = 0; r < R; r++) {
         var step = r === 0 ? 6 : 1;
         // Bounded walk with a pull back toward the seed's starting level.
@@ -82,12 +85,12 @@ const DEMO_SCRIPT: &str = r#"
     if (last) last.textContent = new Date().toISOString().replace(/\.\d+Z$/, '+00:00');
     var badge = row.querySelector('.staleness');
     if (badge) { badge.textContent = 'fresh'; badge.className = 'badge staleness fresh'; }
-    if (walks[id]) {
+    Object.keys(walks).forEach(function (wid) {
       document.dispatchEvent(new CustomEvent('sv:uplink', { detail: {
-        device_id: id, t_ms: seed.now_ms + (Date.now() - loaded), levels: burst(id), levels_ms: 500
+        device_id: wid, t_ms: seed.now_ms + (Date.now() - loaded), levels: burst(wid), levels_ms: STEP
       } }));
-    }
-  }, 2500);
+    });
+  }, TICK);
 })();
 "#;
 
