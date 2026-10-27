@@ -48,6 +48,22 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   commas); no key plots nothing, and the chips' hrefs toggle membership so
   the page works without script. The script mirrors the selection into
   `localStorage` and restores it when the URL has no `device` key.
+- Themes (`src/ui/themes.css` tokens, `src/ui/themes.rs` registry, picker in
+  `views::theme_picker`, bootstrap in `views::THEME_SCRIPT`; docs/THEMES.md):
+  six worlds — `foundry` (default dark), `clinical` (default light),
+  `boardroom`, `neon`, `phosphor`, `greenhouse` — each one
+  `:root[data-theme="<id>"]` block of the same tokens; `style.css` is
+  written against tokens only (`--green` on/fresh, `--red` off/dark,
+  `--warn` stale, `--accent` brand; radii, fonts, shadows, card edges,
+  texture are tokens too). Chart series slots are the two validated
+  reference steps, dark or light by surface, never per theme. `light` /
+  `dark` stay as aliases of the two defaults; no stamp = OS preference.
+  The picker (`<dialog>`, no `<form>`) stores the id in `sv-theme`, the
+  tweaks (accent, radius, font, density, texture, motion) as JSON in
+  `sv-tweaks`, applies them as inline custom properties / `data-texture`
+  / `data-motion` on `<html>`, and imports `#theme=<id>&accent=…` links
+  once. Adding a theme: a CSS block + a `THEMES` row; `test_ui` checks the
+  block exists, declares every token, and matches the row's preview hexes.
 - Device style (`src/style.rs`, wire types in `supervictor_common::models`):
   `DeviceRecord.style` holds an optional colour (`s0`–`s7` palette slot or
   `#rrggbb`), `LineStyle` and `Marker`. `style::resolve` fills gaps —

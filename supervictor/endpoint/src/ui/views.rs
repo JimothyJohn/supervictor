@@ -24,6 +24,7 @@ use crate::models::{DeviceRecord, UplinkRecord};
 use crate::style::{Color, LineStyle, Marker, Resolved, SLOTS};
 use crate::time::parse_rfc3339_unix;
 use crate::ui::charts::{self, Frame, Reference, Series};
+use crate::ui::themes;
 use supervictor_common::status;
 
 /// One row of the fleet table.
@@ -511,41 +512,185 @@ pub const CHART_SCRIPT: &str = r#"
 })();
 "#;
 
-/// Theme bootstrap + toggle, and the phone's view toggle. Runs in `<head>`
-/// so a stored choice applies before first paint (no flash); the theme
-/// click handler attaches once the header exists, the view toggle is
-/// delegated because live pages swap `<main>` out from under it. Both
-/// choices are per-viewer conveniences in localStorage, wrapped in
-/// try/catch — private windows and blocked storage just fall back to the
-/// OS preference and the glance.
+/// Theme bootstrap, the appearance picker, and the phone's view toggle.
+/// Runs in `<head>` so a stored choice applies before first paint (no
+/// flash). The theme is a `data-theme` stamp on `<html>` (`auto` removes
+/// it and the OS preference wins); the tweaks are inline custom properties
+/// on `<html>` — accent, radius, font, density — plus `data-texture` /
+/// `data-motion` flags, so they compose with every theme. Both live in
+/// localStorage (`sv-theme`, `sv-tweaks`), wrapped in try/catch: private
+/// windows and blocked storage fall back to the OS preference. A link with
+/// `#theme=<id>&accent=…` imports a look once and clears the fragment. The
+/// layout defines `window.svThemes` (the id allow-list) before this runs;
+/// `light` / `dark` are aliases of the two defaults for stored choices
+/// from the sun/moon toggle this replaced. The view toggle is delegated
+/// because live pages swap `<main>` out from under it.
 pub const THEME_SCRIPT: &str = r#"
 (function () {
-  var KEY = 'sv-theme', VIEW = 'sv-view', root = document.documentElement;
+  var KEY = 'sv-theme', TWEAKS = 'sv-tweaks', VIEW = 'sv-view', root = document.documentElement;
+  var THEMES = window.svThemes || [];
+  var ALIAS = { light: 'clinical', dark: 'foundry' };
+  var FONTS = {
+    mono: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+    sans: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    serif: '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif',
+    rounded: '"SF Pro Rounded", Nunito, "Varela Round", "Trebuchet MS", system-ui, sans-serif'
+  };
+  var DENSITY = { compact: 0.9, cozy: 1, relaxed: 1.12 };
   function stored(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
-  function effective() {
-    var t = root.getAttribute('data-theme');
-    if (t) return t;
-    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (_) {} }
+  function normalize(id) { id = ALIAS[id] || id; return THEMES.indexOf(id) >= 0 ? id : 'auto'; }
+  // Accept only what the panel can produce; anything else is dropped.
+  function cleanTweaks(o) {
+    var t = {};
+    if (!o || typeof o !== 'object') return t;
+    if (/^#[0-9a-f]{6}$/i.test(o.accent || '')) t.accent = o.accent.toLowerCase();
+    var r = typeof o.radius === 'string' ? parseFloat(o.radius) : o.radius;
+    if (typeof r === 'number' && isFinite(r)) t.radius = Math.max(0, Math.min(24, Math.round(r)));
+    if (DENSITY[o.density] && o.density !== 'cozy') t.density = o.density;
+    if (FONTS[o.font]) t.font = o.font;
+    if (o.texture === false || o.texture === '0' || o.texture === 0) t.texture = false;
+    if (o.motion === false || o.motion === '0' || o.motion === 0) t.motion = false;
+    return t;
   }
-  var saved = stored(KEY);
-  if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+  var state = { theme: normalize(stored(KEY) || 'auto'), tweaks: {} };
+  try { state.tweaks = cleanTweaks(JSON.parse(stored(TWEAKS) || '{}')); } catch (_) { state.tweaks = {}; }
+  (function fromHash() {
+    var h = location.hash || '';
+    if (!/^#(?:[^&]*&)*theme=/.test(h)) return;
+    var params = {};
+    h.slice(1).split('&').forEach(function (kv) {
+      var i = kv.indexOf('=');
+      if (i > 0) { try { params[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1)); } catch (_) {} }
+    });
+    if (params.accent && /^[0-9a-f]{6}$/i.test(params.accent)) params.accent = '#' + params.accent;
+    state.theme = normalize(params.theme);
+    state.tweaks = cleanTweaks(params);
+    persist();
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+  })();
+  function persist() {
+    store(KEY, state.theme === 'auto' ? null : state.theme);
+    store(TWEAKS, Object.keys(state.tweaks).length ? JSON.stringify(state.tweaks) : null);
+  }
+  function applyTheme(id) { if (id === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', id); }
+  function applyTweaks(t) {
+    var st = root.style;
+    if (t.accent) st.setProperty('--accent', t.accent); else st.removeProperty('--accent');
+    if (typeof t.radius === 'number') {
+      st.setProperty('--radius', t.radius + 'px');
+      st.setProperty('--radius-lg', Math.round(t.radius * 1.5 + 2) + 'px');
+    } else { st.removeProperty('--radius'); st.removeProperty('--radius-lg'); }
+    if (FONTS[t.font]) { st.setProperty('--font', FONTS[t.font]); st.setProperty('--font-display', FONTS[t.font]); }
+    else { st.removeProperty('--font'); st.removeProperty('--font-display'); }
+    if (DENSITY[t.density]) st.setProperty('--density', String(DENSITY[t.density])); else st.removeProperty('--density');
+    if (t.texture === false) root.setAttribute('data-texture', 'off'); else root.removeAttribute('data-texture');
+    if (t.motion === false) root.setAttribute('data-motion', 'off'); else root.removeAttribute('data-motion');
+  }
+  function token(name) { return getComputedStyle(root).getPropertyValue(name).trim(); }
+  // The browser chrome (address bar, status bar) follows the page.
+  function paintChrome() {
+    var bg = token('--bg');
+    if (!bg) return;
+    var metas = document.querySelectorAll('meta[name="theme-color"]');
+    for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', bg);
+  }
+  applyTheme(state.theme);
+  applyTweaks(state.tweaks);
   if (stored(VIEW) === 'full') root.setAttribute('data-view', 'full');
   document.addEventListener('click', function (e) {
     var button = e.target && e.target.closest ? e.target.closest('#view-toggle') : null;
     if (!button) return;
     var full = root.getAttribute('data-view') === 'full';
     if (full) root.removeAttribute('data-view'); else root.setAttribute('data-view', 'full');
-    try { localStorage.setItem(VIEW, full ? 'glance' : 'full'); } catch (_) {}
+    store(VIEW, full ? 'glance' : 'full');
   });
   document.addEventListener('DOMContentLoaded', function () {
-    var button = document.getElementById('theme-toggle');
-    if (!button) return;
-    button.addEventListener('click', function () {
-      var next = effective() === 'light' ? 'dark' : 'light';
-      root.setAttribute('data-theme', next);
-      try { localStorage.setItem(KEY, next); } catch (_) {}
-      button.setAttribute('aria-label', next === 'light' ? 'switch to dark mode' : 'switch to light mode');
+    paintChrome();
+    var button = document.getElementById('theme-toggle'), dialog = document.getElementById('theme-picker');
+    if (!button || !dialog) return;
+    if (typeof dialog.showModal !== 'function') { button.hidden = true; return; }
+    function $(id) { return dialog.querySelector('#' + id); }
+    var cards = dialog.querySelectorAll('.theme-card');
+    var accent = $('tw-accent'), accentReset = $('tw-accent-reset'), radius = $('tw-radius'), radiusOut = $('tw-radius-out');
+    var density = $('tw-density'), font = $('tw-font'), texture = $('tw-texture'), motion = $('tw-motion');
+    var json = $('tw-json'), paste = $('tw-import'), status = $('tw-status');
+    function exported() {
+      var o = { theme: state.theme }, t = state.tweaks;
+      Object.keys(t).forEach(function (k) { o[k] = t[k]; });
+      return o;
+    }
+    function shareLink() {
+      var q = ['theme=' + state.theme], t = state.tweaks;
+      if (t.accent) q.push('accent=' + t.accent.slice(1));
+      if (typeof t.radius === 'number') q.push('radius=' + t.radius);
+      if (t.density) q.push('density=' + t.density);
+      if (t.font) q.push('font=' + t.font);
+      if (t.texture === false) q.push('texture=0');
+      if (t.motion === false) q.push('motion=0');
+      return location.origin + location.pathname + '#' + q.join('&');
+    }
+    function sync() {
+      for (var i = 0; i < cards.length; i++) cards[i].setAttribute('aria-pressed', String(cards[i].getAttribute('data-theme-id') === state.theme));
+      var a = token('--accent');
+      if (/^#[0-9a-f]{6}$/i.test(a)) accent.value = a.toLowerCase();
+      var r = typeof state.tweaks.radius === 'number' ? state.tweaks.radius : parseFloat(token('--radius')) || 0;
+      radius.value = r; radiusOut.textContent = r + ' px';
+      density.value = state.tweaks.density || 'cozy';
+      font.value = state.tweaks.font || 'theme';
+      texture.checked = state.tweaks.texture !== false;
+      motion.checked = state.tweaks.motion !== false;
+      json.value = JSON.stringify(exported());
+      paintChrome();
+    }
+    function commit() { applyTheme(state.theme); applyTweaks(state.tweaks); persist(); sync(); }
+    function say(text) {
+      status.textContent = text;
+      clearTimeout(say.t); say.t = setTimeout(function () { status.textContent = ''; }, 1800);
+    }
+    function copy(text, what) {
+      function done() { say(what + ' copied'); }
+      function fallback() {
+        json.value = text; json.focus(); json.select();
+        try { document.execCommand('copy'); done(); } catch (_) { say('select and copy'); }
+        sync();
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+      else fallback();
+    }
+    for (var i = 0; i < cards.length; i++) (function (card) {
+      var id = card.getAttribute('data-theme-id');
+      function tryOn() { applyTheme(id); paintChrome(); }
+      function putBack() { applyTheme(state.theme); paintChrome(); }
+      card.addEventListener('mouseenter', tryOn);
+      card.addEventListener('focus', tryOn);
+      card.addEventListener('mouseleave', putBack);
+      card.addEventListener('blur', putBack);
+      card.addEventListener('click', function () { state.theme = id; commit(); });
+    })(cards[i]);
+    accent.addEventListener('input', function () { state.tweaks.accent = accent.value; applyTweaks(state.tweaks); paintChrome(); });
+    accent.addEventListener('change', commit);
+    accentReset.addEventListener('click', function () { delete state.tweaks.accent; commit(); });
+    radius.addEventListener('input', function () {
+      state.tweaks.radius = parseInt(radius.value, 10); radiusOut.textContent = radius.value + ' px'; applyTweaks(state.tweaks);
     });
+    radius.addEventListener('change', commit);
+    density.addEventListener('change', function () { if (density.value === 'cozy') delete state.tweaks.density; else state.tweaks.density = density.value; commit(); });
+    font.addEventListener('change', function () { if (font.value === 'theme') delete state.tweaks.font; else state.tweaks.font = font.value; commit(); });
+    texture.addEventListener('change', function () { if (texture.checked) delete state.tweaks.texture; else state.tweaks.texture = false; commit(); });
+    motion.addEventListener('change', function () { if (motion.checked) delete state.tweaks.motion; else state.tweaks.motion = false; commit(); });
+    $('tw-copy-json').addEventListener('click', function () { copy(json.value, 'JSON'); });
+    $('tw-copy-link').addEventListener('click', function () { copy(shareLink(), 'link'); });
+    $('tw-apply').addEventListener('click', function () {
+      var o; try { o = JSON.parse(paste.value); } catch (_) { say('not JSON'); return; }
+      state.theme = normalize(o && o.theme); state.tweaks = cleanTweaks(o); paste.value = ''; commit(); say('applied');
+    });
+    $('tw-reset').addEventListener('click', function () { state.tweaks = {}; commit(); say('theme defaults'); });
+    $('tw-done').addEventListener('click', function () { dialog.close(); });
+    $('tw-close').addEventListener('click', function () { dialog.close(); });
+    dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
+    dialog.addEventListener('close', function () { applyTheme(state.theme); paintChrome(); });
+    button.addEventListener('click', function () { sync(); dialog.showModal(); });
   });
 })();
 "#;
@@ -578,10 +723,10 @@ fn layout(nav: Nav, title: &str, subject: &str, mode: PageMode, body: Markup) ->
                 meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover";
                 meta name="color-scheme" content="dark light";
                 meta name="theme-color" content="#0e0e10" media="(prefers-color-scheme: dark)";
-                meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)";
+                meta name="theme-color" content="#f1f5f8" media="(prefers-color-scheme: light)";
                 title { (title) " — supervictor fleet" }
                 link rel="stylesheet" href="/ui/assets/style.css";
-                script { (PreEscaped(THEME_SCRIPT)) }
+                script { "window.svThemes=" (PreEscaped(themes::ids_json())) ";" (PreEscaped(THEME_SCRIPT)) }
             }
             body data-refresh=[refresh] data-live=[live] {
                 header {
@@ -593,13 +738,11 @@ fn layout(nav: Nav, title: &str, subject: &str, mode: PageMode, body: Markup) ->
                     }
                     span #live-dot { "static" }
                     span .subject { (subject) }
-                    button #theme-toggle type="button" aria-label="switch colour theme" title="light / dark" {
-                        svg .icon-sun viewBox="0 0 24 24" aria-hidden="true" {
-                            circle cx="12" cy="12" r="4" {}
-                            path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" {}
-                        }
-                        svg .icon-moon viewBox="0 0 24 24" aria-hidden="true" {
-                            path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" {}
+                    button #theme-toggle type="button" aria-label="appearance: pick a theme or make it yours" title="appearance" aria-haspopup="dialog" aria-controls="theme-picker" {
+                        svg viewBox="0 0 24 24" aria-hidden="true" {
+                            circle .sw-a cx="8" cy="9" r="5.2" {}
+                            circle .sw-b cx="16" cy="9" r="5.2" fill-opacity="0.92" {}
+                            circle .sw-c cx="12" cy="15.5" r="5.2" fill-opacity="0.92" {}
                         }
                     }
                 }
@@ -612,8 +755,101 @@ fn layout(nav: Nav, title: &str, subject: &str, mode: PageMode, body: Markup) ->
                         span .when-full { "back to the glance" }
                     }
                 }
+                (theme_picker())
                 script { (PreEscaped(LIVE_SCRIPT)) }
                 script { (PreEscaped(CHART_SCRIPT)) }
+            }
+        }
+    }
+}
+
+/// The appearance dialog: six worlds plus "auto", the tweak panel, and the
+/// share / import box. Pure markup; THEME_SCRIPT wires it. No `<form>` on
+/// purpose — the live page pauses re-renders while a form has focus, and
+/// the demo's form guard would swallow a `method="dialog"` submit.
+fn theme_picker() -> Markup {
+    html! {
+        dialog #theme-picker aria-labelledby="theme-picker-title" {
+            div .picker {
+                div .picker-head {
+                    h2 #theme-picker-title { "Appearance" }
+                    p { "Six worlds. Hover to try one on, click to keep it." }
+                    button #tw-close .picker-close type="button" aria-label="close" { "×" }
+                }
+                ul .theme-grid role="list" {
+                    @for theme in themes::THEMES {
+                        li {
+                            button .theme-card type="button" data-theme-id=(theme.id) data-scheme=(theme.scheme.css()) aria-pressed="false"
+                                style=(format!("--p-bg:{};--p-surface:{};--p-accent:{};--p-text:{}", theme.preview.bg, theme.preview.surface, theme.preview.accent, theme.preview.text)) {
+                                span .theme-preview aria-hidden="true" { span .p-tile {} span .p-lines { i {} i {} i {} } }
+                                span .theme-name { (theme.name) }
+                                span .theme-for { (theme.audience) }
+                                span .theme-note { (theme.tagline) }
+                            }
+                        }
+                    }
+                }
+                button .theme-card.auto type="button" data-theme-id="auto" aria-pressed="false" {
+                    span .theme-preview aria-hidden="true" { span .p-tile {} span .p-lines { i {} i {} i {} } }
+                    span .theme-words {
+                        span .theme-name { "Auto" }
+                        span .theme-for { "follow the OS" }
+                        span .theme-note { "Foundry when the system is dark, Clinical when it is light." }
+                    }
+                }
+                fieldset .tweaks {
+                    legend { "Make it yours" }
+                    label .tweak for="tw-accent" {
+                        span { "Accent" }
+                        span .tweak-accent {
+                            input #tw-accent type="color" value="#f97316";
+                            button #tw-accent-reset type="button" title="back to the theme's accent" { "theme's" }
+                        }
+                    }
+                    label .tweak for="tw-radius" {
+                        span { "Corners" output #tw-radius-out { "4 px" } }
+                        input #tw-radius type="range" min="0" max="24" step="1" value="4";
+                    }
+                    label .tweak for="tw-density" {
+                        span { "Density" }
+                        select #tw-density {
+                            option value="compact" { "compact" }
+                            option value="cozy" selected { "cozy" }
+                            option value="relaxed" { "relaxed" }
+                        }
+                    }
+                    label .tweak for="tw-font" {
+                        span { "Type" }
+                        select #tw-font {
+                            option value="theme" selected { "the theme's" }
+                            option value="mono" { "monospace" }
+                            option value="sans" { "sans" }
+                            option value="serif" { "serif" }
+                            option value="rounded" { "rounded" }
+                        }
+                    }
+                    label .tweak-check for="tw-texture" { input #tw-texture type="checkbox" checked; "background texture" }
+                    label .tweak-check for="tw-motion" { input #tw-motion type="checkbox" checked; "motion" }
+                }
+                details .share {
+                    summary { "Share or save this look" }
+                    div .share-body {
+                        textarea #tw-json readonly aria-label="this look as JSON" {}
+                        div .share-actions {
+                            button #tw-copy-json type="button" { "copy JSON" }
+                            button #tw-copy-link type="button" { "copy link" }
+                            span #tw-status .muted role="status" aria-live="polite" {}
+                        }
+                        textarea #tw-import aria-label="paste a look as JSON" placeholder="paste a look's JSON here" {}
+                        div .share-actions {
+                            button #tw-apply type="button" { "apply pasted look" }
+                        }
+                    }
+                }
+                div .picker-foot {
+                    button #tw-reset type="button" { "reset tweaks" }
+                    button #tw-done .primary type="button" { "done" }
+                }
             }
         }
     }
