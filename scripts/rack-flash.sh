@@ -11,7 +11,9 @@
 # the A/B partition table, then racked; from then on scripts/ota-push.sh is
 # the update path and this script is recovery only.
 #
-# Per board the loop does: detect the new serial port -> espflash board-info
+# Per board the loop does: detect the serial port (every Olimex CH340 shows up
+# as the same /dev/cu.usbserial-XXXX on a given hub position, so "no new port,
+# one CH340 present" is the normal case and is used without asking) -> espflash board-info
 # (chip + MAC) -> look the MAC up in rack-inventory.tsv, or ask the board type
 # and name it (poe2-rack-NN / poe-iso-rack-NN) -> issue a device cert if missing
 # -> register it on the target -> build + flash via scripts/flash.sh -> say how
