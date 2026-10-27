@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Supervictor endpoint - staging (one EC2 box running the single-binary release)
+Description: Supervictor endpoint box (one EC2 instance running the single-binary release) - staging or prod
 
 # One t4g.micro that installs a GitHub release of supervictor-endpoint on
 # first boot (scripts/install-endpoint.sh: static musl binary, hardened
@@ -10,10 +10,18 @@ Description: Supervictor endpoint - staging (one EC2 box running the single-bina
 # scripts/deploy-staging-build.sh.
 
 Parameters:
+    Stage:
+        Type: String
+        Default: staging
+        AllowedValues:
+            - staging
+            - prod
+        Description: Which box this is; names the tags. deploy-staging.sh passes STAGE and derives the keys below from it.
+
     Hostname:
         Type: String
         Default: staging.supervictor.advin.io
-        Description: FQDN for the staging endpoint
+        Description: FQDN of the endpoint (supervictor.advin.io for the prod box)
 
     InstanceType:
         Type: String
@@ -98,7 +106,7 @@ Resources:
                   Description: mTLS API (devices, admins)
             Tags:
                 - Key: Name
-                  Value: supervictor-staging
+                  Value: !Sub supervictor-${Stage}
 
     InstanceRole:
         Type: AWS::IAM::Role
@@ -166,7 +174,7 @@ Resources:
             Domain: vpc
             Tags:
                 - Key: Name
-                  Value: supervictor-staging
+                  Value: !Sub supervictor-${Stage}
 
     Instance:
         Type: AWS::EC2::Instance
@@ -189,7 +197,7 @@ Resources:
                 HttpEndpoint: enabled
             Tags:
                 - Key: Name
-                  Value: supervictor-staging
+                  Value: !Sub supervictor-${Stage}
             # First boot only. Everything here is what scripts/install-staging.sh
             # does over SSM for a later release; bash variables are written
             # $NAME (no braces) so !Sub leaves them alone.

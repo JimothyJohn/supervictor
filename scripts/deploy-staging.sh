@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
-# deploy-staging.sh — stand up (or re-create) the staging box: one EC2 instance
-# that installs a GitHub release of the single-binary endpoint on first boot.
+# deploy-staging.sh — CREATE a box for a stage: one EC2 instance that installs a
+# GitHub release of the single-binary endpoint on first boot.
 #
-#   TAG=v0.2.0 ./scripts/deploy-staging.sh
+#   TAG=v0.2.0 ./scripts/deploy-staging.sh               # the staging box
+#   STAGE=prod TAG=v0.2.0 ./scripts/deploy-staging.sh    # the prod box (supervictor.advin.io)
 #
 # What it does:
 #   1. issues an ECDSA P-256 server certificate for the hostname from the fleet
 #      CA (certs/ca/ca.key, kept on this machine only) — unless FORCE_CERT=0 and
 #      one is already in S3; staging-letsencrypt.sh swaps in a public one later
-#   2. uploads ca.pem / server.pem / server.key to s3://$BUCKET/staging/
-#   3. deploys supervictor/endpoint/template-staging.yaml; the instance's
-#      bootstrap fetches the PEMs and runs scripts/install-endpoint.sh $TAG
+#   2. uploads ca.pem / server.pem / server.key to s3://$BUCKET/$STAGE/
+#   3. creates supervictor/endpoint/template-staging.yaml as supervictor-endpoint-$STAGE;
+#      the instance's bootstrap fetches the PEMs and runs scripts/install-endpoint.sh $TAG
+#   4. pins the AMI the box came up on at /supervictor/$STAGE/ami-id, which
+#      staging-stack-update.sh passes so no later update replaces the instance
 #
-# For a stack that already exists use scripts/staging-stack-update.sh instead:
-# it pins the live AMI so the instance (SQLite file, Let's Encrypt cert, any
-# hand-installed build) is never replaced. This script is for a fresh stack.
+# Creation only: an existing stack is refused, because a plain deploy
+# re-resolves the "latest AL2023" AMI alias and REPLACES the instance (SQLite
+# file, Let's Encrypt cert, hand-installed build gone). Changes to a live
+# stack go through scripts/staging-stack-update.sh. The prod box needs
+# supervictor.advin.io free first (scratch/01-teardown-lambda-stacks.sh): the
+# stack creates the A record and CloudFormation refuses a name another stack owns.
 #
+#   STAGE             staging (default) | prod — stack name, hostname, S3 prefix, AMI pin
 #   TAG               release the box installs (default: the newest GitHub release)
-#   STACK_NAME        default supervictor-endpoint-staging
-#   HOSTNAME_FQDN     default staging.supervictor.advin.io
+#   STACK_NAME        default supervictor-endpoint-$STAGE
+#   HOSTNAME_FQDN     default staging.supervictor.advin.io / supervictor.advin.io
 #   INSTANCE_TYPE     default t4g.micro
 #   HOSTED_ZONE_ID    Route53 zone for the hostname
 #   BUCKET            S3 bucket for the PEMs (default supervictor)
@@ -45,6 +52,10 @@ if [ -z "${TAG:-}" ]; then
     [ -n "$TAG" ] || fail "no GitHub release found for $REPO — set TAG, or run release.sh first"
 fi
 log "release to install: $TAG"
+if aws cloudformation describe-stacks --stack-name "$STACK_NAME" >/dev/null 2>&1; then
+    fail "stack $STACK_NAME already exists — this script only creates. Update it with: STAGE=$STAGE ./scripts/staging-stack-update.sh [Key=Value ...]"
+fi
+log "creating $STACK_NAME for $HOSTNAME_FQDN (stage=$STAGE type=$INSTANCE_TYPE PEMs under s3://$BUCKET/$S3_PREFIX/)"
 
 CA_PEM="certs/ca/ca.pem"
 CA_KEY="certs/ca/ca.key"
@@ -54,8 +65,8 @@ CA_KEY="certs/ca/ca.key"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-if [ "${FORCE_CERT:-1}" = 0 ] && aws s3api head-object --bucket "$BUCKET" --key staging/server.pem >/dev/null 2>&1; then
-    log "keeping the server certificate already in s3://$BUCKET/staging/ (FORCE_CERT=0)"
+if [ "${FORCE_CERT:-1}" = 0 ] && aws s3api head-object --bucket "$BUCKET" --key "$S3_PREFIX/server.pem" >/dev/null 2>&1; then
+    log "keeping the server certificate already in s3://$BUCKET/$S3_PREFIX/ (FORCE_CERT=0)"
 else
     log "issuing ECDSA P-256 server cert for $HOSTNAME_FQDN signed by the fleet CA"
     openssl ecparam -genkey -name prime256v1 -out "$WORK/server.key" 2>/dev/null
@@ -67,11 +78,11 @@ else
         -days 365 -sha256 \
         -extfile <(printf "subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\n" "$HOSTNAME_FQDN") \
         -out "$WORK/server.pem" 2>/dev/null
-    log "uploading PEMs to s3://$BUCKET/staging/"
-    aws s3 cp --only-show-errors "$WORK/server.pem" "s3://$BUCKET/staging/server.pem"
-    aws s3 cp --only-show-errors "$WORK/server.key" "s3://$BUCKET/staging/server.key"
+    log "uploading PEMs to s3://$BUCKET/$S3_PREFIX/"
+    aws s3 cp --only-show-errors "$WORK/server.pem" "s3://$BUCKET/$S3_PREFIX/server.pem"
+    aws s3 cp --only-show-errors "$WORK/server.key" "s3://$BUCKET/$S3_PREFIX/server.key"
 fi
-aws s3 cp --only-show-errors "$CA_PEM" "s3://$BUCKET/staging/ca.pem"
+aws s3 cp --only-show-errors "$CA_PEM" "s3://$BUCKET/$S3_PREFIX/ca.pem"
 
 log "discovering default VPC + a public subnet in $REGION"
 VPC_ID="$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)"
@@ -92,21 +103,30 @@ aws cloudformation deploy \
     --stack-name "$STACK_NAME" \
     --capabilities CAPABILITY_IAM \
     --parameter-overrides \
+        Stage="$STAGE" \
         Hostname="$HOSTNAME_FQDN" \
         InstanceType="$INSTANCE_TYPE" \
         HostedZoneId="$HOSTED_ZONE_ID" \
         BundleBucket="$BUCKET" \
+        CaCertKey="$S3_PREFIX/ca.pem" \
+        ServerCertKey="$S3_PREFIX/server.pem" \
+        ServerKeyKey="$S3_PREFIX/server.key" \
         Repo="$REPO" \
         ReleaseTag="$TAG" \
         VpcId="$VPC_ID" \
         SubnetId="$SUBNET_ID" \
         ${EIP_PARAMS[@]+"${EIP_PARAMS[@]}"}
 
+INSTANCE_ID="$(stack_resource "$STACK_NAME" Instance)"
+AMI="$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].ImageId' --output text)"
+log "pinning AMI $AMI at $AMI_PARAM (staging-stack-update.sh passes it so no update replaces the box)"
+aws ssm put-parameter --name "$AMI_PARAM" --type String --value "$AMI" --overwrite >/dev/null
+
 log "stack outputs:"
 aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
     --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' --output table
 
 log "done. First boot installs $TAG in about a minute:"
-log "  aws ssm start-session --target $(staging_instance) --region $REGION"
+log "  aws ssm start-session --target $INSTANCE_ID --region $REGION"
 log "  then: sudo tail -f /var/log/bootstrap.log"
-log "Pin the AMI the box came up on before any update: aws ssm put-parameter --name /supervictor/staging/ami-id --type String --overwrite --value <ami-id>"
+log "then: STAGE=$STAGE ./scripts/staging-letsencrypt.sh for a publicly trusted certificate"

@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# staging-stack-update.sh — update the staging CloudFormation stack WITHOUT rebuilding the box.
+# staging-stack-update.sh — update a box's CloudFormation stack WITHOUT rebuilding the box.
 #
-#   ./scripts/staging-stack-update.sh [Key=Value ...]       # review the change set
-#   YES=1 ./scripts/staging-stack-update.sh [Key=Value ...] # ...and execute it
+#   ./scripts/staging-stack-update.sh [Key=Value ...]            # review the change set
+#   YES=1 ./scripts/staging-stack-update.sh [Key=Value ...]      # ...and execute it
+#   STAGE=prod ./scripts/staging-stack-update.sh InstanceType=t4g.small   # the prod box
 #
 # Why not plain `aws cloudformation deploy`: the template's AmiId default is
 # the "latest AL2023" SSM alias, which moves, and an update that re-resolves
 # it REPLACES the instance — losing the SQLite file, the Let's Encrypt cert
 # and any hand-installed build. The live AMI is pinned in SSM at
-# /supervictor/staging/ami-id (AMI_PARAM) and this script always passes that;
+# /supervictor/<stage>/ami-id (AMI_PARAM from _lib.sh; deploy-staging.sh pins
+# it at creation) and this script always passes that;
 # every other parameter keeps its current stack value unless given on the
 # command line (deploy's UsePreviousValue semantics).
 #
@@ -20,7 +22,6 @@
 # shellcheck source=scripts/_lib.sh
 . "$(dirname "$0")/_lib.sh"
 LOG_TAG=stack
-AMI_PARAM="${AMI_PARAM:-/supervictor/staging/ami-id}"
 TEMPLATE="$REPO_ROOT/supervictor/endpoint/template-staging.yaml"
 need aws
 cd "$REPO_ROOT"

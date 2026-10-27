@@ -10,10 +10,15 @@
 #
 #   ADMIN          admin certificate name under certs/admins/ (default: $USER)
 #   AWS_REGION     region for every aws call (default: us-east-1)
-#   STAGING_STACK  CloudFormation stack of the staging box (default: supervictor-endpoint-staging)
-#   STAGING_HOST   its hostname (default: staging.supervictor.advin.io)
-#   PROD_HOST      the production box's hostname (default: supervictor.advin.io;
-#                  no box answers there yet — the Lambda stage was retired 2026-10-27)
+#   STAGE          which box the *-staging.sh scripts (deploy, install, letsencrypt,
+#                  stack-update, build, teardown) operate on: staging (default) or
+#                  prod. The variables below keep their STAGING_ names — the staging
+#                  box came first — and STAGE=prod points them at the prod box.
+#   STAGING_STACK  CloudFormation stack of the box (default: supervictor-endpoint-$STAGE)
+#   STAGING_HOST   its hostname (default: staging.supervictor.advin.io; prod: $PROD_HOST)
+#   PROD_HOST      the production box's hostname (default: supervictor.advin.io)
+#   S3_PREFIX      key prefix for the box's PEMs and builds under the bucket (default: $STAGE)
+#   AMI_PARAM      SSM parameter pinning the box's AMI (default: /supervictor/$STAGE/ami-id)
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse --show-toplevel)}"
@@ -22,9 +27,17 @@ export AWS_DEFAULT_REGION="$REGION"
 ADMIN="${ADMIN:-${QS_ADMIN:-${USER:-admin}}}"
 ADMIN_PEM="$REPO_ROOT/certs/admins/$ADMIN/admin.pem"
 ADMIN_KEY="$REPO_ROOT/certs/admins/$ADMIN/admin.key"
-STAGING_STACK="${STAGING_STACK:-supervictor-endpoint-staging}"
-STAGING_HOST="${STAGING_HOST:-staging.supervictor.advin.io}"
+STAGE="${STAGE:-staging}"
 PROD_HOST="${PROD_HOST:-supervictor.advin.io}"
+case "$STAGE" in
+staging) _stage_host=staging.supervictor.advin.io ;;
+prod)    _stage_host="$PROD_HOST" ;;
+*) printf '[_lib] STAGE must be staging or prod, not %s\n' "$STAGE" >&2; exit 1 ;;
+esac
+STAGING_STACK="${STAGING_STACK:-supervictor-endpoint-$STAGE}"
+STAGING_HOST="${STAGING_HOST:-$_stage_host}"
+S3_PREFIX="${S3_PREFIX:-$STAGE}"
+AMI_PARAM="${AMI_PARAM:-/supervictor/$STAGE/ami-id}"
 # Fleet CA + ISRG Root X1: a client that trusts this bundle survives the box
 # switching between a fleet-signed and a Let's Encrypt server certificate.
 STAGING_BUNDLE="$REPO_ROOT/certs/ca/staging-bundle.pem"
