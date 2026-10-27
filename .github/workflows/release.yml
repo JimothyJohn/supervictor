@@ -11,7 +11,7 @@ permissions:
 jobs:
   # Static musl binaries: run on any Linux box with no runtime deps
   # (scripts/install-endpoint.sh consumes these). sqlite + ui + tls (the
-  # default feature set); the dynamo backend ships only in the Lambda image.
+  # default feature set); the dynamo backend is not in the release artifact.
   build-endpoint:
     name: Build endpoint (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}

@@ -37,6 +37,9 @@ pub struct Config {
     pub sqlite_db_path: String,
     /// Staleness watchdog tick interval in seconds; 0 disables it.
     pub watchdog_interval_secs: u64,
+    /// Current (mA) at or above which a device counts as powered on
+    /// (`POWER_THRESHOLD_MA`, default 1000: the clamp's ADC floor).
+    pub power_threshold_ma: i64,
     /// Days before an uplink row expires (DynamoDB TTL); 0 keeps rows forever.
     pub uplink_ttl_days: u32,
     /// Reject uplinks from devices that are not registered, `active`, and
@@ -46,6 +49,9 @@ pub struct Config {
     /// Terminate mTLS in-process when set (single-binary deployment);
     /// plain HTTP behind API Gateway / a proxy when `None`.
     pub tls: Option<TlsConfig>,
+    /// Directory for OTA firmware images (`FIRMWARE_DIR`); `None` leaves
+    /// the firmware routes answering 503.
+    pub firmware_dir: Option<PathBuf>,
 }
 
 /// `TLS_CERT` + `TLS_KEY` + `TLS_CLIENT_CA` → `Some(TlsConfig)`; none set →
@@ -116,6 +122,13 @@ impl Config {
                     AppError::Config(format!("invalid WATCHDOG_INTERVAL_SECS '{raw}': {e}"))
                 })?
             },
+            power_threshold_ma: {
+                let raw = env::var("POWER_THRESHOLD_MA")
+                    .unwrap_or_else(|_| crate::fleet::DEFAULT_POWER_THRESHOLD_MA.to_string());
+                raw.trim().parse().map_err(|e| {
+                    AppError::Config(format!("invalid POWER_THRESHOLD_MA '{raw}': {e}"))
+                })?
+            },
             uplink_ttl_days: {
                 let raw = env::var("UPLINK_TTL_DAYS").unwrap_or_else(|_| "30".into());
                 raw.parse().map_err(|e| {
@@ -127,6 +140,10 @@ impl Config {
                 parse_bool("REQUIRE_REGISTRATION", &raw)?
             },
             tls: tls_from_env()?,
+            firmware_dir: env::var("FIRMWARE_DIR")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(PathBuf::from),
         })
     }
 }

@@ -2,8 +2,9 @@ use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::Client;
 
 use crate::error::AppError;
-use crate::models::{DeviceRecord, UplinkRecord};
+use crate::models::{DeviceRecord, DeviceStyle, UplinkRecord};
 use crate::store::{DeviceStore, StoreError};
+use supervictor_common::models::{LineStyle, Marker};
 
 /// DynamoDB-backed implementation of [`DeviceStore`](super::DeviceStore).
 pub struct DynamoDeviceStore {
@@ -58,7 +59,44 @@ impl DynamoDeviceStore {
             "created_at".into(),
             AttributeValue::S(record.created_at.clone()),
         );
+        if let Some(t) = record.power_threshold_ma {
+            item.insert(
+                "power_threshold_ma".into(),
+                AttributeValue::N(t.to_string()),
+            );
+        }
+        if let Some(m) = record.min_on_s {
+            item.insert("min_on_s".into(), AttributeValue::N(m.to_string()));
+        }
+        for (key, value) in Self::style_attributes(&record.style) {
+            if let Some(value) = value {
+                item.insert(key.into(), value);
+            }
+        }
+        if let Some(ref fw) = record.desired_fw {
+            item.insert("desired_fw".into(), AttributeValue::S(fw.clone()));
+        }
         item
+    }
+
+    /// The three style attributes as (name, value-or-absent), shared by
+    /// `put_device` and `set_device_style`.
+    fn style_attributes(style: &DeviceStyle) -> [(&'static str, Option<AttributeValue>); 3] {
+        [
+            ("color", style.color.clone().map(AttributeValue::S)),
+            (
+                "line_style",
+                style
+                    .line_style
+                    .map(|l| AttributeValue::S(l.label().to_string())),
+            ),
+            (
+                "marker",
+                style
+                    .marker
+                    .map(|m| AttributeValue::S(m.label().to_string())),
+            ),
+        ]
     }
 
     fn item_to_device(
@@ -85,6 +123,58 @@ impl DynamoDeviceStore {
                 .map(|s| s.to_string()),
             status: get_s("status")?,
             created_at: get_s("created_at")?,
+            // A stored but unparseable number is a corrupt row, not "no
+            // override": surface it rather than silently judging against
+            // the fleet default.
+            power_threshold_ma: match item.get("power_threshold_ma") {
+                None => None,
+                Some(v) => Some(
+                    v.as_n()
+                        .ok()
+                        .and_then(|n| n.parse::<i64>().ok())
+                        .ok_or_else(|| {
+                            AppError::Store(StoreError::io(
+                                "item_to_device",
+                                "power_threshold_ma is not an integer",
+                            ))
+                        })?,
+                ),
+            },
+            min_on_s: match item.get("min_on_s") {
+                None => None,
+                Some(v) => Some(
+                    v.as_n()
+                        .ok()
+                        .and_then(|n| n.parse::<u32>().ok())
+                        .ok_or_else(|| {
+                            AppError::Store(StoreError::io(
+                                "item_to_device",
+                                "min_on_s is not a u32",
+                            ))
+                        })?,
+                )
+                .filter(|m| *m > 0),
+            },
+            // Unknown style tokens read as unset (a newer binary may have
+            // written them); the colour is validated where it is drawn.
+            style: DeviceStyle {
+                color: item
+                    .get("color")
+                    .and_then(|v| v.as_s().ok())
+                    .map(|s| s.to_string()),
+                line_style: item
+                    .get("line_style")
+                    .and_then(|v| v.as_s().ok())
+                    .and_then(|s| LineStyle::parse(s)),
+                marker: item
+                    .get("marker")
+                    .and_then(|v| v.as_s().ok())
+                    .and_then(|s| Marker::parse(s)),
+            },
+            desired_fw: item
+                .get("desired_fw")
+                .and_then(|v| v.as_s().ok())
+                .map(|s| s.to_string()),
         })
     }
 }
@@ -204,7 +294,189 @@ impl DeviceStore for DynamoDeviceStore {
 
     /// One query per device (`limit 1`, newest first). Fine at current fleet
     /// sizes; at 100+ devices pre-aggregate a latest-uplink item instead
-    /// (TODO.md / FRONTEND plan open question).
+    /// (ROADMAP.md, endpoint track, when a fleet that size exists).
+    fn set_device_threshold(
+        &self,
+        device_id: &str,
+        threshold_ma: Option<i64>,
+        min_on_s: Option<u32>,
+    ) -> Result<DeviceRecord, AppError> {
+        // One update expression setting the present parts and removing
+        // the absent ones: `SET #t = :t REMOVE #m` and every other combo.
+        let mut request = self
+            .client
+            .update_item()
+            .table_name(&self.devices_table)
+            .key("device_id", AttributeValue::S(device_id.to_string()))
+            .expression_attribute_names("#t", "power_threshold_ma")
+            .expression_attribute_names("#m", "min_on_s")
+            .condition_expression("attribute_exists(device_id)")
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew);
+        let mut sets: Vec<&str> = Vec::new();
+        let mut removes: Vec<&str> = Vec::new();
+        match threshold_ma {
+            Some(t) => {
+                sets.push("#t = :t");
+                request =
+                    request.expression_attribute_values(":t", AttributeValue::N(t.to_string()));
+            }
+            None => removes.push("#t"),
+        }
+        match min_on_s {
+            Some(m) => {
+                sets.push("#m = :m");
+                request =
+                    request.expression_attribute_values(":m", AttributeValue::N(m.to_string()));
+            }
+            None => removes.push("#m"),
+        }
+        let mut expression = String::new();
+        if !sets.is_empty() {
+            expression.push_str("SET ");
+            expression.push_str(&sets.join(", "));
+        }
+        if !removes.is_empty() {
+            if !expression.is_empty() {
+                expression.push(' ');
+            }
+            expression.push_str("REMOVE ");
+            expression.push_str(&removes.join(", "));
+        }
+        let request = request.update_expression(expression);
+
+        match block_on(request.send()) {
+            Ok(out) => {
+                let item = out.attributes().ok_or_else(|| {
+                    AppError::Store(StoreError::io(
+                        "set_device_threshold",
+                        "no attributes returned",
+                    ))
+                })?;
+                Self::item_to_device(item)
+            }
+            Err(e) => {
+                let service_err = e.into_service_error();
+                if service_err.is_conditional_check_failed_exception() {
+                    Err(AppError::DeviceNotFound {
+                        device_id: device_id.to_string(),
+                    })
+                } else {
+                    Err(AppError::Store(StoreError::io(
+                        "set_device_threshold",
+                        service_err,
+                    )))
+                }
+            }
+        }
+    }
+
+    fn set_desired_fw(
+        &self,
+        device_id: &str,
+        desired_fw: Option<&str>,
+    ) -> Result<DeviceRecord, AppError> {
+        let base = self
+            .client
+            .update_item()
+            .table_name(&self.devices_table)
+            .key("device_id", AttributeValue::S(device_id.to_string()))
+            .expression_attribute_names("#f", "desired_fw")
+            .condition_expression("attribute_exists(device_id)")
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew);
+        let request = match desired_fw {
+            Some(fw) => base
+                .update_expression("SET #f = :f")
+                .expression_attribute_values(":f", AttributeValue::S(fw.to_string())),
+            None => base.update_expression("REMOVE #f"),
+        };
+
+        match block_on(request.send()) {
+            Ok(out) => {
+                let item = out.attributes().ok_or_else(|| {
+                    AppError::Store(StoreError::io("set_desired_fw", "no attributes returned"))
+                })?;
+                Self::item_to_device(item)
+            }
+            Err(e) => {
+                let service_err = e.into_service_error();
+                if service_err.is_conditional_check_failed_exception() {
+                    Err(AppError::DeviceNotFound {
+                        device_id: device_id.to_string(),
+                    })
+                } else {
+                    Err(AppError::Store(StoreError::io(
+                        "set_desired_fw",
+                        service_err,
+                    )))
+                }
+            }
+        }
+    }
+
+    fn set_device_style(
+        &self,
+        device_id: &str,
+        style: DeviceStyle,
+    ) -> Result<DeviceRecord, AppError> {
+        // One expression: SET the parts that are present, REMOVE the rest.
+        let mut sets = Vec::new();
+        let mut removes = Vec::new();
+        let mut request = self
+            .client
+            .update_item()
+            .table_name(&self.devices_table)
+            .key("device_id", AttributeValue::S(device_id.to_string()))
+            .condition_expression("attribute_exists(device_id)")
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew);
+        for (i, (name, value)) in Self::style_attributes(&style).into_iter().enumerate() {
+            let placeholder = format!("#s{i}");
+            request = request.expression_attribute_names(&placeholder, name);
+            match value {
+                Some(v) => {
+                    let value_key = format!(":s{i}");
+                    sets.push(format!("{placeholder} = {value_key}"));
+                    request = request.expression_attribute_values(value_key, v);
+                }
+                None => removes.push(placeholder),
+            }
+        }
+        let mut expression = String::new();
+        if !sets.is_empty() {
+            expression.push_str("SET ");
+            expression.push_str(&sets.join(", "));
+        }
+        if !removes.is_empty() {
+            if !expression.is_empty() {
+                expression.push(' ');
+            }
+            expression.push_str("REMOVE ");
+            expression.push_str(&removes.join(", "));
+        }
+        let request = request.update_expression(expression);
+
+        match block_on(request.send()) {
+            Ok(out) => {
+                let item = out.attributes().ok_or_else(|| {
+                    AppError::Store(StoreError::io("set_device_style", "no attributes returned"))
+                })?;
+                Self::item_to_device(item)
+            }
+            Err(e) => {
+                let service_err = e.into_service_error();
+                if service_err.is_conditional_check_failed_exception() {
+                    Err(AppError::DeviceNotFound {
+                        device_id: device_id.to_string(),
+                    })
+                } else {
+                    Err(AppError::Store(StoreError::io(
+                        "set_device_style",
+                        service_err,
+                    )))
+                }
+            }
+        }
+    }
+
     fn latest_uplinks(&self) -> Result<Vec<UplinkRecord>, AppError> {
         let devices = self.list_devices()?;
         let mut out = Vec::with_capacity(devices.len());
@@ -333,6 +605,10 @@ mod tests {
             subject_dn: None,
             status: "active".into(),
             created_at: "2025-01-01T00:00:00Z".into(),
+            power_threshold_ma: None,
+            min_on_s: None,
+            style: Default::default(),
+            desired_fw: None,
         }
     }
 

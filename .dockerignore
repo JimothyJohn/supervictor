@@ -1,6 +1,10 @@
-# Only send common/ and endpoint/ to the Docker daemon
+# Only send the workspace crates (and the root manifest + lockfile, which the
+# simulated-device image builds against) to the Docker daemon
 *
+!Cargo.toml
+!Cargo.lock
 !supervictor/common/
+!supervictor/edge/
 !supervictor/endpoint/
 
 # Exclude build artifacts and secrets within those dirs

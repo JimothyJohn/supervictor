@@ -8,12 +8,12 @@ default = ["sqlite", "ui", "tls"]
 sqlite = ["rusqlite"]
 dynamo = ["aws-sdk-dynamodb", "aws-config"]
 # In-binary mTLS termination (TLS_CERT / TLS_KEY / TLS_CLIENT_CA): the
-# single-binary deployment path. Off for the Lambda image is harmless but
-# unnecessary — API Gateway terminates there.
+# single-binary deployment path. Off only behind a reverse proxy that
+# terminates mTLS itself (docker-compose.yml + Caddy).
 tls = ["rustls", "tokio-rustls", "rustls-pki-types", "x509-parser"]
 # Server-rendered fleet dashboard (docs plan: maud templates + SSE).
 # Disable for API-only deployments: --no-default-features --features sqlite
-ui = ["maud", "futures-core"]
+ui = ["maud"]
 
 [dependencies]
 axum = "0.8"
@@ -26,9 +26,10 @@ tower-http = { version = "0.7", features = ["trace", "compression-gzip"] }
 rusqlite = { version = "0.40", features = ["bundled"], optional = true }
 # maud: compile-time-checked, auto-escaping HTML. Proc-macro stack (syn/quote)
 # is already in tree via serde derive. futures-core: trait-only crate (Stream
-# for the SSE adapter), already in tree via hyper/tokio ecosystem.
+# for the SSE adapter and the stalled firmware body), already in tree via
+# hyper/tokio ecosystem.
 maud = { version = "0.27", features = ["axum"], optional = true }
-futures-core = { version = "0.3", optional = true }
+futures-core = "0.3"
 aws-sdk-dynamodb = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
 supervictor-common = { path = "../common", features = ["alloc"] }
@@ -40,6 +41,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "logg
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"], optional = true }
 rustls-pki-types = { version = "1", features = ["std"], optional = true }
 x509-parser = { version = "0.18", optional = true }
+# OTA image digests (firmware.rs). Already in the workspace lock through
+# ring/rustls-adjacent crates and the edge build; adds an edge, not a crate.
+sha2 = "0.11"
 
 # Renders a seeded, static copy of the dashboard for the GitHub Pages demo.
 [[example]]
@@ -53,3 +57,6 @@ axum-test = "21"
 # wait-timeout stay out of the tree); `std` brings the regex string
 # strategies. Dep review in the PR that added it (2026-10-23).
 proptest = { version = "1.12", default-features = false, features = ["std"] }
+# Scratch directories for the firmware blob-store tests; already in the
+# workspace lock (dev-only), so no new crate.
+tempfile = "3"

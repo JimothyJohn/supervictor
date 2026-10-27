@@ -1,18 +1,23 @@
 //! Supervictor endpoint — an axum-based REST API for the supervictor IoT platform.
 //!
 //! Receives mTLS-authenticated uplinks from ESP32 devices and stores them in
-//! SQLite (local/dev) or DynamoDB (production). Deployed via SAM + Lambda Web Adapter.
+//! SQLite (one static binary + systemd unit on any Linux box, the only
+//! deployment since 2026-10-27) or DynamoDB (`dynamo` feature).
 
 /// Application configuration loaded from environment variables.
 pub mod config;
 /// Unified error type with HTTP status mapping.
 pub mod error;
+/// OTA firmware images: validation, blob store, `Range` parsing.
+pub mod firmware;
 /// Fleet health: staleness classification and machine-readable snapshots.
 pub mod fleet;
 /// Framework-agnostic request handlers (pure functions).
 pub mod handlers;
 /// Fleet history: bucketed telemetry and status timeline (pure functions).
 pub mod history;
+/// Live view data: uplinks as timestamped 8-bit register samples.
+pub mod live;
 /// mTLS client certificate extraction middleware.
 pub mod middleware;
 /// Domain models, wire types, and API response structs.
@@ -21,6 +26,8 @@ pub mod models;
 pub mod routes;
 /// Pluggable storage backends (SQLite, DynamoDB).
 pub mod store;
+/// Per-device chart style: colour, stroke pattern, point marker.
+pub mod style;
 /// Minimal UTC RFC 3339 timestamp formatting (chrono replacement).
 pub mod time;
 /// In-binary mTLS termination: TLS listener + verified peer identity (feature `tls`).

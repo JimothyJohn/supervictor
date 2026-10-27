@@ -1,4 +1,11 @@
+# OTA layout for the 4 MB flash on every board this fleet runs (docs/OTA.md).
+# otadata picks the slot; ota_0/ota_1 are the A/B app slots (SLOT_SIZE in
+# supervictor-common::firmware must equal their size). No factory slot: a
+# USB flash writes ota_0 and an erased otadata boots it. Pass this file to
+# espflash (-T): the runner in .cargo/config.toml and scripts/flash.sh do.
 # Name,     Type, SubType, Offset,   Size
 nvs,        data, nvs,     0x9000,   0x6000
-phy_init,   data, phy,     0xf000,   0x1000
-factory,    app,  factory, 0x10000,  0x3F0000
+otadata,    data, ota,     0xf000,   0x2000
+phy_init,   data, phy,     0x11000,  0x1000
+ota_0,      app,  ota_0,   0x20000,  0x1F0000
+ota_1,      app,  ota_1,   0x210000, 0x1F0000

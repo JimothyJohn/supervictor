@@ -1,5 +1,8 @@
 # --- Build stage ---
-FROM rust:1.91-bookworm AS build
+# Keep the rustc here ≥ what the lockfile's MSRV demands — Dependabot bumps
+# deps (libsqlite3-sys 0.38 needs cfg_select!, stable from 1.94) while this
+# pin sits still, and CI never exercises the Docker path.
+FROM rust:1.97-bookworm AS build
 
 WORKDIR /app
 
@@ -15,18 +18,19 @@ WORKDIR /app/supervictor/endpoint
 # the example file exists, so stub it too. Examples are never built here.
 RUN mkdir src examples && echo "fn main() {}" > src/main.rs && echo "" > src/lib.rs \
     && echo "fn main() {}" > examples/render_demo.rs \
-    && cargo build --release --features sqlite,dynamo \
+    && cargo build --release \
     && rm -rf src
 
 COPY supervictor/endpoint/src ./src
 RUN touch src/main.rs src/lib.rs \
-    && cargo build --release --features sqlite,dynamo
+    && cargo build --release
 
 # --- Runtime stage ---
+# The container path (docker-compose.yml: plain HTTP behind Caddy, which
+# terminates mTLS and forwards the subject header). The default feature set
+# builds here; the DynamoDB backend is `--features dynamo` if a deployment
+# ever wants it.
 FROM debian:bookworm-slim
-
-COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 \
-     /lambda-adapter /opt/extensions/lambda-adapter
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*

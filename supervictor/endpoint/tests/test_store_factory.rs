@@ -12,9 +12,11 @@ fn test_config(backend: &str) -> Config {
         messages_table: "messages".into(),
         sqlite_db_path: ":memory:".into(),
         watchdog_interval_secs: 0,
+        power_threshold_ma: 100,
         uplink_ttl_days: 30,
         require_registration: false,
         tls: None,
+        firmware_dir: None,
     }
 }
 

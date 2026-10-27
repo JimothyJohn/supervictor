@@ -205,6 +205,10 @@ fn record(id: &str, subject_dn: Option<&str>) -> DeviceRecord {
         subject_dn: subject_dn.map(str::to_string),
         status: "active".into(),
         created_at: "2026-07-01T00:00:00+00:00".into(),
+        power_threshold_ma: None,
+        min_on_s: None,
+        style: Default::default(),
+        desired_fw: None,
     }
 }
 

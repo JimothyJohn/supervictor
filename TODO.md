@@ -1,128 +1,192 @@
-# TODO — Engineering Roadmap
+# TODO — the board
 
-Prioritized backlog of concrete improvements. The scaling plan lives in
-`ROADMAP.md`; larger strategic tracks in `todo/` (ENTERPRISE.md,
-open-source-framework.md). Completed items are deleted in the PR that lands
-them — git history is the changelog. Every remaining item is gated; the
-**unblocks** note says what has to happen first.
+Everything still open, in the board's item format
+(`~/.claude/rules/todo.md`: `needs:` / `result:` / `options:` / `est:` /
+`difficulty:` / `id:` lines; `/todo` renders this file). Direction with a
+trigger lives in `ROADMAP.md`; decisions are recorded where they apply
+(`HARDWARE.md` §11, `docs/MESH.md`, `docs/OTA.md`,
+`supervictor/endpoint/CLAUDE.md`). Completed items are deleted in the PR
+that lands them — git history is the changelog. An answered question is a
+decision: act on it, then tick it in the change that resolves it.
 
-## P0 — Security & cost guardrails
+Hand-off steps are tracked `scripts/` (each header says what it needs) and a
+card here, never an untracked note; `scratch/` holds only throwaway output.
 
-- [ ] Billing alarm: CloudWatch `EstimatedCharges` alarm + SNS topic. Shares
-      the topic/endpoint with ROADMAP Phase 2's dark-device alerting.
-      **Unblocks:** an alert email/endpoint decision + account-level billing
-      alerts enabled.
-- [ ] Cert lifecycle: `deploy-staging.sh` signs with `certs/ca/ca.key` from
-      the local working tree (gitignored, single copy on one laptop). Move
-      signing material to SSM Parameter Store / Secrets Manager; document
-      issuance + rotation; keep only public certs local. **Two CAs exist
-      with the same subject** (found 2026-10-24 while repairing the prod
-      truststore): the Mac Studio's `certs/ca` (issued 2026-03-03, sha256
-      `CD:AC:FD:B1…`) signed every device/admin/server cert in use, and prod
-      now trusts it (truststore.pem version `1fmZKZzmgktCHdWvGdb4PPTv6oJUWG_S`).
-      An older truststore held a 2026-03-08 CA (`E7:3F:86:F4…`) whose key is
-      not on the Studio; API Gateway refuses a truststore with both (same
-      subject). Find or retire that key when the CA moves to SSM.
-      **Unblocks:** an ops window — touches live staging deploys.
+## Hands-on — Nick (gates an agent session cannot pass)
 
-## P1 — Hygiene
+State as of 2026-10-27 ~03:30Z, after PR 122. `depends:` gives the order;
+the rest are independent.
 
-- [ ] `dev` branch protection contexts (owner-run, after `esp32-poe-iso`
-      merges): required checks are still `Lint + test (host)` and
-      `Embedded build (riscv32, ESP32-C3)`. esp32-poe-iso renames the
-      embedded job to `Embedded build (ESP32 xtensa + ESP32-C3 riscv)` and
-      the backend PR adds `DynamoDB store (DynamoDB Local)`; until the
-      contexts match, PRs into dev wait forever on the old name and the
-      dynamo job isn't required. `gh api -X PUT
-      repos/JimothyJohn/supervictor/branches/dev/protection` per
-      ~/.claude/templates/github/README.md.
-      **Unblocks:** esp32-poe-iso landing (owner decision 2026-10-23).
-- [ ] Flip `REQUIRE_REGISTRATION=true` in template.yaml (prod) once every
-      live device is registered *with* its `subject_dn` (strict mode
-      rejects unbound registrations — owner call 2026-10-23). `GET /fleet`
-      shows who still lacks one; `Quickstart onboard` re-registers.
-      **Unblocks:** fleet re-registration pass.
+- [ ] **Tear down the Lambda stacks** — `supervictor-dev` and `supervictor-prod` (API Gateway, the Lambda, the DynamoDB tables, the custom domains `dev.supervictor.advin.io` / `supervictor.advin.io`, their ACM certs and Route53 records). The script exports both DynamoDB tables to `scratch/lambda-export-<ts>/` first, deletes, waits, and prints any DELETE_FAILED resource. Afterwards `s3://supervictor/truststore*.pem` can go by hand. Deletes are denied to agent sessions.
+      needs: PR 122 on dev; a native terminal with aws; ~10 min
+      result: no serverless stack exists; supervictor.advin.io is free for the prod box
+      est: 30m
+      difficulty: low
+      id: teardown-lambda-stacks
+      asked: 2026-10-27
+      by: decisions session (chore/decisions-20261027)
+      notes: ./scripts/teardown-lambda-stacks.sh
+- [ ] **Land the rewritten staging template on the live stack** — the bootstrap now installs a GitHub release (no Docker/Caddy), the IAM policy drops the bundle object, ReleaseTag/Repo/ExistingAllocationId params appear. Goes through `scripts/staging-stack-update.sh` (pins the live AMI, refuses a change set that replaces the instance); read the change set it prints before answering y. `FOLD_EIP=1` also hands the stack the out-of-band Elastic IP 100.56.171.238 — CloudFormation may fail to "delete" the stack's long-released ElasticIp resource and roll back; if so run once without it.
+      needs: PR 122 on dev; a native terminal
+      result: the stack matches the template in the tree; a rebuild would come up on the release install
+      depends: teardown-lambda-stacks
+      est: 20m
+      difficulty: med
+      id: staging-stack-changeset
+      asked: 2026-10-27
+      by: decisions session
+      notes: ./scripts/staging-stack-changeset.sh (YES=1 to skip the prompt; TAG=v0.2.0 once it exists)
+- [ ] **Flip staging to strict registration** — `REQUIRE_REGISTRATION=true` on the box (new boxes already default to it). The script lists devices without a bound certificate first and refuses unless the list is empty or `FORCE=1`; today `c3-wifi-01`, `c3-wifi-02`, `wrover-wifi-01` and `pi-edge-01` are unbound and dark — revoke them on /ui or re-register (`rack-flash.sh staging`, `Quickstart onboard`) first. Edits `/etc/supervictor/env` over SSM and restarts the unit (a restart is yours), then pings with a device cert and reads the summary.
+      needs: a decision on the four unbound devices; a native terminal
+      result: only registered, active, certificate-bound devices can uplink to staging
+      est: 15m
+      difficulty: low
+      id: staging-require-registration
+      asked: 2026-10-27
+      by: decisions session
+      notes: ./scripts/staging-require-registration.sh
+- [ ] **Billing alarm** — CloudWatch `EstimatedCharges` alarm on an SNS topic that emails you (the topic the dark-device alerting reuses, ROADMAP). Needs the console's Billing preferences → "Receive CloudWatch billing alerts" ticked once (no API); SNS sends a confirmation link.
+      needs: EMAIL=…; THRESHOLD_USD (default 25); the billing-alerts preference
+      result: an email when the month's estimate crosses the line
+      est: 10m
+      difficulty: low
+      id: billing-alarm
+      asked: 2026-10-27
+      by: decisions session
+      notes: EMAIL=you@… ./scripts/billing-alarm.sh
+- [ ] **Make the DynamoDB job a required check on `dev`** — the `DynamoDB store (DynamoDB Local)` job runs on every PR but is not required, so a dynamo-only failure cannot block auto-merge. The session's `gh api PATCH` was denied (CI-bypass class).
+      needs: your gh login (repo admin)
+      result: three required contexts on dev
+      est: 2m
+      difficulty: low
+      id: dev-branch-protection
+      asked: 2026-10-27
+      by: decisions session
+      notes: ./scripts/dev-branch-protection.sh
+- [ ] **Cut v0.2.0 and put the release on staging** — everything since v0.1.0 (simulator + profiles, per-device threshold and min-on, live windows, POE2, history, themes, OTA, the single-binary deploy) ships only as hand-installed staging builds; `install-staging.sh` without a TAG rolls the box back to v0.1.0, and `deploy-staging.sh`'s default tag is the newest release.
+      needs: tag push (yours); dev at the commit you want to ship
+      result: staging runs a reproducible release; the extruder/molder min-on can be applied (`./scripts/sim-fleet.sh thresholds staging`)
+      est: 20m
+      difficulty: low
+      id: cut-v0-2-0
+      asked: 2026-10-26
+      by: decisions session
+      notes: git tag -a v0.2.0 <dev merge> -m v0.2.0 && TAG=v0.2.0 ./scripts/release.sh, then TAG=v0.2.0 ./scripts/install-staging.sh
+- [ ] **Promote dev → master** — your manual merge; also activates `.github/workflows/mutants.yml` (scheduled workflows run from the default branch only) and publishes the docs site from the new tree.
+      needs: PR 122 (and whatever else you want) on dev
+      result: master carries the single-binary reality; mutants run monthly
+      depends: cut-v0-2-0
+      est: 5m
+      difficulty: low
+      id: promote-dev-master
+      asked: 2026-10-27
+      by: decisions session
+- [ ] **Restart the simulated fleet from a dev checkout and retire its worktree** — the ten `sim-*` containers still run from `../supervictor-sim-profiles` (an old branch, merged). The session was denied stopping them (workload interference). Thresholds for the eight unheated profiles were re-applied on staging 03:25Z; the extruder/molder 120 s min-on needs the new endpoint on the box first (cut-v0-2-0 or `scripts/deploy-staging-build.sh`).
+      needs: Docker (up on the Studio); a checkout on dev
+      result: containers built from dev; `git worktree remove ../supervictor-sim-profiles` possible
+      depends: cut-v0-2-0
+      est: 15m
+      difficulty: low
+      id: sim-fleet-restart
+      asked: 2026-10-27
+      by: decisions session
+      notes: ./scripts/sim-fleet.sh down (in ../supervictor-sim-profiles), ./scripts/sim-fleet.sh up staging (from dev), ./scripts/sim-fleet.sh thresholds staging, then git worktree remove ../supervictor-sim-profiles
+- [ ] **OTA resume proof not re-run against the current endpoint** — run 2 passed on rack-03 (revert after an EN reset mid-trial, resume after a power cut); the stalled-download proof (`OTA: resuming at`) was last run against an older endpoint build. Optional; the scripts live in `../supervictor-poe-iso/scratch/` (07, and 05 for the deterministic power-cut variant).
+      needs: rack-03 on USB; ~5 min; the poe-iso worktree
+      result: the resume path proven on the shipped endpoint, or the scripts deleted with the worktree
+      options: run it | drop it
+      est: 15m
+      difficulty: low
+      id: ota-resume-proof
+      asked: 2026-10-27
+      by: decisions session
+- [ ] **Pi as a live device** — `pi-edge-01` is dark since 2026-10-24.
+      needs: your password on nick@10.0.0.56 (no agent-reachable key is authorized); Docker if `target-pi/` needs a rebuild (`BUILD=1`)
+      result: a Linux reference device fresh on staging
+      est: 15m
+      difficulty: low
+      id: pi-edge-live
+      asked: 2026-10-25
+      by: decisions session
+      notes: ./scripts/pi-edge.sh staging 12
+- [ ] **Dashboard on the iPhone** — staging serves the glance UI; the phone needs the admin identity (Let's Encrypt server cert, no CA profile).
+      needs: `~/.supervictor/` from browser-cert.sh on the Air (done 2026-10-24)
+      result: https://staging.supervictor.advin.io/ui on the phone
+      est: 10m
+      difficulty: low
+      id: iphone-dashboard
+      asked: 2026-10-26
+      by: decisions session
+      notes: on the Air: scp nick@10.0.0.41:github/supervictor/scripts/iphone-cert.sh ~/ && ~/iphone-cert.sh (AirDrop the identity)
+- [ ] **Tear down the moot phone-preview stack in `../supervictor-mobile`** — endpoint :8443, extruder sim, demo http server on :8000; the session was denied the kill.
+      needs: 1 min
+      result: the ports and the worktree free
+      est: 5m
+      difficulty: low
+      id: teardown-mobile-preview
+      asked: 2026-10-26
+      by: decisions session
+      notes: ./scratch/teardown-mobile-preview.sh in the main checkout (untracked there)
+- [ ] **Fill the switch-port column** — `certs/rack-inventory.tsv` still has `-` for every board, so a dark fleet row does not map to a cable (HARDWARE.md §10).
+      needs: a look at the rack
+      result: device → LS108GP port recorded
+      est: 10m
+      difficulty: low
+      id: rack-switch-ports
+      asked: 2026-10-27
+      by: decisions session
+- [ ] **Create the prod box** — a second instance of `template-staging.yaml` ("Path A", decided 2026-10-27): stack `supervictor-endpoint-prod`, A record for `supervictor.advin.io`, AMI pinned in SSM; polls /health until the release is installed. The script lands with PR 124 (`feat/prod-box`).
+      needs: teardown-lambda-stacks (frees supervictor.advin.io); cut-v0-2-0 (the release it installs); PR 124 on dev; ~5 min
+      result: supervictor-endpoint-prod up on the release, strict registration from day one
+      depends: teardown-lambda-stacks, cut-v0-2-0
+      est: 20m
+      difficulty: med
+      id: prod-box-create
+      asked: 2026-10-27
+      by: prod-box session (feat/prod-box, PR 124)
+      notes: TAG=v0.2.0 ./scripts/prod-box-create.sh
+- [ ] **Let's Encrypt on prod** — DNS-01 via Route53 from the box, renew timer; restarts the prod service.
+      needs: prod-box-create; ~3 min
+      result: a public server certificate on supervictor.advin.io (boards trust it through the staging bundle's ISRG Root X1)
+      depends: prod-box-create
+      est: 10m
+      difficulty: low
+      id: prod-letsencrypt
+      asked: 2026-10-27
+      by: prod-box session (PR 124)
+      notes: ./scripts/prod-letsencrypt.sh
+- [ ] **Move the boards to prod by OTA** — registers each device on prod with its certificate, then `VIA=staging ota-push.sh <device> prod` serves the prod-bound image from the box the board talks to today; canary rack-03 first. Staging rows go dark afterwards — expected.
+      needs: prod-letsencrypt; the esp toolchain; ~3 min per board
+      result: the six PoE boards fresh on prod; staging keeps the simulated fleet
+      depends: prod-letsencrypt
+      est: 30m
+      difficulty: med
+      id: boards-to-prod
+      asked: 2026-10-27
+      by: prod-box session (PR 124)
+      notes: ./scripts/boards-to-prod.sh poe-iso-rack-03, then ./scripts/boards-to-prod.sh
 
-## P1b — Single-binary deployment (owner direction, 2026-10-23)
+## Notes — local state (not tasks)
 
-Goal: `supervictor-endpoint` runs on any generic Linux box with no Docker,
-no Caddy, no on-box source build — one static binary, three PEMs, a
-SQLite file, a systemd unit. Single instance; scaling TBD. Today's
-staging path (EC2 → dnf docker → compose → `cargo build` on a t4g.micro
-with swap → Caddy for mTLS) is the thing this replaces. Approach chosen:
-in-binary mTLS via rustls (decision 2026-10-23). Landed: `tls` feature +
-`TlsListener`, musl release matrix, `scripts/install-endpoint.sh` +
-hardened unit (`supervictor/endpoint/deploy/`). **Running since
-2026-10-24:** `v0.1.0` (aarch64 musl) on the staging box
-`staging.supervictor.advin.io` (i-0672688a9ae6a2614, t4g.micro, SQLite,
-`REQUIRE_REGISTRATION=false`) — installed by hand over SSM; device ping,
-admin `/fleet/summary`, and no-cert refusal all verified. The old
-compose/Caddy stack on that box is stopped and disabled, docker disabled.
-
-- [ ] Retire the compose/Caddy staging path: `template-staging.yaml`
-      UserData becomes "run the install script"; `docker-compose.staging.yml`,
-      `Caddyfile.staging`, and `scripts/deploy-staging.sh`'s bundle upload go.
-      The stack `supervictor-endpoint-staging` is already drifted: its EIP was
-      released at some point, so a new one (`100.56.171.238`, tagged
-      `Name=supervictor-staging`) was allocated out-of-band and the Route53
-      record repointed. Fold that EIP into the template when it is rewritten.
-      **Unblocks:** an ops window.
-- [ ] Point one bench board at the box (firmware bakes `HOST` at compile
-      time → reflash with `HOST=staging.supervictor.advin.io`) so the
-      running reference carries real uplinks, not just `Quickstart ping`.
-      **Unblocks:** bench time.
-
-## P2 — Firmware (edge)
-
-- [ ] Decide the `portal` feature's fate: it `include_bytes!`s
-      `portal/dist/supervictor_portal_bg.wasm.gz`, which is not in the tree —
-      the feature cannot build. Either add a portal build step (wasm
-      toolchain) or drop the feature until the portal returns.
-      **Unblocks:** owner decision (build it vs. drop it).
-- [ ] esp ecosystem migration: bump `esp-rtos` 0.2 → 0.3 and `esp-radio`
-      0.17 → 0.18, then unpin `esp-hal =1.0.0` (pinned because 1.1.x removed
-      unstable APIs the older crates call). Remove the three Dependabot
-      ignores that lift with it (esp-hal, embassy-executor, esp-alloc).
-      **Unblocks:** flashable hardware on hand — CI only compile-checks the
-      firmware; a scheduler/radio migration needs an on-device soak.
-- [ ] Drop the heapless-0.8 bridge in `desktop_main.rs` once serde-json-core
-      releases against heapless 0.9 (their main branch already moved; we're
-      unified on 0.9.3 everywhere else).
-      **Unblocks:** a serde-json-core release > 0.6.0.
-- [ ] OTA update path (prerequisite for cert rotation on deployed devices —
-      see todo/ENTERPRISE.md and ROADMAP.md Phase 2).
-      **Unblocks:** hardware + the esp migration above (A/B partition
-      support lands with the newer esp-hal line).
-
-## P3 — Endpoint
-
-- [ ] Dashboard UX rework: the live dashboard needs design attention before
-      it's customer-visible again — the landing page dropped its demo links
-      in the July review, and /demo still renders with placeholder device
-      names. Relink from the landing page when it's presentable.
-      **Unblocks:** a design pass (owner taste applies).
-- [ ] Fleet dashboard Phase 4 (owner-scoped views, billing summaries).
-      **Unblocks:** the enterprise data model (todo/ENTERPRISE.md).
-- [ ] Dashboard on Lambda: SSE degrades to reload-fallback behind API GW
-      buffering (by design); if live push matters there, that's the
-      ECS-migration trigger per ROADMAP.md Phase 3.
-      **Unblocks:** a real need for live push on the serverless path.
-## P4 — CI/CD & release
-
-- [ ] Promote `.github/workflows/mutants.yml` (monthly cargo-mutants over
-      endpoint + common, 456 mutants at the 2026-10-23 baseline) — scheduled
-      workflows only run from the default branch, so it is inert on `dev`.
-      First real run sizes the job; `--jobs 2` and a 6h ceiling are guesses.
-      **Unblocks:** the next `dev` → `master` merge (owner).
-
-## P5 — Enterprise track
-
-See `todo/ENTERPRISE.md` (multi-table DynamoDB, billing sync, provisioning
-workflows) and `ROADMAP.md` (when Step Functions and each orchestration layer
-earn their keep — not before the enterprise features exist). Nothing here
-blocks P0–P4.
+- Air keychain holds the admin identity + trusts the fleet CA (browser-cert.sh,
+  2026-10-24). If the browser keeps prompting:
+  `security set-key-partition-list -S apple-tool:,apple:,unsigned: -s ~/Library/Keychains/supervictor.keychain-db`
+- Pi binary: `target-pi/aarch64-unknown-linux-gnu/release/supervictor-desktop`,
+  built 2026-10-24 from PR 78; `BUILD=1 ./scripts/pi-edge.sh` rebuilds it.
+- Staging stack updates: always through `scripts/staging-stack-update.sh`
+  (pins `AmiId=/supervictor/staging/ami-id`; an unpinned update replaces the box).
+- Boards pin `certs/ca/staging-bundle.pem` (fleet CA + ISRG Root X1), so the
+  Let's Encrypt cert on staging (expires 2027-01-23, `certbot-renew.timer`)
+  and a fleet-signed one both work. Never `supervictor-endpoint --version`
+  on the box: it starts a second server and hangs an SSM script.
+- Never leave `espflash monitor` attached across a reset (`espflash
+  board-info` does the same): the CH340 parks the board in the ROM
+  bootloader; `espflash reset --port <port>` recovers. `espflash reset` is
+  a power-on reset and wipes the RTC OTA records (the trial count recovers
+  from otadata; a download restarts from zero).
+- Rack 2026-10-27: six PoE boards on the A/B table at 0.1.6, all fresh;
+  the WiFi devkits were left dark on purpose; USB flash is recovery only.
 
 ## Open questions for Nick
 
-- 2026-10-24: mTLS identity never reaches the Lambda. dev.supervictor.advin.io exists (PR 74) and API Gateway enforces the client cert, but the Lambda Web Adapter serializes `lambda_http`'s typed request context, whose REST v1 identity struct has no `clientCert` (aws_lambda_events 0.14 and 1.2; `catch-all-fields` off), and REST parameter mapping needs a non-proxy integration. After PR 75 (no fallback to the client-supplied `x-ssl-client-subject-dn`, which anyone could forge on dev and prod) every Lambda request is anonymous, so bound devices 403 there. Pick one: (a) drop the adapter and run axum under `lambda_http` with `catch-all-fields`, read `identity.other["clientCert"]["subjectDN"]`; (b) move to an HTTP API v2, whose typed context carries `authentication.clientCert` through the adapter; (c) a REQUEST Lambda authorizer that copies `$context.identity.clientCert.subjectDN` into the authorizer context. I'd take (a): Rust-native, no sidecar, REST stays. Bench boards sit on staging (in-binary TLS, unaffected) until then.
-- 2026-10-24: the edge telemetry simulator (`supervictor/edge/src/models/sim.rs`, PR 78 + esp32-poe-iso 2d9deec) is compiled in unconditionally and fills temp_c / humidity_pct / rssi_dbm with fake-but-plausible values; heap_free and uptime_s are real. When real sensors land, should the simulator move behind a cargo feature (`sim`, off by default) so a production board can never report invented readings, or stay as the fallback for fields a board lacks? I'd put it behind a feature once the first real sensor ships. Also: cut v0.2.0 so staging's hand-installed PR 78 build is reproducible (03-install.sh currently rolls it back to v0.1.0).
+(none)

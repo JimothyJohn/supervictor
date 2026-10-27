@@ -1,4 +1,5 @@
 use alloc::string::String;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 /// Uplink payload sent by the device. Canonical wire type.
@@ -56,6 +57,15 @@ pub struct UplinkMessage {
     /// 9-axis IMU: magnetic field [x, y, z] in µT.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mag_ut: Option<[f32; 3]>,
+
+    // --- Sub-interval burst (absent unless the device batches samples) ---
+    /// 8-bit register levels, `levels::COUNT` per sample, oldest first;
+    /// the last sample is the uplink instant (see `crate::levels`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub levels: Vec<u8>,
+    /// Milliseconds between consecutive samples in `levels`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels_ms: Option<u32>,
 }
 
 /// Device registration request (CLI → endpoint).
@@ -68,6 +78,200 @@ pub struct RegisterDeviceRequest {
     /// Optional X.509 subject DN from the client certificate.
     #[serde(default)]
     pub subject_dn: Option<String>,
+    /// Optional per-device power threshold (mA): `current` at or above it is
+    /// "on". Absent means the fleet default (`POWER_THRESHOLD_MA`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_threshold_ma: Option<i64>,
+    /// Seconds the current must stay at or above the threshold before the
+    /// device counts as `on` ("producing", not merely powered); unset or 0
+    /// judges the last reading alone. At most 3600.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_on_s: Option<u32>,
+    /// Optional chart colour (see [`DeviceStyle::color`]); absent means the
+    /// endpoint assigns the first palette slot the fleet is not using.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Optional line style for the device's chart traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_style: Option<LineStyle>,
+    /// Optional point marker for the device's chart traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker: Option<Marker>,
+}
+
+/// How a device's trace is stroked on the dashboard charts.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LineStyle {
+    /// Continuous line (the default).
+    #[default]
+    Solid,
+    /// Long dashes.
+    Dashed,
+    /// Short dots.
+    Dotted,
+    /// Dash, dot, dash, dot.
+    DashDot,
+}
+
+impl LineStyle {
+    /// Every style, in menu order.
+    pub const ALL: [LineStyle; 4] = [
+        LineStyle::Solid,
+        LineStyle::Dashed,
+        LineStyle::Dotted,
+        LineStyle::DashDot,
+    ];
+
+    /// Wire token / CSS class (`solid`, `dashed`, `dotted`, `dashdot`).
+    pub fn label(self) -> &'static str {
+        match self {
+            LineStyle::Solid => "solid",
+            LineStyle::Dashed => "dashed",
+            LineStyle::Dotted => "dotted",
+            LineStyle::DashDot => "dashdot",
+        }
+    }
+
+    /// Parse a wire token; anything else is `None`.
+    pub fn parse(token: &str) -> Option<LineStyle> {
+        LineStyle::ALL.into_iter().find(|s| s.label() == token)
+    }
+}
+
+/// Glyph drawn at each plotted point of a device's trace, so two devices
+/// that share a colour still read apart.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Marker {
+    /// No per-point glyph (the default).
+    #[default]
+    None,
+    /// Filled circle.
+    Circle,
+    /// Filled square.
+    Square,
+    /// Filled diamond.
+    Diamond,
+    /// Filled triangle.
+    Triangle,
+}
+
+impl Marker {
+    /// Every marker, in menu order.
+    pub const ALL: [Marker; 5] = [
+        Marker::None,
+        Marker::Circle,
+        Marker::Square,
+        Marker::Diamond,
+        Marker::Triangle,
+    ];
+
+    /// Wire token / CSS class.
+    pub fn label(self) -> &'static str {
+        match self {
+            Marker::None => "none",
+            Marker::Circle => "circle",
+            Marker::Square => "square",
+            Marker::Diamond => "diamond",
+            Marker::Triangle => "triangle",
+        }
+    }
+
+    /// Parse a wire token; anything else is `None`.
+    pub fn parse(token: &str) -> Option<Marker> {
+        Marker::ALL.into_iter().find(|m| m.label() == token)
+    }
+}
+
+/// How a device is drawn on the dashboard charts. Stored on the device
+/// record; also the body of `PUT /devices/{id}/style` (admin), which
+/// replaces the whole style — an absent or `null` field clears that part
+/// back to its default. Unknown fields are rejected so a misspelt key
+/// cannot silently clear a colour.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceStyle {
+    /// Trace colour: a palette slot `s0`–`s7` (theme-aware, validated for
+    /// both surfaces) or a custom `#rrggbb`. `None` means the endpoint's
+    /// positional fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Stroke pattern; `None` is solid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_style: Option<LineStyle>,
+    /// Per-point glyph; `None` is no marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker: Option<Marker>,
+}
+
+impl DeviceStyle {
+    /// True when every part is unset.
+    pub fn is_default(&self) -> bool {
+        self.color.is_none() && self.line_style.is_none() && self.marker.is_none()
+    }
+}
+
+/// Per-device power judgement update (`PUT /devices/{id}/threshold`,
+/// admin): the threshold and the minimum on-time together. The body
+/// replaces both — `null` or an absent field clears that part (threshold
+/// back to the fleet default, min-on back to "the last reading alone").
+/// Unknown fields are rejected so a misspelt key cannot silently clear it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceThresholdRequest {
+    /// Current (mA) at or above which this device counts as powered on.
+    #[serde(default)]
+    pub power_threshold_ma: Option<i64>,
+    /// Seconds at or above the threshold before the device counts as
+    /// producing (decided 2026-10-27 for heated machines: a heater zone
+    /// pulsing is not "on"); 0 or absent = the last reading alone. ≤ 3600.
+    #[serde(default)]
+    pub min_on_s: Option<u32>,
+}
+
+/// Per-device target firmware update (`PUT /devices/{id}/desired_fw`,
+/// admin). `null` or an absent field clears it. Unknown fields are
+/// rejected so a misspelt key cannot silently clear a rollout target.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DesiredFwRequest {
+    /// Version the device should run next; must be an uploaded image for
+    /// that device (`PUT /devices/{id}/firmware/{version}`).
+    #[serde(default)]
+    pub desired_fw: Option<String>,
+}
+
+/// A one-shot fault on a device's next firmware download (bench proof of
+/// resume, docs/OTA.md): the image body stops after `stall_at` bytes
+/// (absolute offset into the image) for `stall_secs`, then completes.
+/// Longer than the device's read timeout, the stall makes it drop the
+/// connection, keep its resume record and retry with `Range`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FirmwareFault {
+    /// Image offset at which the body pauses.
+    pub stall_at: u64,
+    /// How long it pauses before the rest is sent.
+    pub stall_secs: u64,
+}
+
+/// What the endpoint knows about one uploaded firmware image. Served at
+/// `GET /devices/{id}/firmware/{version}/manifest`; the device checks
+/// `chip`, `size` and `sha256` against what it downloads before it
+/// activates the slot. Field names are the `fields::FW_*` constants.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FirmwareManifest {
+    /// Version string (`crate::firmware::Version` shape).
+    pub version: String,
+    /// Image size in bytes.
+    pub size: u32,
+    /// SHA-256 of the whole image, lowercase hex (64 chars).
+    pub sha256: String,
+    /// Chip token (`crate::firmware::ChipId::label`).
+    pub chip: String,
+    /// RFC 3339 upload time.
+    pub uploaded_at: String,
 }
 
 /// Device info returned by the API (endpoint → CLI).
@@ -84,4 +288,22 @@ pub struct DeviceResponse {
     pub status: String,
     /// ISO-8601 timestamp of when the device was registered.
     pub created_at: String,
+    /// Per-device power threshold (mA), if one overrides the fleet default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_threshold_ma: Option<i64>,
+    /// Minimum on-time (s) before the device counts as producing, if set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_on_s: Option<u32>,
+    /// Stored chart colour (`s0`–`s7` or `#rrggbb`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Stored line style, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_style: Option<LineStyle>,
+    /// Stored point marker, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker: Option<Marker>,
+    /// Firmware version the device should run next (OTA target), if set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired_fw: Option<String>,
 }

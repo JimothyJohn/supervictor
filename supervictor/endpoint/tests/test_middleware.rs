@@ -2,19 +2,6 @@ use axum::http::HeaderMap;
 use supervictor_endpoint::middleware::extract_client_subject;
 
 #[test]
-fn extract_from_lwa_header() {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "x-amzn-request-context",
-        r#"{"identity":{"clientCert":{"subjectDN":"CN=device1,O=supervictor"}}}"#
-            .parse()
-            .unwrap(),
-    );
-    let subject = extract_client_subject(&headers);
-    assert_eq!(subject.as_deref(), Some("CN=device1,O=supervictor"));
-}
-
-#[test]
 fn extract_from_proxy_header() {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -26,56 +13,38 @@ fn extract_from_proxy_header() {
 }
 
 #[test]
-fn lwa_takes_priority_over_proxy() {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "x-amzn-request-context",
-        r#"{"identity":{"clientCert":{"subjectDN":"CN=from-lwa"}}}"#
-            .parse()
-            .unwrap(),
-    );
-    headers.insert("x-ssl-client-subject-dn", "CN=from-proxy".parse().unwrap());
-    let subject = extract_client_subject(&headers);
-    assert_eq!(subject.as_deref(), Some("CN=from-lwa"));
-}
-
-#[test]
 fn no_headers_returns_none() {
     let headers = HeaderMap::new();
     assert!(extract_client_subject(&headers).is_none());
 }
 
+/// The retired Lambda Web Adapter header is just another unknown header
+/// now: it neither grants an identity nor shadows the proxy convention.
 #[test]
-fn malformed_lwa_json_returns_none() {
-    let mut headers = HeaderMap::new();
-    headers.insert("x-amzn-request-context", "{bad json}".parse().unwrap());
-    assert!(extract_client_subject(&headers).is_none());
-}
-
-/// Regression (2026-10-24): behind the adapter, a request with no client
-/// certificate must have NO identity. Falling through to the proxy header let
-/// any caller pick a device subject on dev and prod (raw execute-api URL, or
-/// the mTLS domain with someone else's valid cert).
-#[test]
-fn lwa_present_without_cert_ignores_forged_proxy_header() {
+fn adapter_request_context_is_ignored() {
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-amzn-request-context",
-        r#"{"identity":{"sourceIp":"1.2.3.4"}}"#.parse().unwrap(),
-    );
-    headers.insert(
-        "x-ssl-client-subject-dn",
-        "OU=devices,O=Supervictor,CN=c3-wifi-01".parse().unwrap(),
+        r#"{"identity":{"clientCert":{"subjectDN":"CN=from-adapter"}}}"#
+            .parse()
+            .unwrap(),
     );
     assert!(extract_client_subject(&headers).is_none());
+    headers.insert("x-ssl-client-subject-dn", "CN=from-proxy".parse().unwrap());
+    assert_eq!(
+        extract_client_subject(&headers).as_deref(),
+        Some("CN=from-proxy")
+    );
 }
 
-/// Same when the adapter header is present but unparseable: still no fallback.
+/// A non-UTF-8 header value is no identity, not a panic.
 #[test]
-fn lwa_malformed_ignores_forged_proxy_header() {
+fn undecodable_proxy_header_is_none() {
     let mut headers = HeaderMap::new();
-    headers.insert("x-amzn-request-context", "{bad json}".parse().unwrap());
-    headers.insert("x-ssl-client-subject-dn", "CN=forged".parse().unwrap());
+    headers.insert(
+        "x-ssl-client-subject-dn",
+        axum::http::HeaderValue::from_bytes(b"CN=\xff\xfe").unwrap(),
+    );
     assert!(extract_client_subject(&headers).is_none());
 }
 

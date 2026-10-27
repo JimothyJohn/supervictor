@@ -46,7 +46,7 @@ jobs:
     env:
       DYNAMODB_LOCAL_ENDPOINT: http://localhost:8000
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
         with:
           toolchain: stable
@@ -57,6 +57,9 @@ jobs:
         run: cargo test -p supervictor-endpoint --features dynamo --locked
 
   embedded:
+    # The name is a required status check in dev's branch protection — rename
+    # both together or PRs into dev never go green. Builds ESP32 (xtensa,
+    # ethernet + wifi) and ESP32-C3 (riscv) with the esp toolchain.
     name: Embedded build (riscv32, ESP32-C3)
     runs-on: ubuntu-latest
     env:
@@ -66,15 +69,18 @@ jobs:
       CA_PATH: ca/ca.pem
       DEVICE_NAME: ci-device
       HOST: ci.invalid
+      API_PATH: /
       SSID: ci-ssid
       PASSWORD: ci-password
       TLS_VERSION: "1.3"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # nightly
+      # Xtensa (original ESP32) needs the esp-rs fork toolchain; this action
+      # runs espup and exports the toolchain env into the job.
+      - uses: esp-rs/xtensa-toolchain@ec6d36527049a7f4fb2cb0c1a644668c1bb8a2a4 # v1.7.0
         with:
-          toolchain: nightly
-          components: rust-src
+          buildtargets: esp32
+          default: false
       - name: Generate throwaway CI certs
         run: |
           mkdir -p ci-certs/ca ci-certs/devices/ci-device
@@ -84,6 +90,17 @@ jobs:
           openssl req -new -key ci-certs/devices/ci-device/client.key -subj "/CN=ci-device" \
             | openssl x509 -req -CA ci-certs/ca/ca.pem -CAkey ci-certs/ca/ca.key -CAcreateserial -days 1 \
               -out ci-certs/devices/ci-device/client.pem
-      - name: Check embedded firmware
+      - name: Check embedded firmware (ethernet — primary uplink, ESP32; measured-only image)
         working-directory: supervictor/edge
-        run: cargo check --features embedded --locked
+        run: cargo check --features ethernet --locked
+      - name: Check embedded firmware (ethernet + sim — what the rack runs)
+        working-directory: supervictor/edge
+        run: cargo check --features ethernet,sim --locked
+      - name: Check embedded firmware (wifi — fallback interface, ESP32)
+        working-directory: supervictor/edge
+        run: cargo check --features wifi,chip-esp32 --locked
+      # The esp toolchain's rustc carries the riscv backend too; same
+      # toolchain builds the C3 with build-std, no extra install.
+      - name: Check embedded firmware (wifi, ESP32-C3 riscv)
+        working-directory: supervictor/edge
+        run: cargo check --features wifi,chip-esp32c3 --target riscv32imc-unknown-none-elf --locked

@@ -50,8 +50,26 @@ Design rules:
 > Since 2026-10-24 the bench firmware and the desktop client fill `seq`,
 > `uptime_s`, `interval_s`, `heap_free`, `rssi_dbm`, `temp_c` and
 > `humidity_pct` on every ping. Until real sensors land the environmental
-> values (and RSSI) come from `supervictor/edge/src/models/sim.rs`, a
-> seeded simulator; `heap_free` and `uptime_s` are real on the ESP32.
+> values (and RSSI, and `current` itself) come from
+> `supervictor/edge/src/models/sim.rs`, a seeded simulator behind the
+> `sim` cargo feature — off by default since 2026-10-27, so an image built
+> without it reports only `current` 0 (no sensor driver yet) plus the real
+> `seq` / `uptime_s` / `interval_s` / `heap_free`. `scripts/flash.sh` adds
+> `sim` for bench boards unless `SIM=0`.
+>
+> With a **machine profile** (`SIM_PROFILE`; `supervictor/edge/src/models/profile.rs`)
+> the simulator impersonates plant equipment instead of the bench trace:
+> `extruder`, `press-brake`, `cnc`, `saw`, `oven`, `compressor`, `conveyor`,
+> `molder`, `welder`, `pump`. `current` is then the one-leg supply current
+> in mA averaged over the uplink interval (tens of amps; motor inrush up to
+> 6× rated for one second), following that machine's duty cycle on top of a
+> working day of runs, breaks and shutdowns (shutdown = 0 mA, so the power
+> state flips). `temp_c` becomes the machine's probe: barrel/oven
+> temperature for the heated profiles (up to 400 °C), motor housing
+> otherwise. Firmware takes `SIM_PROFILE` / `SIM_SPEED` at build time (an
+> unknown name fails the build); the desktop client at runtime.
+> `supervictor/edge/docker-compose.sim.yml` runs one container per profile
+> (`./scripts/sim-fleet.sh up staging`).
 
 ### Device health (optional; firmware fills these every ping)
 
@@ -78,6 +96,53 @@ Floats must be finite: the device serializer (`serde-json-core`) emits
 non-finite floats as `null`, which the endpoint rejects inside a `[f32; 3]`.
 When real sensor drivers land, clamp/skip NaN before filling these fields.
 
+## Sub-interval burst: 8-bit levels (optional)
+
+A *register* is one charted field — `current`, `temp_c`, `humidity_pct`,
+`rssi_dbm`, `heap_free`, in that order. Each has a fixed full-scale range,
+and a *level* maps that range onto one byte: `1..=255` is the range (254
+steps, 0.39 % of full scale per step, 0.2 % worst rounding error) and `0`
+means "no reading" (a wired board has no RSSI). The table lives once, in
+`supervictor/common/src/levels.rs`, and both the firmware and the endpoint
+quantise/dequantise with it — the edge crate depends on `supervictor-common`
+for exactly this, so the two ends cannot drift.
+
+| Register | `lo` (level 1) | `hi` (level 255) | step |
+|----------|----------------|------------------|------|
+| `current` (mA) | 0 | 20000 | 78.7 mA |
+| `temp_c` | -40 | 60 | 0.39 °C |
+| `humidity_pct` | 0 | 100 | 0.39 %RH |
+| `rssi_dbm` | -100 | -20 | 0.31 dB |
+| `heap_free` (bytes) | 0 | 524288 | 2 KiB |
+
+The point is bytes per datapoint: a keyed float costs ~15 bytes on the
+wire, a level costs one. So a device can sample fifty times between
+uplinks and ship the whole burst:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `levels` | u8 array | Flat, 5 bytes per sample, oldest first; the last sample is the uplink instant. Length must be a multiple of 5, at most 600 samples |
+| `levels_ms` | u32 | Milliseconds between consecutive samples; required with `levels`, `1..=3600000` |
+
+The scalar fields keep carrying the latest sample at full precision, so a
+burst-less uplink is unchanged and old firmware needs nothing. The endpoint
+rejects a malformed burst (ragged length, missing or zero spacing, a byte
+over 255) with 422 and stores nothing (`validate::check_levels`). Stored
+bursts feed the live view (`/ui/live`, sample resolution, last 120 s) and
+are folded into the history bucket means. Default firmware cadence:
+`UPLINK_BURST = 50` samples over the 5 s interval → one every 100 ms,
+10 Hz (`supervictor/edge/src/config.rs`); the desktop client takes
+`BURST=`, capped at `LEVELS_SAMPLES_MAX = 50` per uplink. 10 Hz is where
+the SEN0211 clamp stops rewarding speed: its peak detector rises within a
+mains cycle, so a motor start or inrush is resolved, while its decay is a
+10 s RC regardless (HARDWARE.md 6.1). Going faster doubles the firmware
+buffers, the uplink item and the live page's seed again for no new signal.
+Changing a register's range re-scales every stored burst — append new
+registers at the end instead, never reorder. The `current` range was
+6000 mA until 2026-10-25 (changed to the SEN0211 clamp's 20 A full scale
+before any real-sensor bursts were stored; sim bursts on staging from
+before that date dequantise 3.3× high).
+
 ## Uplink cadence
 
 `interval_s` is the canonical knob: **t seconds between pings**, set per
@@ -98,11 +163,13 @@ a future rollup layer, not the raw ping table — this is the guardrail the
 
 ## Payload budget
 
-Worst case (64-char id, every field at its widest printing) is ~475 bytes.
-The firmware's buffers are sized for it: 512-byte JSON buffer and 1024-byte
-request buffer in `supervictor/edge/src/network/http.rs`, guarded by
-`uplink_tests::uplink_worst_case_fits_json_buffer`. Adding a field means
-re-checking that test, not hoping.
+Worst case (64-char id, every field at its widest printing, the nine IMU
+floats, a full 50-sample `levels` burst of three-digit bytes) is 1420
+bytes. The firmware's buffers are sized for it: 1536-byte JSON buffer and
+2048-byte request buffer in `supervictor/edge/src/network/http.rs`, guarded by
+`uplink_tests::full_uplink_with_max_id_fits_the_request_buffers`. Adding a
+field (or growing `LEVELS_SAMPLES_MAX`) means re-checking that test, not
+hoping.
 
 ## Sensor candidates for the placeholders
 

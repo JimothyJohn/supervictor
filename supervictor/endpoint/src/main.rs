@@ -21,11 +21,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let store = supervictor_endpoint::store::factory::create_store(&config).await?;
     supervictor_endpoint::watchdog::spawn(store.clone(), config.watchdog_interval_secs);
-    let app = supervictor_endpoint::routes::router_with(
+    let firmware: Option<std::sync::Arc<dyn supervictor_endpoint::firmware::FirmwareStore>> =
+        match &config.firmware_dir {
+            Some(dir) => {
+                let fs = supervictor_endpoint::firmware::FsFirmwareStore::new(dir)?;
+                tracing::info!(dir = %fs.root().display(), "firmware store ready");
+                Some(std::sync::Arc::new(fs))
+            }
+            None => {
+                tracing::info!("FIRMWARE_DIR unset: firmware routes answer 503");
+                None
+            }
+        };
+    let app = supervictor_endpoint::routes::router_with_firmware(
         store,
         supervictor_endpoint::routes::RouterOptions {
             require_registration: config.require_registration,
+            power_threshold_ma: config.power_threshold_ma,
         },
+        firmware,
     );
 
     let addr = format!("0.0.0.0:{}", config.port);
@@ -69,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Resolve when SIGTERM (ECS task stop, Lambda Web Adapter drain) or Ctrl-C
+/// Resolve when SIGTERM (systemd stop, container stop) or Ctrl-C
 /// arrives, letting in-flight requests finish instead of dropping mid-write.
 async fn shutdown_signal() {
     let ctrl_c = async {

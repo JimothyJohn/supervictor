@@ -24,6 +24,10 @@ fn record(id: &str, status: &str, subject_dn: Option<&str>) -> DeviceRecord {
         subject_dn: subject_dn.map(str::to_string),
         status: status.into(),
         created_at: "2026-07-01T00:00:00+00:00".into(),
+        power_threshold_ma: None,
+        min_on_s: None,
+        style: Default::default(),
+        desired_fw: None,
     }
 }
 
@@ -158,7 +162,7 @@ fn spoofed_uplink_is_rejected_and_not_stored() {
 
 #[test]
 fn bound_device_without_cert_is_rejected() {
-    // The execute-api path skips API Gateway mTLS: no clientCert, no subject.
+    // A request that arrived with no client certificate has no subject.
     let store = common::test_store();
     store
         .put_device(record("dev-1", "active", Some(BOUND_DN)))
@@ -355,38 +359,6 @@ async fn http_spoof_is_403_and_leaks_nothing() {
 }
 
 #[tokio::test]
-async fn http_lambda_request_context_subject_is_bound_too() {
-    let store = common::test_store();
-    store
-        .put_device(record("dev-1", "active", Some(BOUND_DN)))
-        .unwrap();
-    let server = TestServer::new(router(store));
-    let ctx = |dn: &str| {
-        (
-            HeaderName::from_static("x-amzn-request-context"),
-            HeaderValue::from_str(&format!(
-                r#"{{"identity":{{"clientCert":{{"subjectDN":"{dn}"}}}}}}"#
-            ))
-            .unwrap(),
-        )
-    };
-    let (n, v) = ctx(OTHER_DN);
-    server
-        .post("/")
-        .add_header(n, v)
-        .text(body("dev-1"))
-        .await
-        .assert_status(StatusCode::FORBIDDEN);
-    let (n, v) = ctx(BOUND_DN);
-    server
-        .post("/")
-        .add_header(n, v)
-        .text(body("dev-1"))
-        .await
-        .assert_status_ok();
-}
-
-#[tokio::test]
 async fn http_require_registration_option() {
     let store = common::test_store();
     store.put_device(record("dev-1", "active", None)).unwrap();
@@ -397,6 +369,7 @@ async fn http_require_registration_option() {
         store,
         RouterOptions {
             require_registration: true,
+            ..RouterOptions::default()
         },
     ));
     server

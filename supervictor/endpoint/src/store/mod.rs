@@ -133,6 +133,32 @@ pub trait DeviceStore: Send + Sync {
     /// Update a device's lifecycle status, returning the updated record.
     /// Errors with [`AppError::DeviceNotFound`] if the device does not exist.
     fn set_device_status(&self, device_id: &str, status: &str) -> Result<DeviceRecord, AppError>;
+
+    /// Set (`Some`) or clear (`None`) a device's power threshold override
+    /// and its minimum on-time, both at once; returns the updated record,
+    /// `DeviceNotFound` for an unknown id. The caller validates the values.
+    fn set_device_threshold(
+        &self,
+        device_id: &str,
+        threshold_ma: Option<i64>,
+        min_on_s: Option<u32>,
+    ) -> Result<DeviceRecord, AppError>;
+    /// Set (`Some`) or clear (`None`) the firmware version a device should
+    /// run next; returns the updated record, `DeviceNotFound` for an
+    /// unknown id. The caller validates the version and that an image
+    /// exists — the store only remembers the string.
+    fn set_desired_fw(
+        &self,
+        device_id: &str,
+        desired_fw: Option<&str>,
+    ) -> Result<DeviceRecord, AppError>;
+    /// Replace a device's chart style (every part; unset parts clear);
+    /// returns the updated record, `DeviceNotFound` for an unknown id.
+    fn set_device_style(
+        &self,
+        device_id: &str,
+        style: crate::models::DeviceStyle,
+    ) -> Result<DeviceRecord, AppError>;
     /// Most recent uplink per device (devices that never uplinked are
     /// absent). One query on SQLite; per-device on DynamoDB (see impl notes).
     fn latest_uplinks(&self) -> Result<Vec<UplinkRecord>, AppError>;

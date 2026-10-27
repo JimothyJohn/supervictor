@@ -6,44 +6,18 @@ use axum::http::{Extensions, HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
-/// Extract mTLS client certificate subject DN from request headers.
-///
-/// Trust order:
-/// 1. `x-amzn-request-context` (Lambda Web Adapter / API Gateway). The adapter
-///    sets this header on every request and overwrites whatever the client
-///    sent, so its presence proves we are behind the adapter and its contents
-///    are the gateway's, not the caller's. When it is present it is the ONLY
-///    source: a missing `identity.clientCert` means "no client certificate",
-///    not "ask another header" — behind API Gateway nothing trustworthy sets
-///    `x-ssl-client-subject-dn`, so falling through would let any caller
-///    choose its own identity (observed on dev and prod, 2026-10-24).
-/// 2. `x-ssl-client-subject-dn` (reverse proxy / ingress convention), only
-///    when no adapter header is present. The proxy in front must strip it
-///    from incoming requests; this binary cannot tell.
+/// Extract the mTLS client certificate subject DN a trusted reverse proxy
+/// forwarded in `x-ssl-client-subject-dn` (the Caddy / nginx convention,
+/// and what the test harness uses). The proxy in front must strip that
+/// header from incoming requests; this binary cannot tell. It is consulted
+/// only when the binary did not terminate TLS itself — see
+/// [`client_identity`]. (The Lambda Web Adapter's `x-amzn-request-context`
+/// path was retired 2026-10-27 with the serverless deployment.)
 pub fn extract_client_subject(headers: &HeaderMap) -> Option<String> {
-    // Lambda Web Adapter passes API Gateway requestContext as a header. Its
-    // presence is authoritative: no fallback to client-controllable headers.
-    if let Some(ctx_header) = headers.get("x-amzn-request-context") {
-        return ctx_header
-            .to_str()
-            .ok()
-            .and_then(|ctx_str| serde_json::from_str::<serde_json::Value>(ctx_str).ok())
-            .as_ref()
-            .and_then(|ctx| ctx.get("identity"))
-            .and_then(|id| id.get("clientCert"))
-            .and_then(|cert| cert.get("subjectDN"))
-            .and_then(|s| s.as_str())
-            .map(str::to_string);
-    }
-
-    // Reverse proxy / ingress controller convention
-    if let Some(ssl_subject) = headers.get("x-ssl-client-subject-dn") {
-        if let Ok(s) = ssl_subject.to_str() {
-            return Some(s.to_string());
-        }
-    }
-
-    None
+    headers
+        .get("x-ssl-client-subject-dn")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
 }
 
 /// The request's authenticated client identity.
@@ -51,8 +25,8 @@ pub fn extract_client_subject(headers: &HeaderMap) -> Option<String> {
 /// When this binary terminated TLS itself (feature `tls`, `TLS_*` set), the
 /// identity is the verified peer certificate's subject carried in
 /// `ConnectInfo<TlsPeer>` — and forwarded headers are ignored, whatever they
-/// say: nothing upstream vouched for them. Otherwise (API Gateway / Caddy in
-/// front) it is whatever the trusted proxy forwarded, per
+/// say: nothing upstream vouched for them. Otherwise (a reverse proxy in
+/// front, plain HTTP here) it is whatever the trusted proxy forwarded, per
 /// [`extract_client_subject`].
 pub fn client_identity(extensions: &Extensions, headers: &HeaderMap) -> Option<String> {
     #[cfg(feature = "tls")]
@@ -80,7 +54,7 @@ pub fn is_admin_subject(dn: &str) -> bool {
 /// True when two subject DNs name the same certificate subject.
 ///
 /// Component-wise: split on `,`, trim, upper-case the attribute type, sort.
-/// The same certificate is rendered differently by API Gateway, Caddy and
+/// The same certificate is rendered differently by rustls, Caddy and
 /// `openssl -nameopt RFC2253` (spacing, component order), so byte equality
 /// would reject legitimate devices. Anything looser than this — case-folding
 /// values, collapsing escapes — risks admitting a subject the CA never

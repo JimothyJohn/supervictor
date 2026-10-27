@@ -1,182 +1,101 @@
-![supervictor](docs/banner.jpg)
+![supervictor](docs/banner.svg)
 
 # supervictor
 
-**One language. One toolchain. Sensor to cloud.**
+Rust from the register to the database. ESP32 firmware, an endpoint that terminates mTLS itself, the certificate authority that issues every identity, and a live fleet dashboard — one Cargo workspace, one static binary on the server. The deployment is a Linux box, systemd and a SQLite file; nothing else runs. What it is for: [supervictor.advin.io](https://www.supervictor.advin.io).
 
-Supervictor is an all-Rust IoT framework that covers the entire stack — bare-metal firmware on a RISC-V microcontroller, a cloud API with a fleet dashboard, and mTLS certificate management — wired together by a single `./Quickstart` entry point. No Node.js lambdas. No YAML-driven code generators. Rust from the register to the database; one deliberate shell script for orchestration.
+## Quickstart
 
-## Why One Language Matters
+```bash
+git clone https://github.com/JimothyJohn/supervictor.git && cd supervictor
+./Quickstart
+```
 
-Most IoT stacks are a Frankenstein of C firmware, Python cloud functions, bash deploy scripts, and JavaScript dashboards — held together by JSON contracts that nobody validates. When the firmware team changes a field name, the cloud team finds out at 2 AM.
+One command, start to finish: it checks the toolchain, writes `.env.dev`, issues the fleet CA and your admin, server and device certificates, builds, runs the test suite, starts the endpoint with mTLS on `https://localhost:8443`, then asks what should post telemetry — a simulated machine on your computer, an ESP32 over USB, or nothing yet. It is idempotent: rerun it after any fix and it skips what already exists. It only prompts on a terminal and only where a choice is ambiguous; `QS_HARDWARE=sim ./Quickstart` answers ahead of time for scripts and CI. `./Quickstart status` and `./Quickstart down` manage what it started.
 
-Supervictor takes a different approach:
+- `make` is the same path with the usual names (`make help`, `lint`, `test-unit`, `flash`, `deploy`).
+- In Claude Code, `/quickstart` runs it with an agent that reads your serial ports and environment first and fixes what fails. `/bring-your-own` is the next step: the endpoint on a server you own (Linux box, VPS, Pi, container, macOS or WSL) and telemetry from a board that is not the bench Olimex — another ESP32, a Linux SBC, or anything that can do mTLS — with a checker that proves the server from a device's point of view before you flash.
+- Rust is the only requirement. Flashing adds `espflash` and the esp toolchain, which `./Quickstart install` sets up.
 
-- **Shared types across the entire stack.** The same `UplinkMessage` struct compiles into the firmware and the API. Change a field and the compiler catches every callsite — on the microcontroller *and* in the cloud — before anything ships.
-- **One build system.** `cargo build` works for the firmware and the API. No polyglot toolchain to install, no version matrix to maintain.
-- **One test runner.** Unit tests, integration tests, and end-to-end mTLS verification all run with `cargo test`. Same language, same assertions, same CI pipeline.
-- **One dependency tree to audit.** Security review one ecosystem instead of three. `cargo audit` covers your firmware, your API, and your deploy tooling in a single pass.
-- **Refactor without fear.** Rename a function, restructure a module, change a protocol — the compiler tells you exactly what broke across every layer. Try that across C, Python, and JavaScript.
+## Ask the fleet from an agent
 
-The result: an IoT stack where a solo developer moves as fast as a team, and a team moves as fast as a well-oiled machine.
+`supervictor/mcp` is a Model Context Protocol server: five read-only tools over the admin API — backend status (health, TLS, admin access), fleet summary, per-device status with filters, one device's record and recent uplinks, and bucketed history. The repo's `.mcp.json` registers it for Claude Code (`scripts/mcp.sh` builds it on first use, or `make mcp`); any MCP client can run the same binary. It reads `SUPERVICTOR_URL` (default `https://localhost:8443`), `SUPERVICTOR_CA` and `SUPERVICTOR_ADMIN_CERT`/`_KEY` (default `certs/admins/$USER/`), and every tool takes an `endpoint` argument to ask about staging or production with the same admin certificate.
+
+Open the dashboard by importing `certs/admins/<you>/admin.p12` into your browser (the password printed once when it was issued), or read the same data over curl with the admin certificate.
+
+## One language
+
+- **One wire contract.** `UplinkMessage`, the routes and the field names live in `common/` and compile into the firmware and the API. Rename a field and both ends fail to build until they agree.
+- **One toolchain.** `cargo build` and `cargo test` cover firmware, endpoint, simulator and certificate tooling; `cargo audit` covers one dependency tree.
+- **One binary to run.** The endpoint links rustls, SQLite and the dashboard. No reverse proxy, no runtime, no managed service between a board and its data.
 
 ## Architecture
 
 ```
- ESP32-C3                    mTLS                    Axum API
-┌──────────────┐       ┌──────────────┐       ┌──────────────────┐
-│  Rust/no_std │──────>│   X.509      │──────>│  Rust/tokio      │
-│  Embassy     │       │   client     │       │  SQLite/DynamoDB  │
-│  esp-mbedtls │       │   certs      │       │  Feature-gated   │
-└──────────────┘       └──────────────┘       └──────────────────┘
-     edge/                                        endpoint/
-                          cli/
-                   ┌──────────────────┐
-                   │  Build, flash,   │
-                   │  deploy, certs,  │
-                   │  onboard         │
-                   └──────────────────┘
+ ESP32 board                  mTLS                     Endpoint
+┌──────────────────┐    ┌──────────────┐    ┌──────────────────────────┐
+│  Rust/no_std     │───>│   X.509      │───>│  Rust/axum/tokio         │
+│  Embassy async   │    │   client     │    │  mTLS terminated in-     │
+│  PoE Ethernet    │    │   certs      │    │  binary (rustls)         │
+│  or WiFi         │    └──────────────┘    │  SQLite (DynamoDB opt.)  │
+└──────────────────┘            ▲           │  /ui dashboard, /fleet   │
+      edge/                     │           └──────────────────────────┘
+                                │                    endpoint/
+┌──────────────────┐            │
+│  Simulated       │────────────┘   Same client, same certs: the
+│  machine         │                desktop binary, or a container
+│  (desktop client)│                per pretend machine.
+└──────────────────┘
 ```
 
-Three crates. Two binaries. One language.
+Three crates: `supervictor/common` (wire contract, `no_std`), `supervictor/edge` (firmware and desktop client), `supervictor/endpoint` (API, dashboard, stores, TLS). Boards: Olimex ESP32-POE-ISO and ESP32-POE2 over wired PoE Ethernet, ESP32-C3 over WiFi; other MCUs are a port of `edge/src/board/`.
 
-## Quick Start
+## Build on it
 
-```bash
-git clone git@github.com:JimothyJohn/supervictor.git
-cd supervictor
+**Wire contract.** `POST /` carries `{ id, current, ...telemetry }`; everything after `id` and `current` is optional and omitted when absent, units live in field names, and the endpoint stores whatever arrives, so a new field needs no endpoint change. Schema and rules: [docs/TELEMETRY.md](docs/TELEMETRY.md).
 
-# Generate mTLS certificates
-./Quickstart certs ca
-./Quickstart certs device esp32
-./Quickstart certs server caddy
-
-# Start local endpoint (SAM local)
-./Quickstart dev --serve
-
-# Flash firmware to device
-./Quickstart edge
-
-# When ready: deploy to production
-./Quickstart prod
-```
-
-## Repository Layout
-
-```
-supervictor/
-  supervictor/
-    common/                        # Shared types & routes (no_std compatible)
-    edge/                          # ESP32-C3 firmware (no_std, Embassy async)
-      src/bin/embedded_main.rs     #   firmware entry point
-      src/bin/desktop_main.rs      #   desktop mTLS test client
-      src/app/                     #   application logic + async tasks
-      src/network/                 #   HTTP, TLS, DNS, TCP
-      src/models/                  #   uplink message types
-    endpoint/                      # Cloud API (axum + tokio)
-      src/handlers.rs              #   framework-agnostic pure functions
-      src/routes.rs                #   axum router
-      src/store/                   #   pluggable backends (SQLite, DynamoDB)
-      template.yaml                #   SAM/CloudFormation
-      docker-compose.yml           #   local dev with Caddy mTLS
-  certs/                           # generated certs (gitignored)
-  docs/                            # web interface
-```
-
-## API
+**API.** Device routes take the device's certificate; admin routes need a certificate with `OU=admin`.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
-| `GET` | `/` | Greeting + mTLS subject (if present) |
-| `POST` | `/` | Device uplink — `{ id, current, ...telemetry }` ([schema](docs/TELEMETRY.md)) |
-| `GET` | `/devices` | List all registered devices |
-| `POST` | `/devices` | Register a new device |
-| `GET` | `/devices/{id}` | Get device details |
-| `GET` | `/devices/{id}/uplinks` | Recent uplink history |
+| `POST` | `/` | Device uplink; identity bound to the client certificate |
+| `GET`/`POST` | `/devices` | List / register (`device_id`, `owner_id`, `subject_dn`, optional `power_threshold_ma`, `color`, `line_style`, `marker`) |
+| `GET` | `/devices/{id}`, `/devices/{id}/uplinks` | Device record, recent uplinks |
+| `PUT` | `/devices/{id}/threshold` | Set or clear the device's power threshold (admin) |
+| `PUT` | `/devices/{id}/style` | Replace how the dashboard draws the device: `color` (`s0`–`s7` or `#rrggbb`), `line_style`, `marker` (admin) |
+| `GET` | `/fleet`, `/fleet/summary` | Per-device health; aggregate counts for alerting (admin) |
+| `GET` | `/fleet/history?window=` | Bucketed telemetry plus status and power timelines, `1m`…`7d` (admin) |
+| `GET` | `/ui`, `/ui/history?device=…`, `/ui/devices/{id}` | Dashboard — history plots the devices you pick, each in its own colour / line / marker; `/ui/events` is the SSE stream (admin) |
 
-Handlers are pure functions with zero framework coupling — testable without HTTP, swappable across web frameworks.
+Handlers are pure functions with no framework types; `routes.rs` is the only axum-specific file.
 
-## Pipeline
+**Storage.** `DeviceStore` in `endpoint/src/store/` is the whole persistence contract: ten methods over devices and uplinks. SQLite is the default (additive migrations on open); DynamoDB is behind the `dynamo` feature with TTL expiry. A new backend is one `impl` block, and the shared contract suite runs against it.
 
-`./Quickstart` orchestrates the full lifecycle through progressive stages:
+**Endpoint configuration** is environment only: `PORT`, `TLS_CERT` / `TLS_KEY` / `TLS_CLIENT_CA` (all three → mTLS in-process; none → plain HTTP behind a proxy that terminates it), `STORE_BACKEND`, `SQLITE_DB_PATH`, `POWER_THRESHOLD_MA`, `REQUIRE_REGISTRATION`, `WATCHDOG_INTERVAL_SECS`, `UPLINK_TTL_DAYS`. A malformed value fails the boot rather than disabling a check.
 
-| Command | What it does |
-|---------|-------------|
-| `./Quickstart` | Lint + build (host, embedded, desktop) + full test suite |
-| `./Quickstart dev` | Endpoint tests + SAM local + integration tests |
-| `./Quickstart dev --serve` | Same, but keeps the local server running |
-| `./Quickstart edge` | Build + flash ESP32-C3 firmware |
-| `./Quickstart staging` | Dev gate + deploy dev stack + remote integration tests |
-| `./Quickstart prod` | Full pipeline + confirmation + production deployment |
-| `./Quickstart certs ca\|device\|server\|admin` | mTLS certificate lifecycle |
-| `./Quickstart ping` / `fleet` | mTLS health check / fleet status table |
-| `./Quickstart onboard` | End-to-end: cert + register + flash + verify |
+**Firmware.** `cargo run --bin supervictor-embedded --features <ethernet | board-poe2 | wifi,chip-esp32c3>` from `supervictor/edge/` builds and flashes. `HOST`, `DEVICE_NAME`, `CERT_PATH`, `CA_PATH`, `SSID`, `PASSWORD` and `TLS_VERSION` are baked in at compile time from `.env.dev`; the device certificate is embedded, so each board is its own identity. `SIM_PROFILE` (`extruder`, `press-brake`, `cnc`, `saw`, `oven`, `compressor`, `conveyor`, `molder`, `welder`, `pump`) makes a board or the desktop client act like that machine; `scripts/sim-fleet.sh up` runs all ten as containers against an endpoint.
 
-## Pluggable Storage
+## Deploy
 
-The `DeviceStore` trait defines the storage contract. Swap backends without touching a single handler:
-
-```rust
-pub trait DeviceStore: Send + Sync {
-    fn put_device(&self, record: DeviceRecord) -> Result<DeviceRecord, AppError>;
-    fn get_device(&self, device_id: &str) -> Result<Option<DeviceRecord>, AppError>;
-    fn list_devices(&self) -> Result<Vec<DeviceRecord>, AppError>;
-    fn put_uplink(&self, record: UplinkRecord) -> Result<(), AppError>;
-    fn get_uplinks(&self, device_id: &str, limit: usize) -> Result<Vec<UplinkRecord>, AppError>;
-}
-```
-
-**Built-in backends:** SQLite (default) and DynamoDB (feature-gated). Adding your own is one `impl` block.
-
-## Testing
-
-Every layer is testable offline with zero external dependencies:
-
-```bash
-# Edge — runs on host, not on hardware
-cargo test --lib --target aarch64-apple-darwin -p supervictor-edge
-
-# Endpoint — in-memory SQLite, no AWS
-cargo test --features sqlite -p supervictor-endpoint
-
-# CLI
-cargo test -p supervictor-cli
-```
-
-Device tests use mock TCP servers with canned responses. Endpoint tests use in-memory SQLite via `axum-test`. No Docker, no AWS credentials, no network.
-
-## Deployment
-
-The endpoint runs anywhere Rust compiles:
-
-- **Any Linux box (the default path):** one static binary that terminates mTLS itself, a systemd unit, SQLite. No Docker, no reverse proxy, no toolchain on the host. See below.
-- **Local dev:** `docker compose up` (Caddy mTLS reverse proxy + SQLite)
-- **AWS Lambda:** SAM template with Lambda Web Adapter, arm64/Graviton, DynamoDB; API Gateway terminates mTLS via its truststore, ACM certificates, Route53 DNS.
-- **Any container platform:** Multi-stage Dockerfile, 30MB final image on Debian slim
-
-### Single binary on a Linux server
-
-Releases ship static `aarch64` and `x86_64` musl builds with sha256 sums. On the target machine, as root:
+The endpoint is one static musl binary. On any Linux box, as root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JimothyJohn/supervictor/master/scripts/install-endpoint.sh \
-  | sudo bash -s -- v0.1.0            # downloads, verifies, installs binary + unit
+  | sudo bash -s -- v0.1.0                                # verifies the sha256, installs binary + unit
 sudo cp server.pem server.key ca.pem /etc/supervictor/   # from ./Quickstart certs
 sudo systemctl start supervictor-endpoint
 ```
 
-With `TLS_CERT`, `TLS_KEY` and `TLS_CLIENT_CA` set (the unit passes the PEMs in as systemd credentials), the binary listens on `:443`, requires a client certificate chaining to `ca.pem`, and takes each device's identity from the certificate it presented. Forwarded-subject headers are ignored in this mode. The unit runs as a dynamic user with `ProtectSystem=strict`, a syscall filter, and only `CAP_NET_BIND_SERVICE`; the database lives in `/var/lib/supervictor`. Re-run the installer with a newer tag to upgrade; `/etc/supervictor/env` is left alone.
+It listens on `:443`, requires a client certificate chaining to `ca.pem`, and takes each device's identity from the certificate it presented. The unit runs as a dynamic user with `ProtectSystem=strict`, a syscall filter, `MemoryDenyWriteExecute` and only `CAP_NET_BIND_SERVICE`; the PEMs are passed as systemd credentials and the database lives in `/var/lib/supervictor`. Re-run the installer with a newer tag to upgrade. `make deploy` stands up the staging box this way on a t4g.micro. The same binary runs on any Linux box, a Pi, a VPS or in a container (`endpoint/docker-compose.yml`, Caddy terminating mTLS in front), wherever you are; nothing in it depends on AWS.
 
-## Tech Stack
+## Security
 
-| Layer | Crates | Notes |
-|-------|--------|-------|
-| Device | esp-hal, embassy, esp-mbedtls, heapless | no_std, async, 144KB heap |
-| Endpoint | axum, tokio, rusqlite, aws-sdk-dynamodb | Feature-gated backends |
-| CLI | clap, ureq, toml | Sync HTTP, no runtime overhead |
-| Security | X.509 client certs, mTLS everywhere | Zero-trust by default |
+- Every connection is mutual TLS 1.2/1.3; every device, server and operator holds its own X.509 identity from the fleet CA. No passwords, tokens or shared keys anywhere in the system.
+- Identity comes from the verified peer certificate and nowhere else. Forwarded-subject headers are ignored when TLS is in-process, and an uplink whose certificate does not match the registered `subject_dn` is rejected.
+- Revoking a device is a status flip; its certificate stops working at the next request. Operator actions are audit-logged by certificate identity.
+- `REQUIRE_REGISTRATION=true` turns away any certificate that is not registered, active and bound to a device record, so an issued-but-unknown identity cannot post.
 
-## License
+## Testing and releases
 
-[MIT](LICENSE) — Nick Armenta, 2026
+CI runs format, clippy with warnings denied, the full workspace suite, the DynamoDB contract suite against DynamoDB Local, and compile checks for every embedded target on every pull request; green checks are the approval and merges into `dev` land themselves. Tests use real SQLite, real TLS with certificates from the repo's own generator, a simulated day per machine profile, and adversarial inputs on every route — no mocked databases or handshakes. A `v*` tag builds the static `aarch64` and `x86_64` binaries with checksums.

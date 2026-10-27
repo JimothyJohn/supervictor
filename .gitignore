@@ -261,6 +261,7 @@ $RECYCLE.BIN/
 # End of https://www.gitignore.io/api/osx,linux,python,windows,pycharm,visualstudiocode
 
 # My stuff
+TESTRIG.md
 .env*
 *venv*
 logs/
@@ -274,8 +275,13 @@ certs/
 .devcontainer/
 .ruff_cache/
 !certs/AmazonRootCA1.pem
-.claude
+# Session state (handoff, settings) stays local; the repo's skills ship.
+.claude/*
+!.claude/skills/
 scratch/
 
-# Pi cross-build output (scratch/12-pi-edge.sh)
+# Cross-build output (scripts/pi-edge.sh, scripts/deploy-staging-build.sh)
 target-pi/
+
+# static musl build of the endpoint for the staging box (docker, scratch/03)
+target-musl/

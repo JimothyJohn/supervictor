@@ -50,7 +50,7 @@ fn get_host_header_present() {
 #[test]
 fn get_user_agent_present() {
     let req = get_request("h", None).unwrap();
-    assert!(req.contains("User-Agent: Uplink/0.1.0 (Platform; ESP32-C3)\r\n"));
+    assert!(req.contains("User-Agent: Uplink/0.1.0 (Platform; ESP32)\r\n"));
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn post_contains_json_body() {
 #[test]
 fn post_body_after_double_crlf() {
     let req = post_request("h", &make_msg("x", 1), Some("/")).unwrap();
-    let parts: HString<512> = req;
+    let parts: HString<768> = req;
     let s = parts.as_str();
     let sep = s.find("\r\n\r\n").expect("missing header/body separator");
     let body = &s[sep + 4..];

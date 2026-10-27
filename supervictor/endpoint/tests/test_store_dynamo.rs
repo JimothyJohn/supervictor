@@ -180,6 +180,10 @@ fn device(id: &str, subject_dn: Option<&str>) -> DeviceRecord {
         subject_dn: subject_dn.map(str::to_string),
         status: "active".into(),
         created_at: "2099-07-01T00:00:00+00:00".into(),
+        power_threshold_ma: None,
+        min_on_s: None,
+        style: Default::default(),
+        desired_fw: None,
     }
 }
 
@@ -317,7 +321,193 @@ async fn set_device_status_updates_and_rejects_unknown() {
     fx.teardown().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_device_threshold_sets_clears_and_rejects_unknown() {
+    let fx = Fixture::new("threshold", TTL_DAYS).await;
+    fx.store
+        .put_device(device("dev-1", Some("CN=dev-1")))
+        .unwrap();
+    assert_eq!(
+        fx.store
+            .get_device("dev-1")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        None,
+        "no attribute = no override"
+    );
+
+    let updated = fx
+        .store
+        .set_device_threshold("dev-1", Some(12_000), None)
+        .unwrap();
+    assert_eq!(updated.power_threshold_ma, Some(12_000));
+    assert_eq!(updated.min_on_s, None);
+
+    // Every SET/REMOVE combination of the two parts, round-tripped.
+    for (t, m) in [
+        (Some(15_000), Some(120)),
+        (None, Some(60)),
+        (Some(15_000), None),
+        (None, None),
+        (Some(1), Some(u32::MAX)),
+    ] {
+        let updated = fx.store.set_device_threshold("dev-1", t, m).unwrap();
+        assert_eq!((updated.power_threshold_ma, updated.min_on_s), (t, m));
+        let read = fx.store.get_device("dev-1").unwrap().unwrap();
+        assert_eq!(
+            (read.power_threshold_ma, read.min_on_s),
+            (t, m),
+            "{t:?} {m:?}"
+        );
+    }
+    // Back to the state the rest of this test was written against.
+    let updated = fx
+        .store
+        .set_device_threshold("dev-1", Some(12_000), None)
+        .unwrap();
+    assert_eq!(
+        updated.subject_dn.as_deref(),
+        Some("CN=dev-1"),
+        "ReturnValues ALL_NEW must carry the untouched fields"
+    );
+    assert_eq!(
+        fx.store
+            .get_device("dev-1")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(12_000)
+    );
+    // Negative and huge values survive the N attribute round trip.
+    for t in [-1, i64::MAX, i64::MIN] {
+        let updated = fx
+            .store
+            .set_device_threshold("dev-1", Some(t), None)
+            .unwrap();
+        assert_eq!(updated.power_threshold_ma, Some(t), "{t}");
+    }
+
+    // Clearing REMOVEs the attribute rather than storing a null.
+    let cleared = fx.store.set_device_threshold("dev-1", None, None).unwrap();
+    assert_eq!(cleared.power_threshold_ma, None);
+    let listed = fx.store.list_devices().unwrap();
+    assert_eq!(listed[0].power_threshold_ma, None);
+
+    // A threshold given at registration is stored with the item.
+    let mut with = device("dev-2", None);
+    with.power_threshold_ma = Some(5_000);
+    fx.store.put_device(with).unwrap();
+    assert_eq!(
+        fx.store
+            .get_device("dev-2")
+            .unwrap()
+            .unwrap()
+            .power_threshold_ma,
+        Some(5_000)
+    );
+
+    let err = fx
+        .store
+        .set_device_threshold("ghost", Some(1), None)
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::DeviceNotFound { .. }),
+        "got {err:?}"
+    );
+    assert!(
+        fx.store.get_device("ghost").unwrap().is_none(),
+        "a failed conditional update must not upsert"
+    );
+    fx.teardown().await;
+}
+
 // ── Uplinks ──────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_device_style_sets_clears_and_rejects_unknown() {
+    use supervictor_common::models::{DeviceStyle, LineStyle, Marker};
+    let fx = Fixture::new("style", TTL_DAYS).await;
+    let mut styled = device("dev-1", Some("CN=dev-1"));
+    styled.style = DeviceStyle {
+        color: Some("#ff8800".into()),
+        line_style: Some(LineStyle::Dashed),
+        marker: None,
+    };
+    fx.store.put_device(styled.clone()).unwrap();
+    fx.store.put_device(device("dev-2", None)).unwrap();
+    assert_eq!(
+        fx.store.get_device("dev-1").unwrap().unwrap().style,
+        styled.style,
+        "style given at registration is stored with the item"
+    );
+    assert!(fx
+        .store
+        .get_device("dev-2")
+        .unwrap()
+        .unwrap()
+        .style
+        .is_default());
+
+    // SET the present parts, REMOVE the absent ones, in one update.
+    let updated = fx
+        .store
+        .set_device_style(
+            "dev-1",
+            DeviceStyle {
+                color: None,
+                line_style: Some(LineStyle::Dotted),
+                marker: Some(Marker::Diamond),
+            },
+        )
+        .unwrap();
+    assert_eq!(updated.style.color, None, "REMOVEd");
+    assert_eq!(updated.style.line_style, Some(LineStyle::Dotted));
+    assert_eq!(updated.style.marker, Some(Marker::Diamond));
+    assert_eq!(
+        updated.subject_dn.as_deref(),
+        Some("CN=dev-1"),
+        "ALL_NEW carries the untouched fields"
+    );
+    let listed = fx.store.list_devices().unwrap();
+    let dev1 = listed.iter().find(|d| d.device_id == "dev-1").unwrap();
+    assert_eq!(dev1.style, updated.style);
+
+    // All-absent is a pure REMOVE expression.
+    let cleared = fx
+        .store
+        .set_device_style("dev-1", DeviceStyle::default())
+        .unwrap();
+    assert!(cleared.style.is_default());
+    // All-present is a pure SET expression.
+    let full = fx
+        .store
+        .set_device_style(
+            "dev-1",
+            DeviceStyle {
+                color: Some("s7".into()),
+                line_style: Some(LineStyle::DashDot),
+                marker: Some(Marker::Triangle),
+            },
+        )
+        .unwrap();
+    assert_eq!(full.style.color.as_deref(), Some("s7"));
+    assert_eq!(full.style.marker, Some(Marker::Triangle));
+
+    let err = fx
+        .store
+        .set_device_style("ghost", DeviceStyle::default())
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::DeviceNotFound { .. }),
+        "got {err:?}"
+    );
+    assert!(
+        fx.store.get_device("ghost").unwrap().is_none(),
+        "a failed conditional update must not upsert"
+    );
+    fx.teardown().await;
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn uplinks_are_newest_first_with_limit() {
@@ -720,4 +910,59 @@ async fn device_uplinks_since_is_a_sort_key_range() {
     }
 
     fx.teardown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_desired_fw_sets_clears_and_rejects_unknown() {
+    let fx = Fixture::new("desired-fw", TTL_DAYS).await;
+    fx.store
+        .put_device(device("dev-1", Some("CN=dev-1")))
+        .unwrap();
+    assert_eq!(
+        fx.store.get_device("dev-1").unwrap().unwrap().desired_fw,
+        None,
+        "no attribute = no target"
+    );
+
+    let updated = fx.store.set_desired_fw("dev-1", Some("0.2.0")).unwrap();
+    assert_eq!(updated.desired_fw.as_deref(), Some("0.2.0"));
+    assert_eq!(
+        updated.subject_dn.as_deref(),
+        Some("CN=dev-1"),
+        "ReturnValues ALL_NEW must carry the untouched fields"
+    );
+    assert_eq!(
+        fx.store
+            .get_device("dev-1")
+            .unwrap()
+            .unwrap()
+            .desired_fw
+            .as_deref(),
+        Some("0.2.0")
+    );
+
+    // Clearing REMOVEs the attribute rather than storing an empty string.
+    let cleared = fx.store.set_desired_fw("dev-1", None).unwrap();
+    assert_eq!(cleared.desired_fw, None);
+    assert_eq!(fx.store.list_devices().unwrap()[0].desired_fw, None);
+
+    // Unknown device: the conditional write fails closed.
+    assert!(matches!(
+        fx.store.set_desired_fw("ghost", Some("0.2.0")),
+        Err(AppError::DeviceNotFound { .. })
+    ));
+
+    // A target given at registration is stored with the item.
+    let mut with = device("dev-2", None);
+    with.desired_fw = Some("0.3.0".into());
+    fx.store.put_device(with).unwrap();
+    assert_eq!(
+        fx.store
+            .get_device("dev-2")
+            .unwrap()
+            .unwrap()
+            .desired_fw
+            .as_deref(),
+        Some("0.3.0")
+    );
 }

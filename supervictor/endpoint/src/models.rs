@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Re-exported wire types shared between endpoint and CLI.
-pub use supervictor_common::models::{DeviceResponse, RegisterDeviceRequest, UplinkMessage};
+pub use supervictor_common::models::{
+    DeviceResponse, DeviceStyle, RegisterDeviceRequest, UplinkMessage,
+};
 
 // --- Domain Records (storage layer) ---
 
@@ -19,6 +21,37 @@ pub struct DeviceRecord {
     pub status: String,
     /// ISO 8601 timestamp of device registration.
     pub created_at: String,
+    /// Per-device power threshold (mA) overriding the fleet default;
+    /// `None` means use `POWER_THRESHOLD_MA`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_threshold_ma: Option<i64>,
+    /// Seconds the current must hold at or above the threshold before the
+    /// device is `on` ("producing"); `None`/0 judges the last reading alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_on_s: Option<u32>,
+    /// How the device is drawn on the charts; unset parts fall back to
+    /// defaults (`crate::style::resolve`).
+    #[serde(default, skip_serializing_if = "DeviceStyle::is_default")]
+    pub style: DeviceStyle,
+    /// Firmware version the device should run next (OTA target); `None`
+    /// means "whatever it runs". Set by `PUT /devices/{id}/desired_fw`
+    /// and echoed to the device in every uplink response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired_fw: Option<String>,
+}
+
+impl DeviceRecord {
+    /// The threshold this device is judged against: its own, else the fleet's.
+    pub fn effective_threshold_ma(&self, fleet_threshold_ma: i64) -> i64 {
+        self.power_threshold_ma.unwrap_or(fleet_threshold_ma)
+    }
+
+    /// Minimum on-time in seconds (0 when unset), capped at
+    /// [`crate::fleet::MAX_MIN_ON_S`] so a stored value from a newer binary
+    /// can never make a snapshot read unbounded history.
+    pub fn effective_min_on_s(&self) -> u32 {
+        self.min_on_s.unwrap_or(0).min(crate::fleet::MAX_MIN_ON_S)
+    }
 }
 
 /// Persistent uplink message record stored in the database.
@@ -56,6 +89,11 @@ pub struct UplinkResponse {
     /// mTLS client subject DN if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_subject: Option<String>,
+    /// Firmware version the device should run next, when an operator has
+    /// set one (OTA control channel): the device compares it with what it
+    /// runs and pulls the image if newer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desired_fw: Option<String>,
 }
 
 /// JSON error response body returned on request failures.
@@ -77,6 +115,12 @@ impl From<DeviceRecord> for DeviceResponse {
             subject_dn: r.subject_dn,
             status: r.status,
             created_at: r.created_at,
+            power_threshold_ma: r.power_threshold_ma,
+            min_on_s: r.min_on_s,
+            color: r.style.color,
+            line_style: r.style.line_style,
+            marker: r.style.marker,
+            desired_fw: r.desired_fw,
         }
     }
 }

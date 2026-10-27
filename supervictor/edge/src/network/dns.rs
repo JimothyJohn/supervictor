@@ -1,7 +1,8 @@
-//! DNS hijack server — responds to all queries with the gateway IP.
+//! DNS response builder — answers any query with the gateway IP.
 //!
-//! Pure functions compile on all targets.
-//! The async `dns_hijack` task is gated behind `#[cfg(feature = "portal")]`.
+//! Pure functions only, compiled and tested on every target. The UDP
+//! hijack task that served captive-portal probes (feature `portal`) was
+//! dropped 2026-10-27 with the portal; the builder stays for its return.
 
 use heapless::Vec as HVec;
 
@@ -78,36 +79,3 @@ pub fn build_dns_response(query: &[u8]) -> Option<HVec<u8, 512>> {
 
     Some(resp)
 }
-
-/// Embassy task that listens on UDP port 53 and resolves all queries to the gateway IP.
-#[cfg(feature = "portal")]
-#[embassy_executor::task]
-pub async fn dns_hijack(stack: embassy_net::Stack<'static>) {
-    use embassy_net::udp::{PacketMetadata, UdpSocket};
-    use esp_println::println;
-
-    let mut rx_meta = [PacketMetadata::EMPTY; 4];
-    let mut tx_meta = [PacketMetadata::EMPTY; 4];
-    let mut rx_buf = [0u8; 512];
-    let mut tx_buf = [0u8; 512];
-
-    let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
-    socket.bind(53).unwrap();
-    println!("DNS hijack server started on port 53");
-
-    let mut query_buf = [0u8; 512];
-    loop {
-        let (n, remote) = match socket.recv_from(&mut query_buf).await {
-            Ok(result) => result,
-            Err(_) => continue,
-        };
-
-        if let Some(response) = build_dns_response(&query_buf[..n]) {
-            let _ = socket.send_to(&response, remote).await;
-        }
-    }
-}
-
-#[cfg(test)]
-#[path = "dns_tests.rs"]
-mod tests;
