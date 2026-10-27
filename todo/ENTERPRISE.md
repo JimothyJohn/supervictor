@@ -2,6 +2,12 @@
 
 Adds device registry, data persistence, usage-based billing via Stripe.
 
+> Written against the serverless deployment, which was retired 2026-10-27
+> (`ROADMAP.md`, "Where we are"). The product scope below still stands; the
+> infrastructure sections (API Gateway, Lambda, DynamoDB tables, `qs
+> dev/staging/prod`) are redone on the single-binary path when this track
+> opens. Nothing here is scheduled.
+
 ## Architecture
 
 ```

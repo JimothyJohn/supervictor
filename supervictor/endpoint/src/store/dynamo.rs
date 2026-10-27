@@ -294,7 +294,7 @@ impl DeviceStore for DynamoDeviceStore {
 
     /// One query per device (`limit 1`, newest first). Fine at current fleet
     /// sizes; at 100+ devices pre-aggregate a latest-uplink item instead
-    /// (TODO.md / FRONTEND plan open question).
+    /// (ROADMAP.md, endpoint track, when a fleet that size exists).
     fn set_device_threshold(
         &self,
         device_id: &str,

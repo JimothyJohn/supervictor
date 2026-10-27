@@ -1,5 +1,5 @@
 //! ESP-NOW beside the wired uplink — the radio + EMAC coexistence spike
-//! (TODO.md P2, go/no-go for the mesh).
+//! (GO, 2026-10-25) and the module the mesh in docs/MESH.md builds on.
 //!
 //! The WiFi radio comes up in station mode without joining any network and
 //! ESP-NOW runs on it: a broadcast beacon every

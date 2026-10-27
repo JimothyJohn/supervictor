@@ -70,7 +70,8 @@ ethernet = ["embedded", "ph-esp32-mac", "embassy-net-driver", "esp32", "chip-esp
 # out GPIO17); `board-poe2` is the ESP32-POE2, whose WROVER-E keeps 16/17 for
 # PSRAM and takes the clock out of GPIO0 (see src/board/poe2.rs).
 board-poe2 = ["ethernet"]
-# Coexistence spike (TODO.md P2): ESP-NOW beacons on the WiFi radio next to
+# ESP-NOW beside the wired uplink (the mesh's first module, docs/MESH.md):
+# beacons on the WiFi radio next to
 # the wired EMAC uplink. Stacks on `ethernet` (or `board-poe2`); the radio
 # comes up in station mode without joining a network, so no SSID is needed.
 espnow = ["wifi", "esp-radio/esp-now"]

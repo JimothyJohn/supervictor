@@ -5,10 +5,11 @@
 #
 # Needs a terminal: it prompts, and espflash wants the serial port.
 #
-# Why USB at all: the classic ESP32 ROM bootloader only speaks UART, the Olimex
-# boards ship with nothing that listens on the network, and the firmware has no
-# OTA path yet (TODO.md P2). PoE powers a factory board; it cannot flash it.
-# Each board is flashed once over USB, then racked.
+# Why USB at all: the classic ESP32 ROM bootloader only speaks UART and the
+# Olimex boards ship with nothing that listens on the network. PoE powers a
+# factory board; it cannot flash it. Each board is flashed once over USB onto
+# the A/B partition table, then racked; from then on scripts/ota-push.sh is
+# the update path and this script is recovery only.
 #
 # Per board the loop does: detect the new serial port -> espflash board-info
 # (chip + MAC) -> look the MAC up in rack-inventory.tsv, or ask the board type
@@ -205,7 +206,7 @@ MENU
         2) board=ESP32-POE-ISO; features=ethernet;   prefix=poe-iso-rack
            mod="$(ask 'module label on the metal can — WROOM or WROVER? [wroom/wrover]')"
            case "$mod" in
-           [wW][rR][oO][vV]*) note "a WROVER POE-ISO keeps GPIO16/17 for PSRAM like the POE2 → the RMII clock must move to GPIO0; the ethernet feature reads PHY id 0xffffffff on it. Needs its own board feature (TODO.md open question). Skipping."; continue ;;
+           [wW][rR][oO][vV]*) note "a WROVER POE-ISO keeps GPIO16/17 for PSRAM like the POE2 → the RMII clock must move to GPIO0; the ethernet feature reads PHY id 0xffffffff on it. Needs its own board feature (none on the rack: every board is WROOM, 2026-10-27). Skipping."; continue ;;
            esac ;;
         3) note "plain ESP32-POE: pin map not verified against poe_iso.rs — park it and check the schematic. Skipping."; continue ;;
         *) continue ;;

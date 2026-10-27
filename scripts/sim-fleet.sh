@@ -111,12 +111,14 @@ register() { # <device>
     esac
 }
 
-# Set the per-device threshold on an already-registered device (admin cert).
+# Set the per-device threshold and minimum on-time on an already-registered
+# device (admin cert). The PUT body replaces both parts, so both are sent.
 # Idempotent; skipped with a note when no admin cert is available.
 apply_threshold() { # <device>
-    local threshold admin_dir="$REPO_ROOT/certs/admins/${FLEET_ADMIN:-nick}" status
+    local threshold min_on admin_dir="$REPO_ROOT/certs/admins/${FLEET_ADMIN:-nick}" status
     threshold="$(threshold_for "$1")"
-    [[ -n "$threshold" ]] || return 0
+    min_on="$(min_on_for "$1")"
+    [[ -n "$threshold" || -n "$min_on" ]] || return 0
     if [[ ! -f "$admin_dir/admin.pem" ]]; then
         log "$1: no admin cert at $admin_dir; threshold left as is"
         return 0
@@ -124,9 +126,9 @@ apply_threshold() { # <device>
     status="$(curl -sS -o /dev/null -w '%{http_code}' "${CA_FLAG[@]}" \
         --cert "$admin_dir/admin.pem" --key "$admin_dir/admin.key" \
         -X PUT "https://$SIM_HOST/devices/$1/threshold" -H 'content-type: application/json' \
-        -d "{\"power_threshold_ma\":$threshold}")"
+        -d "{\"power_threshold_ma\":${threshold:-null},\"min_on_s\":${min_on:-null}}")"
     case "$status" in
-    200) log "$1: power threshold $threshold mA" ;;
+    200) log "$1: power threshold ${threshold:-default} mA${min_on:+, producing after $min_on s}" ;;
     404|405) log "$1: endpoint has no threshold route yet (HTTP $status); deploy the endpoint, then re-run" ;;
     *) fail "$1: threshold update returned HTTP $status" ;;
     esac
