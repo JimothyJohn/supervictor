@@ -273,6 +273,7 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       difficulty: med
       id: lambda-mtls-identity
       asked: 2026-10-24
+      answer: Why are we still using AWS Lambda when we can run this on our own naked infra anywhere?
 - [ ] **Telemetry simulator behind a cargo feature once real sensors land?** — `sim.rs` + the machine profiles in `profile.rs` are compiled in unconditionally and fill temp/humidity/rssi with plausible fakes. Move behind `sim` (off by default) so a production board can never report invented readings, or keep as the fallback for fields a board lacks? I'd put it behind a feature once the first real sensor ships (P2 item).
       needs: yes/no
       result: a production build cannot invent readings
@@ -281,6 +282,7 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       difficulty: low
       id: sim-behind-feature
       asked: 2026-10-24
+      answer: feature off by default
 - [ ] **Is -20 °C a low enough temperature floor?** — 8-bit register levels (PR 85) fix each register's full scale in `supervictor/common/src/levels.rs`: temp -20..60 °C, humidity 0..100 %RH, rssi -100..-20 dBm, heap 0..512 KiB (1..=255 = range, 0 = no reading; 0.39 %/step). Current was answered 2026-10-25 (20 A, the SEN0211 probe range).
       needs: a floor in °C
       result: the temp register scale is final before boards ship
@@ -289,6 +291,7 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       difficulty: low
       id: temp-floor
       asked: 2026-10-24
+      answer: -40
 - [ ] **Heated machines: does `on` mean producing or powered?** — "producing" needs a min-on-time or a second threshold per device; "powered" is one bar, as shipped. Extruder and molder are the only sim profiles where it matters (P3 item).
       needs: a definition
       result: the power state matches what an operator means by "on"
@@ -297,6 +300,7 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       difficulty: med
       id: heated-on-meaning
       asked: 2026-10-25
+      answer: producing (min-on-time)
 - [ ] **Mesh identity model: gateway vouches for its ESP-NOW children?** — my pick: the PoE gateway's cert vouches for its ESP-NOW children (device record gains `gateway_id`), link encryption via a shared ESP-NOW PMK baked at flash time like SSID. Bench-grade, not per-leaf certs. The coexistence spike is a GO (PR 103); the mesh protocol starts on this answer.
       needs: yes/no
       result: the ESP-NOW protocol (gateway/leaf roles, PMK) gets built on the spike module
@@ -306,6 +310,7 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       id: mesh-identity-model
       asked: 2026-10-25
       by: coexistence-spike session (feat/espnow-coexist)
+      answer: yes, gateway vouches + shared PMK. I would love for the moth module to be connected to the network with the rest of them simply hunting for signal. The idea would be they have external antennas which can be stored in the open space, not in an enclosure.
 - [ ] **Board inventory for the rack** — how many ESP32-POE2 vs ESP32-POE-ISO, and are any POE-ISO the WROVER variant (PSRAM → RMII clock on GPIO0 like the POE2; needs its own feature or a PSRAM flag)? rack-flash.sh refuses a WROVER POE-ISO until this is known.
       needs: counts, and WROVER yes/no
       result: every rack board has a verified board feature
@@ -314,6 +319,7 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
       difficulty: low
       id: rack-board-inventory
       asked: 2026-10-25
+      answer: They're all WROOM but I like being prepared for other possible platforms with some kind of hardware abstraction-layer that's application-specific as crazy as that may be.
 - [x] **Which local-preview path failed on the new phone UI?** — PR 96 (phone glance layer) is on dev. The mobile-UI session left a Quickstart stack running in `../supervictor-mobile` (endpoint :8443 with a multi-name server cert, extruder sim, `.logs/`), a demo http server on :8000 serving `scratch/demo` + `supervictor-ca.pem`, and `scratch/01-trust-fleet-ca.sh` for the Studio's keychain. Nick said "not working" without saying which step: Studio browser (CA trust not yet run; server cert verified by curl on every address), the phone's CA profile / full-trust toggle, the phone identity (.p12 from 2026-10-24), or the phone being on 10.0.0.x rather than 192.168.3.x. Full state in that worktree's `.claude/handoff.md`.
       needs: the exact symptom (which URL, which device, what error text)
       result: a working preview path written into scripts/ or the README, and the stack torn down
