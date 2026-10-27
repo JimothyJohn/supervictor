@@ -70,8 +70,8 @@ impl PageMode {
 /// Static SSE hookup. One `EventSource` per page: it keeps the header dot
 /// honest, patches the fleet table's row for the device that just pinged,
 /// and re-dispatches every uplink as a `sv:uplink` DOM event for whatever
-/// else is listening (the live strips). Where SSE doesn't survive the proxy
-/// (Lambda / API GW buffer responses) a page that declares `data-poll` on
+/// else is listening (the live strips). Where SSE doesn't survive a
+/// buffering proxy, a page that declares `data-poll` on
 /// `#live` falls back to polling that snapshot URL (`sv:snapshot`); other
 /// pages fall back to a periodic reload.
 /// Public so the static-demo renderer (`examples/render_demo.rs`) can swap it

@@ -71,7 +71,7 @@ Pick one path from `references/server.md` and follow its section:
 | **B. bare binary** | macOS, WSL, a dev box, a Linux without systemd, "just run it" | `supervictor-endpoint` built from source, configured by env vars, run under whatever supervisor they have |
 | **C. container + Caddy** | they already run Docker Compose | the endpoint on plain HTTP behind Caddy terminating mTLS |
 | **D. their own reverse proxy** | nginx/Traefik/Caddy already in front | the endpoint on plain HTTP; the proxy verifies client certs and forwards the subject header |
-| **E. AWS Lambda** | they are an AWS shop | pointer only — the SAM template exists; identity propagation has an open issue (TODO.md) |
+| **E. AWS EC2 box** | they are an AWS shop | path A on one instance from `endpoint/template-staging.yaml` (bootstrap installs the release) |
 
 Whichever path: **prove it from a device's point of view** before touching
 hardware. The bundled script does the whole checklist (DNS, port, chain,

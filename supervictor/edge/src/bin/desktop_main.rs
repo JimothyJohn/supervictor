@@ -9,8 +9,8 @@
 //!   HOST        - Target host for HTTP requests (e.g. supervictor.advin.io)
 //!   PORT        - TLS port on that host (default 443; a local Quickstart
 //!                 endpoint listens on 8443)
-//!   API_PATH    - Request path: "/" (custom domain, default) or "/<stage>"
-//!                 against a raw execute-api URL
+//!   API_PATH    - Request path: "/" (default), or a prefix when something in
+//!                 front mounts the endpoint under one
 //!   DEVICE_ID   - Device id to post as (default "1234567890"); should match
 //!                 the client cert's CN once the device is registered
 //!   INTERVAL_S  - Seconds between uplinks (default 5; jittered ±20 %)
@@ -79,9 +79,9 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
     // SNI server name must match the server's certificate
     let server_name = ServerName::try_from(base_host.as_str())?.to_owned();
 
-    // API_PATH: "/" against a custom domain (base-path mapping supplies the
-    // stage), "/<stage>" against a raw execute-api URL. Runtime here; the
-    // embedded build bakes it in at compile time.
+    // API_PATH: "/" for the endpoint itself, a prefix when something in front
+    // mounts it under one. Runtime here; the embedded build bakes it in at
+    // compile time.
     let api_path = env_or("API_PATH", "/");
     let device_id: HString<64> = env_or("DEVICE_ID", "1234567890")
         .as_str()

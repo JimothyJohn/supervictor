@@ -25,10 +25,9 @@ use esp_println::println;
 use esp_radio::wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState};
 use mbedtls_rs::{Session, SessionConfig, Tls};
 
-/// Uplink path from API_PATH at compile time: "/" against a custom domain
-/// (base-path mapping supplies the stage), "/<stage>" against a raw
-/// execute-api URL. Must start with '/'. The OTA routes hang off the same
-/// prefix.
+/// Uplink path from API_PATH at compile time: "/" for the endpoint itself,
+/// a prefix when something in front mounts it under one. Must start with
+/// '/'. The OTA routes hang off the same prefix.
 pub const API_PATH: &str = env!("API_PATH");
 const _: () = assert!(!API_PATH.is_empty() && API_PATH.as_bytes()[0] == b'/');
 

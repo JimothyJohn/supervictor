@@ -631,7 +631,10 @@ cd supervictor</pre>
 <section>
   <h2>Infrastructure</h2>
   <p style="color:var(--muted); margin-bottom:16px; font-size:0.9rem;">
-    Defined in <code>endpoint/template.yaml</code> using AWS SAM. Prod-only resources are gated behind a <code>Condition: IsProd</code> flag.
+    One static binary, a systemd unit, three PEMs and a SQLite file on any Linux box
+    (<code>scripts/install-endpoint.sh</code>, <code>endpoint/deploy/</code>). The reference
+    box is one EC2 instance from <code>endpoint/template-staging.yaml</code>; nothing in the
+    service depends on AWS.
   </p>
   <div style="overflow-x:auto">
     <table class="pipeline">
@@ -639,12 +642,11 @@ cd supervictor</pre>
         <tr><th>Resource</th><th>Description</th><th>Scope</th></tr>
       </thead>
       <tbody>
-        <tr><td>API Gateway</td><td>Regional REST API with CORS</td><td>All</td></tr>
-        <tr><td>Lambda</td><td>Rust binary via Lambda Web Adapter, arm64</td><td>All</td></tr>
-        <tr><td>ACM Certificate</td><td>DNS-validated TLS for custom domain</td><td>Prod</td></tr>
-        <tr><td>Custom Domain</td><td>mTLS enforcement via S3 truststore</td><td>Prod</td></tr>
-        <tr><td>Route53</td><td>A-record alias to API Gateway</td><td>Prod</td></tr>
-        <tr><td>Application Insights</td><td>CloudWatch monitoring + X-Ray tracing</td><td>All</td></tr>
+        <tr><td>EC2 instance</td><td>t4g.micro, Amazon Linux 2023, bootstraps the release install</td><td>Staging</td></tr>
+        <tr><td>Elastic IP + Route53</td><td>A record for the box's hostname</td><td>Staging</td></tr>
+        <tr><td>Security group</td><td>443 only; SSM for a shell, no SSH</td><td>Staging</td></tr>
+        <tr><td>Let's Encrypt</td><td>Public server certificate via DNS-01 (certbot-dns-route53); devices pin the fleet CA + ISRG Root X1</td><td>Staging</td></tr>
+        <tr><td>GitHub release</td><td>Static musl tarballs (aarch64, x86_64) the installer verifies by sha256</td><td>All</td></tr>
       </tbody>
     </table>
   </div>

@@ -8,8 +8,8 @@ default = ["sqlite", "ui", "tls"]
 sqlite = ["rusqlite"]
 dynamo = ["aws-sdk-dynamodb", "aws-config"]
 # In-binary mTLS termination (TLS_CERT / TLS_KEY / TLS_CLIENT_CA): the
-# single-binary deployment path. Off for the Lambda image is harmless but
-# unnecessary — API Gateway terminates there.
+# single-binary deployment path. Off only behind a reverse proxy that
+# terminates mTLS itself (docker-compose.yml + Caddy).
 tls = ["rustls", "tokio-rustls", "rustls-pki-types", "x509-parser"]
 # Server-rendered fleet dashboard (docs plan: maud templates + SSE).
 # Disable for API-only deployments: --no-default-features --features sqlite

@@ -87,7 +87,7 @@ sudo cp server.pem server.key ca.pem /etc/supervictor/   # from ./Quickstart cer
 sudo systemctl start supervictor-endpoint
 ```
 
-It listens on `:443`, requires a client certificate chaining to `ca.pem`, and takes each device's identity from the certificate it presented. The unit runs as a dynamic user with `ProtectSystem=strict`, a syscall filter, `MemoryDenyWriteExecute` and only `CAP_NET_BIND_SERVICE`; the PEMs are passed as systemd credentials and the database lives in `/var/lib/supervictor`. Re-run the installer with a newer tag to upgrade. `make deploy` stands up the staging box this way on a t4g.micro. The same binary also runs as a Lambda behind API Gateway mTLS (`endpoint/template.yaml`) or in a container, if that is where you are.
+It listens on `:443`, requires a client certificate chaining to `ca.pem`, and takes each device's identity from the certificate it presented. The unit runs as a dynamic user with `ProtectSystem=strict`, a syscall filter, `MemoryDenyWriteExecute` and only `CAP_NET_BIND_SERVICE`; the PEMs are passed as systemd credentials and the database lives in `/var/lib/supervictor`. Re-run the installer with a newer tag to upgrade. `make deploy` stands up the staging box this way on a t4g.micro. The same binary runs on any Linux box, a Pi, a VPS or in a container (`endpoint/docker-compose.yml`, Caddy terminating mTLS in front), wherever you are; nothing in it depends on AWS.
 
 ## Security
 

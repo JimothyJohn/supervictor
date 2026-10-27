@@ -6,12 +6,14 @@
 # Sets REPO_ROOT, REGION (exported as AWS_DEFAULT_REGION), ADMIN with its
 # ADMIN_PEM / ADMIN_KEY, and the staging stack/host names. Defines log, fail,
 # need, need_admin, stack_resource, stack_output, staging_instance,
-# lambda_function, ssm_run and admin_curl. Turns on `set -euo pipefail`.
+# ssm_run and admin_curl. Turns on `set -euo pipefail`.
 #
 #   ADMIN          admin certificate name under certs/admins/ (default: $USER)
 #   AWS_REGION     region for every aws call (default: us-east-1)
 #   STAGING_STACK  CloudFormation stack of the staging box (default: supervictor-endpoint-staging)
 #   STAGING_HOST   its hostname (default: staging.supervictor.advin.io)
+#   PROD_HOST      the production box's hostname (default: supervictor.advin.io;
+#                  no box answers there yet — the Lambda stage was retired 2026-10-27)
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse --show-toplevel)}"
@@ -22,6 +24,7 @@ ADMIN_PEM="$REPO_ROOT/certs/admins/$ADMIN/admin.pem"
 ADMIN_KEY="$REPO_ROOT/certs/admins/$ADMIN/admin.key"
 STAGING_STACK="${STAGING_STACK:-supervictor-endpoint-staging}"
 STAGING_HOST="${STAGING_HOST:-staging.supervictor.advin.io}"
+PROD_HOST="${PROD_HOST:-supervictor.advin.io}"
 # Fleet CA + ISRG Root X1: a client that trusts this bundle survives the box
 # switching between a fleet-signed and a Let's Encrypt server certificate.
 STAGING_BUNDLE="$REPO_ROOT/certs/ca/staging-bundle.pem"
@@ -46,7 +49,14 @@ stack_output() {
         --query "Stacks[0].Outputs[?OutputKey=='$2'].OutputValue" --output text | sed 's:/*$::'
 }
 staging_instance() { stack_resource "$STAGING_STACK" Instance; }
-lambda_function()  { stack_resource "supervictor-$1" EndpointFunction; }   # <dev|prod>
+# target_host <staging|prod> -> hostname of that endpoint
+target_host() {
+    case "$1" in
+    staging) echo "$STAGING_HOST" ;;
+    prod) echo "$PROD_HOST" ;;
+    *) fail "target must be staging or prod" ;;
+    esac
+}
 
 # ssm_run <instance-id> <comment> <timeout-seconds> < script
 # Runs the script on stdin as root on the instance (AWS-RunShellScript), waits

@@ -190,7 +190,6 @@ rustls-pemfile = { version = "2.2.0", optional = true }
 [dev-dependencies]
 # Fault-schedule property tests for the OTA installer (src/ota/install_tests.rs).
 proptest = { version = "1.12", default-features = false, features = ["std"] }
-reqwest = { version = "0.12.15", features = ["json", "rustls-tls"] }
 tokio = { version = "1.0", features = ["full"] }
 rustls = "0.23.26"
 tokio-rustls = "0.26.2"

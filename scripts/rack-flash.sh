@@ -30,7 +30,7 @@
 . "$(dirname "$0")/_lib.sh"
 LOG_TAG=rack
 
-TARGET_ENV="${1:-staging}"
+TARGET_ENV="${1:-staging}"   # staging | prod
 FW_ROOT="${FW_ROOT:-$REPO_ROOT}"
 INVENTORY="${INVENTORY:-$REPO_ROOT/certs/rack-inventory.tsv}"
 LOG="$REPO_ROOT/.logs/rack-flash.log"
@@ -44,12 +44,7 @@ ask()   { local __v; read -r -p "$1 " __v </dev/tty; printf '%s' "$__v"; }
 pause() { read -r -p "$1 [Enter] " _ </dev/tty; }
 die()   { printf '\033[31m[rack] %s\033[0m\n' "$*" >&2; exit 1; }
 
-case "$TARGET_ENV" in
-staging) HOST="$STAGING_HOST";           CA="$STAGING_BUNDLE";                     API_PATH=/ ;;
-dev)     HOST=dev.supervictor.advin.io;  CA="$REPO_ROOT/certs/ca/AmazonRootCA1.pem"; API_PATH=/ ;;
-prod)    HOST=supervictor.advin.io;      CA="$REPO_ROOT/certs/ca/AmazonRootCA1.pem"; API_PATH=/ ;;
-*) die "target must be staging, dev or prod" ;;
-esac
+HOST="$(target_host "$TARGET_ENV")"; CA="$STAGING_BUNDLE"; API_PATH=/
 
 # ── preflight ───────────────────────────────────────────────────────────────
 say "preflight ($TARGET_ENV → $HOST)"
@@ -66,15 +61,8 @@ grep -q 'board-poe2' "$FW_ROOT/supervictor/edge/Cargo.toml" || die "$FW_ROOT has
 need_admin
 mkdir -p "$(dirname "$LOG")"
 note "firmware checkout: $FW_ROOT @ $(git -C "$FW_ROOT" log --oneline -1) [$(git -C "$FW_ROOT" rev-parse --abbrev-ref HEAD)]"
-case "$TARGET_ENV" in
-staging)
-    admin_curl -f -m 15 --cacert "$CA" "https://$HOST/fleet" >/dev/null || die "staging fleet API unreachable with the admin cert"
-    note "staging reachable" ;;
-*)
-    need aws
-    LOG_GROUP="/aws/lambda/$(lambda_function "$TARGET_ENV")"
-    note "WARNING: $TARGET_ENV runs behind API Gateway; the Lambda sees every device as anonymous and 403s bound boards (TODO.md open question). Registration may work, uplinks will not until the identity path is fixed." ;;
-esac
+admin_curl -f -m 15 --cacert "$CA" "https://$HOST/fleet" >/dev/null || die "$TARGET_ENV fleet API unreachable with the admin cert"
+note "$TARGET_ENV reachable"
 [ -f "$INVENTORY" ] || printf 'device_id\tboard\tmac\tfeatures\tswitch_port\ttarget\tflashed_at\tuplinked_at\n' > "$INVENTORY"
 
 # Warm the build cache for both wired feature sets while boards get unboxed.
@@ -173,13 +161,9 @@ poll_uplink() { # <device> <flashed_at> -> 0 when seen
     note "waiting up to 3 min for $d to uplink to $TARGET_ENV (newer than $t)"
     for i in $(seq 1 18); do
         sleep 10
-        case "$TARGET_ENV" in
-        staging)
-            if admin_curl -f -m 15 --cacert "$CA" "https://$HOST/fleet" \
+        if admin_curl -f -m 15 --cacert "$CA" "https://$HOST/fleet" \
                 | python3 -I -c 'import json,sys; b,t=sys.argv[1:]; rows=json.load(sys.stdin); rows=rows if isinstance(rows,list) else rows.get("devices",rows); sys.exit(0 if any(r.get("device_id")==b and (r.get("last_uplink") or "")>t for r in rows) else 1)' "$d" "$t"; then
-                return 0; fi ;;
-        *) aws logs tail "$LOG_GROUP" --since 2m --format short 2>/dev/null | grep -q "$d" && return 0 ;;
-        esac
+                return 0; fi
         printf '.'
     done
     echo; return 1

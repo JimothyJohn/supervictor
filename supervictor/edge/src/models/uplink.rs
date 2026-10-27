@@ -134,7 +134,9 @@ impl UplinkMessage {
     }
 }
 
-/// Deserialized response from the Lambda-backed API Gateway endpoint.
+/// Parsed uplink response (headers + body). Named for the API Gateway era
+/// it was written in; the `x-amzn-*` / `x-amz-apigw-id` fields simply stay
+/// empty against the single-binary endpoint.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LambdaResponse {
     /// AWS Lambda request identifier.

@@ -58,7 +58,7 @@ content-addressed blobs beside a manifest (atomic rename, the manifest is
 the commit marker), image validation on upload (magic, chip, slot fit,
 appended sha256), `Range` + `If-Match` on download. Download is allowed to
 the device's own bound certificate or an admin only. Without
-`FIRMWARE_DIR` (the Lambda stages today) the routes answer 503.
+`FIRMWARE_DIR` the routes answer 503.
 
 Tests: `supervictor/edge/src/ota/*_tests.rs` (proptest fault schedules:
 random chunking, resets at arbitrary points, byte corruption, overrun,
@@ -67,10 +67,10 @@ and `supervictor/endpoint/tests/test_firmware_api.rs` (another device's
 certificate, unbound devices, traversal, torn/oversize/wrong-chip images,
 every `Range` shape, concurrent re-uploads against readers).
 
-Not yet: signed manifests (O.2 signing), an S3 store for the Lambda
-stages, generic images with the identity in NVS (would make one image
-serve the fleet), staged rollouts (O.3). The bench exit criteria in O.0
-and O.1 below are the next thing to run.
+Not yet: signed manifests (O.2 signing), generic images with the identity
+in NVS (would make one image serve the fleet), staged rollouts (O.3). The
+serverless stages that would have needed an S3 store were retired
+2026-10-27; every box serves images from its own `FIRMWARE_DIR`.
 
 ## Contract and bench proof (2026-10-26)
 
@@ -144,8 +144,7 @@ mid-write power cuts with zero bricks.
   *response* (currently discarded) carries it back. No polling endpoint, no
   new connection — the 5-second heartbeat is the poll.
 - **Artifact route:** `GET /firmware/{version}/{chip}` on the endpoint
-  (device mTLS, same axum binary both paths) — S3-backed on Lambda,
-  disk-backed self-hosted. Supports `Range`: the device's heapless response
+  (device mTLS) — disk-backed (`FIRMWARE_DIR`) on the box. Supports `Range`: the device's heapless response
   buffer is 1 KB, so the image streams down in ranged chunks written
   straight to the inactive slot.
 - **Device loop:** running fw ≠ desired fw → chunked download → SHA-256

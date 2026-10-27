@@ -95,9 +95,11 @@ PORT=443
 STORE_BACKEND=sqlite
 SQLITE_DB_PATH=/var/lib/supervictor/supervictor.db
 LOG_LEVEL=info
-# Flip to true once every device is registered with its certificate
-# (GET /fleet over an admin cert shows who still lacks a subject_dn).
-REQUIRE_REGISTRATION=false
+# Strict: only registered, active devices bound to the certificate they
+# present may uplink (decided 2026-10-27 for new boxes). Set false while
+# onboarding a fleet whose devices were registered without a subject_dn
+# (GET /fleet over an admin cert shows who still lacks one), then flip back.
+REQUIRE_REGISTRATION=true
 # Days before uplink rows expire (DynamoDB only; SQLite keeps them).
 UPLINK_TTL_DAYS=30
 # OTA firmware images (docs/OTA.md). Under the unit's StateDirectory so the

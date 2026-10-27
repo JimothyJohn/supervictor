@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # flash.sh — build + flash one ESP32 board for a target endpoint, then watch it arrive.
 #
-#   ./scripts/flash.sh <device> <dev|staging|prod> [--monitor]
+#   ./scripts/flash.sh <device> <staging|prod> [--monitor]
 #
 #   device    the DEVICE_NAME baked into the firmware. certs/devices/<device>/
 #             must exist (./Quickstart certs device <device>) and the device must
 #             be registered on the target (POST /devices; rack-flash.sh does both).
-#   dev       HOST=dev.supervictor.advin.io, Amazon root CA (API Gateway mTLS)
 #   staging   HOST=staging.supervictor.advin.io, certs/ca/staging-bundle.pem
 #             (fleet CA + ISRG Root X1, so the board survives a server-cert switch)
-#   prod      .env.dev as-is: HOST=supervictor.advin.io, Amazon root CA
+#   prod      HOST=supervictor.advin.io (PROD_HOST), same bundle — a second box
+#             on the single-binary path; nothing answers there until it exists.
 #
 # Which firmware, which port:
 #   FEATURES     board-poe2 | ethernet | wifi,chip-esp32 | wifi,chip-esp32c3.
@@ -42,7 +42,7 @@
 # shellcheck source=scripts/_lib.sh
 . "$(dirname "$0")/_lib.sh"
 LOG_TAG=flash
-USAGE="usage: flash.sh <device> <dev|staging|prod> [--monitor]"
+USAGE="usage: flash.sh <device> <staging|prod> [--monitor]"
 DEVICE="${1:?$USAGE}"
 TARGET_ENV="${2:?$USAGE}"
 MONITOR="${3:-}"
@@ -85,12 +85,8 @@ set -a
 # shellcheck source=/dev/null
 . "$REPO_ROOT/.env.dev"
 set +a
-case "$TARGET_ENV" in
-dev)     export HOST=dev.supervictor.advin.io API_PATH=/ CA_PATH=ca/AmazonRootCA1.pem ;;
-staging) export HOST="$STAGING_HOST" API_PATH=/ CA_PATH="ca/$STAGING_BUNDLE_NAME" ;;
-prod)    : ;;   # .env.dev as-is is the prod profile
-*) fail "target must be dev, staging or prod" ;;
-esac
+TARGET_HOST="$(target_host "$TARGET_ENV")"
+export HOST="$TARGET_HOST" API_PATH=/ CA_PATH="ca/$STAGING_BUNDLE_NAME"
 export CERT_PATH="certs/" DEVICE_NAME="$DEVICE"
 [ -f "$REPO_ROOT/$CERT_PATH$CA_PATH" ] || fail "CA bundle missing at $CERT_PATH$CA_PATH"
 # Xtensa toolchain env, written by `espup install` (./Quickstart install).
@@ -121,24 +117,15 @@ echo "FLASHED_AT=$FLASHED_AT"                  # rack-flash.sh reads this line
 if [ "${VERIFY:-1}" = 0 ]; then log "VERIFY=0 — skipping the arrival poll"; exit 0; fi
 
 cd "$REPO_ROOT"
-case "$TARGET_ENV" in
-staging) need_admin ;;
-*)       need aws; LOG_GROUP="/aws/lambda/$(lambda_function "$TARGET_ENV")" ;;
-esac
+need_admin
 log "waiting up to 3 min for $DEVICE to check in at $TARGET_ENV (uplink after $FLASHED_AT)"
 for i in $(seq 1 18); do
     sleep 10
-    case "$TARGET_ENV" in
-    staging)
-        # "fresh" alone is not proof: the pre-flash firmware's last uplink stays fresh for a
-        # while. Require an uplink newer than the flash.
-        if admin_curl -f --cacert "$STAGING_BUNDLE" "https://$STAGING_HOST/fleet" \
-            | python3 -I -c 'import json,sys; b,t=sys.argv[1:]; rows=json.load(sys.stdin); rows=rows if isinstance(rows,list) else rows.get("devices",rows); sys.exit(0 if any(r.get("device_id")==b and (r.get("last_uplink") or "")>t for r in rows) else 1)' "$DEVICE" "$FLASHED_AT"; then
-            log "$DEVICE uplinked after the flash — on staging"; break; fi ;;
-    *)
-        if aws logs tail "$LOG_GROUP" --since 2m --format short 2>/dev/null | grep -q "$DEVICE"; then
-            log "$DEVICE seen in the $TARGET_ENV Lambda logs"; break; fi ;;
-    esac
+    # "fresh" alone is not proof: the pre-flash firmware's last uplink stays fresh for a
+    # while. Require an uplink newer than the flash.
+    if admin_curl -f --cacert "$STAGING_BUNDLE" "https://$TARGET_HOST/fleet" \
+        | python3 -I -c 'import json,sys; b,t=sys.argv[1:]; rows=json.load(sys.stdin); rows=rows if isinstance(rows,list) else rows.get("devices",rows); sys.exit(0 if any(r.get("device_id")==b and (r.get("last_uplink") or "")>t for r in rows) else 1)' "$DEVICE" "$FLASHED_AT"; then
+        log "$DEVICE uplinked after the flash — on $TARGET_ENV"; break; fi
     [ "$i" -eq 18 ] && log "not seen yet — attach with: espflash monitor --port $SERIAL_PORT --chip $CHIP --non-interactive --after no-reset --before no-reset-no-sync"
 done
 if [ "$MONITOR" = "--monitor" ]; then

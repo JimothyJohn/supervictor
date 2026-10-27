@@ -4,11 +4,12 @@
 #   TAG=v0.2.0 ./scripts/install-staging.sh
 #
 # What runs on the box (as root, via AWS-RunShellScript):
-#   1. stop + disable the compose/Caddy stack the template's bootstrap starts
-#      (it owns :443 on a freshly built box; a no-op afterwards)
-#   2. /etc/supervictor/{server.pem,server.key,ca.pem} from the PEMs the stack
-#      deploy placed in /opt/supervictor/certs — unless they are already there
-#      (a Let's Encrypt cert installed by staging-letsencrypt.sh is kept)
+#   1. stop + disable the compose/Caddy stack a box built before 2026-10-27
+#      ran (it owned :443; a no-op on a box the current template bootstrapped)
+#   2. /etc/supervictor/{server.pem,server.key,ca.pem} from the PEMs an old
+#      stack deploy placed in /opt/supervictor/certs — unless they are already
+#      there (the current bootstrap, or a Let's Encrypt cert from
+#      staging-letsencrypt.sh, puts them in /etc/supervictor directly)
 #   3. fetch install-endpoint.sh + the unit from the tag and run the installer
 #      (downloads the aarch64 musl tarball from the GitHub release, verifies
 #      the sha256, installs unit + /etc/supervictor/env, restarts the service)
@@ -41,9 +42,9 @@ if systemctl is-active --quiet docker; then docker ps -q | xargs -r docker stop 
 systemctl disable --now docker.service docker.socket 2>&1 || true
 echo "== PEMs -> /etc/supervictor (kept if present)"
 install -d -m 0700 /etc/supervictor
-[ -f /etc/supervictor/server.pem ] || install -m 0644 /opt/supervictor/certs/server.pem /etc/supervictor/server.pem
-[ -f /etc/supervictor/server.key ] || install -m 0600 /opt/supervictor/certs/server.key /etc/supervictor/server.key
-[ -f /etc/supervictor/ca.pem ]     || install -m 0644 /opt/supervictor/certs/ca.pem     /etc/supervictor/ca.pem
+[ -f /etc/supervictor/server.pem ] || [ ! -f /opt/supervictor/certs/server.pem ] || install -m 0644 /opt/supervictor/certs/server.pem /etc/supervictor/server.pem
+[ -f /etc/supervictor/server.key ] || [ ! -f /opt/supervictor/certs/server.key ] || install -m 0600 /opt/supervictor/certs/server.key /etc/supervictor/server.key
+[ -f /etc/supervictor/ca.pem ]     || [ ! -f /opt/supervictor/certs/ca.pem ]     || install -m 0644 /opt/supervictor/certs/ca.pem     /etc/supervictor/ca.pem
 openssl x509 -in /etc/supervictor/server.pem -noout -subject -issuer -enddate
 echo "== installer + unit from $TAG"
 install -d /opt/supervictor/install/scripts /opt/supervictor/install/supervictor/endpoint/deploy

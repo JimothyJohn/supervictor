@@ -2,18 +2,16 @@
 
 ## Executive Summary
 
-Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge device. Uses axum + Lambda Web Adapter for SAM deployment, architected for ECS migration.
+Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge device. axum, one static binary that terminates mTLS itself, deployed as a systemd unit on any Linux box (`deploy/`, `scripts/install-endpoint.sh`). The SAM/Lambda path was retired 2026-10-27.
 
 ## Commands
 
 - `cargo test --features sqlite` — run all tests (unit + integration)
 - `cargo build --features sqlite` — build for local dev
-- `cargo build --release --features sqlite,dynamo` — build for production
+- `cargo build --release` — the production binary (sqlite + ui + tls); a v* tag builds the static musl tarballs in CI (`.github/workflows/release.yml`)
 - `cargo clippy -- -D warnings` — lint
 - `cargo fmt --check` — format check
-- `docker compose up` — local dev with mTLS via Caddy
-- `sam build` — build SAM deployment artifact
-- `sam local start-api` — run locally via SAM
+- `docker compose up` — container path: plain HTTP behind Caddy terminating mTLS
 
 ## Constraints
 
@@ -121,8 +119,8 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   terminates TLS itself with mandatory client-cert verification. Identity
   then comes from the verified peer certificate via `ConnectInfo<TlsPeer>`;
   `middleware::client_identity` ignores the forwarded-subject headers in
-  that mode. Unset → plain HTTP, identity from the proxy headers (Lambda /
-  Caddy). `tests/test_tls.rs` is a real TLS end-to-end with certs minted by
+  that mode. Unset → plain HTTP, identity from the proxy header
+  (`x-ssl-client-subject-dn`, Caddy / nginx). `tests/test_tls.rs` is a real TLS end-to-end with certs minted by
   `scripts/gen_certs.sh` (openssl required).
 - Tests use in-memory SQLite by default (no AWS in the default suite).
   The `dynamo` backend has its own contract suite, `tests/test_store_dynamo.rs`,

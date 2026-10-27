@@ -1,9 +1,10 @@
 //! Fleet dashboard: server-rendered HTML behind admin mTLS.
 //!
 //! Every `/ui` route requires a verified client-cert subject containing an
-//! `OU=admin` component (device certs carry other OUs and get 403). The proxy
-//! layer (Caddy / API Gateway truststore) does the cryptographic validation;
-//! this module trusts only the forwarded subject header, same as the API.
+//! `OU=admin` component (device certs carry other OUs and get 403). The
+//! binary's own TLS listener (or a reverse proxy in front) does the
+//! cryptographic validation; this module only reads the verified subject,
+//! same as the API.
 
 /// Embedded CSS and other static assets.
 pub mod assets;

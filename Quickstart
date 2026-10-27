@@ -97,8 +97,6 @@ cd "$REPO_ROOT"
 command_exists rustc || { echo "ERROR: rustc not found — install Rust from https://rustup.rs then rerun" >&2; exit 1; }
 HOST_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
 LOG_DIR="$REPO_ROOT/.logs"
-SAM_PID_FILE="$LOG_DIR/sam_local.pid"
-SAM_LOG_FILE="$LOG_DIR/sam_local.log"
 ENDPOINT_PID_FILE="$LOG_DIR/endpoint.pid"
 ENDPOINT_LOG_FILE="$LOG_DIR/endpoint.log"
 SIM_PID_FILE="$LOG_DIR/sim.pid"
@@ -106,7 +104,6 @@ SIM_LOG_FILE="$LOG_DIR/sim.log"
 LOCAL_DB="$LOG_DIR/local.db"
 GEN_CERTS="$REPO_ROOT/supervictor/endpoint/scripts/gen_certs.sh"
 EDGE_DIR="$REPO_ROOT/supervictor/edge"
-ENDPOINT_DIR="$REPO_ROOT/supervictor/endpoint"
 mkdir -p "$LOG_DIR"
 
 help_function() {
@@ -125,28 +122,24 @@ Stages (each runs alone):
   lint                     cargo fmt --check + clippy --all-targets -D warnings
   build                    Workspace + edge embedded (xtensa) + edge desktop
   unit                     Full workspace test suite on the host
-  integration              SAM-local roundtrips (SAM_LOCAL_URL) + staging smoke
+  integration              Staging smoke (STAGING_URL, admin certificate)
   -t, --test               lint -> build -> unit -> integration
 
 Local dev & deploy:
-  dev [--serve|--stop]     Tests + sam build + sam local (+integration); --serve
-                           detaches sam local, --stop kills a detached one
   edge                     Build + flash the ESP32-POE-ISO (espflash via cargo run)
-  staging                  dev gate + deploy dev stack + remote integration tests
-  prod                     dev + staging gates + confirm + prod deploy + truststore
-  deploy                   Self-hosted staging box (scripts/deploy-staging.sh)
+  deploy                   Self-hosted staging box (scripts/deploy-staging.sh);
+                           a release goes on it with scripts/install-staging.sh
 
 Fleet operations:
   certs <mode> [...]       ca | device | server | admin | list | verify | handshake
   ping [host] [port]       mTLS GET / against an endpoint (device cert)
   fleet [host] [port]      Fleet health table over admin mTLS (GET /fleet)
   onboard <device> <owner> Cert -> register -> flash -> verify, end to end
-  truststore-reload        Force API Gateway to re-read the mTLS truststore
 
 Env: ENV selects .env.<stage> (default: dev). TRACE=1 for xtrace.
      QS_HARDWARE=none|sim|flash, QS_PORT, QS_ADMIN, QS_OWNER, QS_TESTS=0,
      SIM_PROFILE, SIM_SPEED answer the guided path's prompts ahead of time.
-     PING_CERTS, FLEET_ADMIN, SAM_LOCAL_PORT override defaults.
+     PING_CERTS, FLEET_ADMIN override defaults.
 EOF
 }
 
@@ -206,16 +199,20 @@ test_unit() {
 }
 
 test_integration() {
-    if [[ -n "${SAM_LOCAL_URL:-}" ]]; then
-        log "running SAM-local roundtrip tests against ${SAM_LOCAL_URL}"
-        (cd "$EDGE_DIR" && cargo test --test sam_local_roundtrip --target "$HOST_TARGET")
-    else
-        log "SKIP sam-local tests (SAM_LOCAL_URL not set)"
-    fi
+    # The box terminates mTLS itself, so even /health needs a client
+    # certificate: the admin one (QS_ADMIN, default $USER).
     if [[ -n "${STAGING_URL:-}" ]]; then
-        log "smoke: ${STAGING_URL}/health"
-        curl -fsS --max-time 10 "${STAGING_URL}/health" >/dev/null
-        log "staging healthy"
+        local admin="${QS_ADMIN:-${USER:-admin}}"
+        local pem="$REPO_ROOT/certs/admins/$admin/admin.pem" key="$REPO_ROOT/certs/admins/$admin/admin.key"
+        local bundle="$REPO_ROOT/certs/ca/staging-bundle.pem"
+        [[ -f "$bundle" ]] || bundle="$REPO_ROOT/certs/ca/ca.pem"
+        if [[ -f "$pem" && -f "$key" ]]; then
+            log "smoke: ${STAGING_URL}/health with the $admin certificate"
+            curl -fsS --max-time 10 --cert "$pem" --key "$key" --cacert "$bundle" "${STAGING_URL}/health" >/dev/null
+            log "staging healthy"
+        else
+            log "SKIP staging smoke (no admin certificate at $pem — ./Quickstart certs admin $admin)"
+        fi
     else
         log "SKIP staging smoke (STAGING_URL not set)"
     fi
@@ -273,10 +270,8 @@ ESPFLASH_PORT=
 # cannot reach localhost; point this at a LAN host or a deployed endpoint
 # before flashing. The local endpoint and the simulator ignore it.
 HOST=localhost
-# Request path: "/" (custom domain / single binary) or "/<stage>" on a raw
-# execute-api URL.
+# Request path the board posts to: "/" for the endpoint itself.
 API_PATH=/
-SAM_LOCAL_PORT=3000
 
 # Certificate layout, repo-root-relative: CERT_PATH + CA_PATH = the CA the
 # device trusts for the SERVER; CERT_PATH + devices/\$DEVICE_NAME/client.*
@@ -504,142 +499,10 @@ cmd_down() {
     log "down (database kept at $LOCAL_DB; delete it to start clean)"
 }
 
-# ── Local dev pipeline (SAM) ─────────────────────────────────────────
-
-sam_local_stop() {
-    if [[ -f "$SAM_PID_FILE" ]]; then
-        local pid
-        pid="$(cat "$SAM_PID_FILE")"
-        if kill "$pid" 2>/dev/null; then
-            log "stopped sam local (PID $pid)"
-        else
-            log "sam local (PID $pid) was not running"
-        fi
-        rm -f "$SAM_PID_FILE"
-    else
-        log "no sam local PID file at $SAM_PID_FILE"
-    fi
-}
-
-sam_local_wait_ready() {
-    local url="$1" deadline=$((SECONDS + 60))
-    log "waiting for sam local at $url"
-    until curl -fsS --max-time 2 "$url" >/dev/null 2>&1; do
-        [[ $SECONDS -lt $deadline ]] || fail "sam local not ready in 60s (logs: $SAM_LOG_FILE)"
-        sleep 1
-    done
-    log "sam local ready"
-}
-
-cmd_dev() {
-    local serve=0
-    for arg in "$@"; do
-        case "$arg" in
-        --serve) serve=1 ;;
-        --stop) sam_local_stop; return 0 ;;
-        *) fail "unknown dev flag: $arg" ;;
-        esac
-    done
-    for cmd in sam docker; do command_exists "$cmd" || fail "missing: $cmd"; done
-
-    local port="${SAM_LOCAL_PORT:-3000}"
-    log "running edge library tests"
-    # From the repo root so edge/.cargo/config.toml (xtensa default target +
-    # build-std) doesn't apply — build-std core/alloc conflicts with the
-    # prebuilt host std.
-    cargo test -p supervictor-edge --lib --target "$HOST_TARGET" \
-        > "$LOG_DIR/rust_tests.log" 2>&1 || fail "edge tests failed (see $LOG_DIR/rust_tests.log)"
-    log "running endpoint tests"
-    (cd "$ENDPOINT_DIR" && cargo test --features sqlite) \
-        > "$LOG_DIR/endpoint_tests.log" 2>&1 || fail "endpoint tests failed (see $LOG_DIR/endpoint_tests.log)"
-
-    log "building SAM artifacts"
-    (cd "$ENDPOINT_DIR" && sam build --skip-pull-image) \
-        > "$LOG_DIR/sam_build.log" 2>&1 || fail "sam build failed (see $LOG_DIR/sam_build.log)"
-
-    log "starting sam local on port $port"
-    (cd "$ENDPOINT_DIR" && sam local start-api --port "$port" --skip-pull-image) \
-        > "$SAM_LOG_FILE" 2>&1 &
-    echo $! > "$SAM_PID_FILE"
-    sam_local_wait_ready "http://localhost:$port"
-
-    if [[ $serve -eq 1 ]]; then
-        log "sam local running (PID $(cat "$SAM_PID_FILE")) at http://localhost:$port"
-        log "stop with: ./Quickstart dev --stop"
-        return 0
-    fi
-
-    # Repo root, not $EDGE_DIR — see the desktop-check note in
-    # validate_and_build (build-std would poison target/<host>/).
-    log "running local integration tests"
-    (SAM_LOCAL_URL="http://localhost:$port" \
-        cargo test -p supervictor-edge --test sam_local_roundtrip --target "$HOST_TARGET") \
-        || { sam_local_stop; fail "integration tests failed"; }
-    sam_local_stop
-    log "dev OK"
-}
-
 cmd_edge() {
     log "building and flashing embedded firmware"
     [[ -n "${ESPFLASH_PORT:-}" ]] && log "using serial port $ESPFLASH_PORT"
     (cd "$EDGE_DIR" && cargo run --bin supervictor-embedded --features ethernet)
-}
-
-# ── Staging / prod pipelines ─────────────────────────────────────────
-
-stack_endpoint() { # <config-env>
-    # Pull stack_name from samconfig.toml's [<env>.deploy.parameters] (or
-    # [<env>.global.parameters]) — awk section tracking, no TOML dep.
-    local stack
-    stack="$(awk -v env="$1" '
-        /^\[/ { in_section = ($0 == "[" env ".deploy.parameters]" || $0 == "[" env ".global.parameters]") }
-        in_section && $1 == "stack_name" { gsub(/[="]/, "", $3); print $3; exit }
-    ' "$ENDPOINT_DIR/samconfig.toml")"
-    [[ -n "$stack" ]] || fail "no stack_name in samconfig.toml for '$1'"
-    aws cloudformation describe-stacks --stack-name "$stack" \
-        --query "Stacks[0].Outputs[?OutputKey=='SupervictorApiEndpoint'].OutputValue" \
-        --output text | sed 's:/*$::'
-}
-
-cmd_staging() {
-    cmd_dev
-    log "loading .env.staging"
-    set -a; . "$REPO_ROOT/.env.staging"; set +a
-    for cmd in sam docker openssl aws; do command_exists "$cmd" || fail "missing: $cmd"; done
-
-    log "deploying dev stack"
-    (cd "$ENDPOINT_DIR" && sam build --skip-pull-image && sam deploy --config-env dev --no-confirm-changeset --no-fail-on-empty-changeset) \
-        > "$LOG_DIR/sam_deploy_dev.log" 2>&1 || fail "dev-stack deploy failed (see $LOG_DIR/sam_deploy_dev.log)"
-
-    local url
-    url="$(stack_endpoint dev)"
-    log "deployed dev stack endpoint: $url"
-
-    log "running integration tests against deployed stack"
-    (cd "$ENDPOINT_DIR" && DEPLOYED_URL="$url" cargo test --features sqlite -- --ignored) \
-        > "$LOG_DIR/staging_integration_tests.log" 2>&1 \
-        || fail "staging integration tests failed (see $LOG_DIR/staging_integration_tests.log)"
-    # Repo root, not $EDGE_DIR — see the desktop-check note in validate_and_build.
-    log "running device roundtrip tests against deployed stack"
-    (DEPLOYED_URL="$url" cargo test -p supervictor-edge --test deployed_roundtrip --target "$HOST_TARGET") \
-        > "$LOG_DIR/device_deployed_tests.log" 2>&1 \
-        || fail "device roundtrip tests failed (see $LOG_DIR/device_deployed_tests.log)"
-    log "staging OK"
-}
-
-cmd_prod() {
-    cmd_staging
-    echo
-    read -r -p "All tests passed. Deploy to PRODUCTION? [y/N] " answer
-    [[ "$answer" == "y" || "$answer" == "Y" ]] || { log "aborted"; return 1; }
-
-    log "loading .env.prod"
-    set -a; . "$REPO_ROOT/.env.prod"; set +a
-    log "deploying production stack"
-    (cd "$ENDPOINT_DIR" && sam build --no-cached --skip-pull-image && sam deploy --config-env prod --no-confirm-changeset --no-fail-on-empty-changeset) \
-        > "$LOG_DIR/sam_deploy_prod.log" 2>&1 || fail "prod deploy failed (see $LOG_DIR/sam_deploy_prod.log)"
-    cmd_truststore_reload
-    log "production deployment complete"
 }
 
 # ── Fleet operations ─────────────────────────────────────────────────
@@ -720,48 +583,6 @@ cmd_onboard() { # <device-name> <owner-id> [host] [port]
     log "onboard complete: $device"
 }
 
-cmd_truststore_reload() {
-    # Versioned-bucket flow: pin the domain to the CURRENT VersionId of the
-    # canonical truststore key. Atomic — one patch, no temp-key swap. (The
-    # old swap/restore dance once failed mid-way and stranded the domain on
-    # a deleted temp object; a version pin cannot strand anything.)
-    local domain="supervictor.advin.io" bucket="supervictor" key="truststore.pem"
-    command_exists aws || fail "missing: aws"
-
-    local vid
-    vid="$(aws s3api head-object --bucket "$bucket" --key "$key" \
-        --query VersionId --output text)" || fail "cannot read s3://$bucket/$key"
-    [[ -n "$vid" && "$vid" != "None" ]] \
-        || fail "s3://$bucket has no versioning — enable it; unversioned reloads are unsafe"
-
-    log "pinning $domain truststore to s3://$bucket/$key @ $vid"
-    aws apigateway update-domain-name --domain-name "$domain" --patch-operations \
-        "op=replace,path=/mutualTlsAuthentication/truststoreUri,value=s3://$bucket/$key" \
-        "op=replace,path=/mutualTlsAuthentication/truststoreVersion,value=$vid" \
-        >/dev/null || fail "truststore update failed"
-    truststore_wait_settled "$domain" || fail "domain did not settle"
-
-    local got
-    got="$(aws apigateway get-domain-name --domain-name "$domain" \
-        --query 'mutualTlsAuthentication.truststoreVersion' --output text)"
-    [[ "$got" == "$vid" ]] || fail "version mismatch after update: $got"
-    log "truststore pinned to version $vid"
-}
-
-truststore_wait_settled() { # <domain>
-    local domain="$1" deadline=$((SECONDS + 120)) state
-    while :; do
-        state="$(aws apigateway get-domain-name --domain-name "$domain" \
-            --query 'domainNameStatus' --output text 2>/dev/null || echo "UNKNOWN")"
-        [[ "$state" == "AVAILABLE" ]] && return 0
-        if [[ $SECONDS -ge $deadline ]]; then
-            log "domain $domain did not settle in 120s (state: $state)"
-            return 1
-        fi
-        sleep 5
-    done
-}
-
 publish() {
     log "deploying staging endpoint"
     exec "$REPO_ROOT/scripts/deploy-staging.sh"
@@ -785,16 +606,12 @@ lint) lint ;;
 build) validate_and_build ;;
 unit | test) test_unit ;;
 integration) test_integration ;;
-dev) shift; cmd_dev "$@" ;;
 edge) cmd_edge ;;
-staging) cmd_staging ;;
-prod) cmd_prod ;;
 deploy) publish ;;
 certs) shift; cmd_certs "$@" ;;
 ping) shift; cmd_ping "$@" ;;
 fleet) shift; cmd_fleet "$@" ;;
 onboard) shift; cmd_onboard "$@" ;;
-truststore-reload) cmd_truststore_reload ;;
 *)
     log "unknown command: $1"
     help_function

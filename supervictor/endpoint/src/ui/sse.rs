@@ -4,8 +4,8 @@
 //! non-blocking send, so a slow or absent dashboard can never wedge ingest.
 //! Each SSE client gets a forwarder task bridging broadcast → bounded mpsc;
 //! `try_send` drops events for a client that stops reading (lag is the
-//! documented behavior, not backpressure). On Lambda, API Gateway buffers
-//! responses, so the page's script falls back to periodic reload there.
+//! documented behavior, not backpressure). Behind a proxy that buffers
+//! responses the page's script falls back to periodic reload.
 
 use std::convert::Infallible;
 use std::pin::Pin;

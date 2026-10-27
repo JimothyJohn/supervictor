@@ -131,14 +131,16 @@ fields, so prefer nginx or Caddy unless they already have that. Verify with the 
 endpoint; a device cert being treated as admin proves the proxy is not
 stripping inbound headers.
 
-## E. AWS Lambda behind API Gateway
+## E. An AWS EC2 box
 
-`supervictor/endpoint/template.yaml` deploys the same binary under the
-Lambda Web Adapter with API Gateway mTLS (`./Quickstart staging` /
-`prod`). Known gap at the time of writing: the REST-API request context the
-adapter forwards carries no `clientCert`, so every request is anonymous and
-bound devices get 403 — see the open question in `TODO.md` before
-recommending this path to anyone new.
+Path A on an EC2 instance. `supervictor/endpoint/template-staging.yaml` is
+the reference: one t4g.micro whose bootstrap runs
+`scripts/install-endpoint.sh` from a release tag, an Elastic IP, a Route53
+record and a 443-only security group; `scripts/deploy-staging.sh` deploys
+it and `scripts/staging-letsencrypt.sh` swaps in a public server
+certificate. The serverless path (API Gateway + Lambda) was retired
+2026-10-27: it could not carry the client certificate's identity into the
+binary, and nothing here needs anything AWS-specific.
 
 ## Public server certificate (Let's Encrypt)
 
