@@ -282,6 +282,7 @@ pub fn handle_register_device(
         style.color = Some(crate::style::auto_color(&store.list_devices()?).token());
     }
 
+    validate::check_min_on_s(req.min_on_s)?;
     let record = DeviceRecord {
         device_id: req.device_id,
         owner_id: req.owner_id,
@@ -289,6 +290,7 @@ pub fn handle_register_device(
         status: status::ACTIVE.into(),
         created_at: now_rfc3339(),
         power_threshold_ma: req.power_threshold_ma,
+        min_on_s: req.min_on_s.filter(|s| *s > 0),
         style,
         desired_fw: None,
     };
@@ -297,10 +299,11 @@ pub fn handle_register_device(
     Ok(DeviceResponse::from(saved))
 }
 
-/// Set or clear a device's power threshold override from a JSON body
-/// (`{"power_threshold_ma": 12000}`; `{}` or `null` clears it). An empty
-/// body also clears: the endpoint is single-purpose, so "nothing" can only
-/// mean "back to the fleet default".
+/// Set or clear a device's power judgement from a JSON body
+/// (`{"power_threshold_ma": 12000, "min_on_s": 120}`; `{}` or `null`
+/// clears both). The body replaces both parts: a threshold alone clears
+/// the min-on, and vice versa. An empty body also clears: the endpoint is
+/// single-purpose, so "nothing" can only mean "back to the fleet default".
 pub fn handle_set_device_threshold(
     device_id: &str,
     raw_body: Option<&str>,
@@ -328,7 +331,12 @@ pub fn handle_set_device_threshold(
                 }
             }
         };
-    let saved = store.set_device_threshold(device_id, req.power_threshold_ma)?;
+    validate::check_min_on_s(req.min_on_s)?;
+    let saved = store.set_device_threshold(
+        device_id,
+        req.power_threshold_ma,
+        req.min_on_s.filter(|s| *s > 0),
+    )?;
     Ok(DeviceResponse::from(saved))
 }
 

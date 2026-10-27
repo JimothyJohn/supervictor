@@ -14,8 +14,14 @@ path = "./src/bin/desktop_main.rs"
 required-features = ["desktop"]
 
 [features]
-portal = ["wifi", "embassy-net/udp"]
-desktop = ["tokio", "rustls", "tokio-rustls", "rustls-pemfile"]
+# Telemetry simulator (models/sim.rs + profile.rs): invented current /
+# temperature / humidity / RSSI traces for a board without sensors. OFF by
+# default (decided 2026-10-27) so a production image can never report a
+# reading it did not take. The bench scripts pass it explicitly (flash.sh,
+# ota-push.sh: SIM=1 default, SIM=0 for a production image); the desktop
+# client IS the simulator, so `desktop` implies it. Tests always compile it.
+sim = []
+desktop = ["tokio", "rustls", "tokio-rustls", "rustls-pemfile", "sim"]
 # Chip selection — embedded builds need exactly one, matched to the cargo
 # --target (chip-esp32 ↔ xtensa-esp32-none-elf, chip-esp32c3 ↔
 # riscv32imc-unknown-none-elf). Fans the choice out to every esp-rs crate;
@@ -64,7 +70,8 @@ ethernet = ["embedded", "ph-esp32-mac", "embassy-net-driver", "esp32", "chip-esp
 # out GPIO17); `board-poe2` is the ESP32-POE2, whose WROVER-E keeps 16/17 for
 # PSRAM and takes the clock out of GPIO0 (see src/board/poe2.rs).
 board-poe2 = ["ethernet"]
-# Coexistence spike (TODO.md P2): ESP-NOW beacons on the WiFi radio next to
+# ESP-NOW beside the wired uplink (the mesh's first module, docs/MESH.md):
+# beacons on the WiFi radio next to
 # the wired EMAC uplink. Stacks on `ethernet` (or `board-poe2`); the radio
 # comes up in station mode without joining a network, so no SSID is needed.
 espnow = ["wifi", "esp-radio/esp-now"]
@@ -134,10 +141,12 @@ serde = { version = "1.0.219", default-features = false, features = ["alloc"] }
 serde-json-core = "0.7.0"
 mbedtls-rs = { git = "https://github.com/esp-rs/mbedtls-rs.git", rev = "4329f17", optional = true, features = ["log"] }
 # ESP32 EMAC (wired Ethernet) driver. crates.io 0.1.1 cannot detect any PHY —
-# MDIO reads are broken (upstream photon-circus/ph-esp32-mac#4). Pinned to the
-# hardware-verified fix from that PR; switch to crates.io once #4 merges and a
-# release follows.
-ph-esp32-mac = { git = "https://github.com/cfbraun/ph-esp32-mac", rev = "4cdad7f0e1d0a6a384a380692bcee3ee2351f357", features = [
+# MDIO reads are broken; upstream merged the fix as photon-circus/ph-esp32-mac#4
+# (2026-07-25) but has not cut a release. Pinned to that merge commit on the
+# upstream repo (its tree is byte-identical to the hardware-verified fork rev
+# 4cdad7f the rack ran on, so no re-soak was needed). Move to crates.io when a
+# release > 0.1.1 appears; Dependabot cannot watch a git dependency.
+ph-esp32-mac = { git = "https://github.com/photon-circus/ph-esp32-mac", rev = "b05d53ade4224361175283ac1b65c7504a029301", features = [
   "esp-hal",
   "embassy-net",
   "log",
@@ -182,7 +191,6 @@ rustls-pemfile = { version = "2.2.0", optional = true }
 [dev-dependencies]
 # Fault-schedule property tests for the OTA installer (src/ota/install_tests.rs).
 proptest = { version = "1.12", default-features = false, features = ["std"] }
-reqwest = { version = "0.12.15", features = ["json", "rustls-tls"] }
 tokio = { version = "1.0", features = ["full"] }
 rustls = "0.23.26"
 tokio-rustls = "0.26.2"

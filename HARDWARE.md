@@ -6,8 +6,8 @@ afternoon. Optimised for part count, robustness and prototyping speed, in
 that order. Performance and novelty are explicitly not goals.
 
 Companion documents: `docs/TELEMETRY.md` (wire schema and register ranges),
-`TESTRIG.md` (which board is on which port, gitignored), `TODO.md` P2 (the
-firmware items this kit unblocks), `hardware/SOURCING.md` (where to buy
+`TESTRIG.md` (which board is on which port, gitignored), `ROADMAP.md`
+(firmware track: the items this kit unblocks), `hardware/SOURCING.md` (where to buy
 each part, US design/build shops, budget and schedule per step),
 `hardware/bom-devkit.csv` (cart-ready BOM) and
 `hardware/RFQ-prototype.md` (the package a design/build vendor needs).
@@ -27,7 +27,7 @@ SHT40, nothing soldered, no enclosure for v0. Firmware is the existing
 
 | # | Part | Qty | Status | Role |
 |---|------|-----|--------|------|
-| 1 | Olimex ESP32-POE-ISO (WROOM-32E or 32UE) | 1 | **Have** (4 on the rack: `poe-iso-eth-01`, `poe-iso-rack-01..03`) | MCU, PoE PD, Ethernet, 3.3 V / 5 V rails |
+| 1 | Olimex ESP32-POE-ISO (WROOM-32E or 32UE) | 1 | **Have** (4 on the rack: `poe-iso-eth-01`, `poe-iso-rack-01..03`; plus two ESP32-POE2, `poe2-rack-01` and `poe2-wifi-01`. All six are WROOM — inventory answer 2026-10-27, no WROVER POE-ISO, so `rack-flash.sh`'s WROVER refusal never fires) | MCU, PoE PD, Ethernet, 3.3 V / 5 V rails |
 | 2 | DFRobot Gravity Analog AC Current Sensor SEN0211 (20 A probe + conditioning module) | 1 | **Have** (from the `uplink` project) | `current` (mA) |
 | 3 | Female–female 2.54 mm jumper wires | 3 (clamp) + 4 (SHT40) | Have | Module → EXT1/EXT2/UEXT |
 | 4 | Cat5e/6 patch cable | 1 | Have | Power + data |
@@ -76,8 +76,8 @@ shortlisted.
 
 **Wired only.** One cable is power, data and physical identity (switch
 port). No credentials baked at compile time, no `rssi_dbm`, no WiFi stack in
-the image, no 2.4 GHz coexistence question until the ESP-NOW mesh spike
-(TODO.md P2) says otherwise.
+the image, no 2.4 GHz coexistence question until the ESP-NOW mesh
+(`docs/MESH.md`) says otherwise.
 
 ## 4. Board reference
 
@@ -242,7 +242,7 @@ decided 2026-10-26, no NVS path).
 
 | Consumer | Draw | Source |
 |----------|------|--------|
-| POE-ISO board (ESP32 + PHY, link up) | ~1–2 W | TODO.md switch-day note; LS108GP shows per-port draw |
+| POE-ISO board (ESP32 + PHY, link up) | ~1–2 W | LS108GP shows per-port draw |
 | SEN0211 module | not specified on the wiki; op-amp class, single-digit mA | measure on first bring-up |
 | SHT40 | < 1 mA | datasheet class |
 | **Headroom** | 2 W external budget minus the above | plenty; a 12 V sensor is the first thing that would not fit |
@@ -276,10 +276,11 @@ re-exported through `board::active` like the Ethernet pins already are:
 **Features.** `sensor-current` and `sensor-sht4x`, both off by default so CI
 keeps building what it builds today; `scripts/flash.sh` grows a `FEATURES=`
 row for the kit (`ethernet,sensor-current[,sensor-sht4x]`) in
-`certs/rack-inventory.tsv`. When either sensor feature is on, the simulator
-(`models/sim.rs`, `models/profile.rs`) must not fill that field: this is the
-moment TODO.md P2 "simulator behind a cargo feature" lands as `sim`, on only
-for `SIM_PROFILE` builds.
+`certs/rack-inventory.tsv`. The simulator (`models/sim.rs`,
+`models/profile.rs`) is behind the `sim` feature since 2026-10-27, off by
+default; `flash.sh` adds it unless `SIM=0`. A sensor feature must take its
+field over from the simulator when both are on (today a build without `sim`
+sends `current` 0 and no environmental fields).
 
 **Sampling.** The burst task already samples every 100 ms
 (`UPLINK_BURST = 50` per 5 s uplink, 10 Hz; decided 2026-10-25 — the
@@ -321,7 +322,9 @@ Each step has a pass criterion; do not skip ahead on a fail.
 7. **Soak.** 24 h on the rack. Pass: `heap_free` flat, `seq` contiguous,
    no watchdog reboots (`uptime_s` monotonic).
 8. **Fault.** Pull the Ethernet cable 60 s. Pass: fleet row stale → dark →
-   fresh after replug with no USB touch (TODO.md P2, still outstanding).
+   fresh after replug with no USB touch. Done 2026-10-25 on `poe-iso-eth-01`:
+   stale at 15 min, fresh 20 s after replug; the 24 h soak is the rack's
+   normal week since.
 
 ## 9. Robustness notes
 
@@ -369,15 +372,27 @@ dark fleet row maps to a cable.
   `certs/rack-inventory.tsv`. No NVS path.
 - ~~Buy the SHT40 now?~~ **Decided 2026-10-25: ordering the SHT41 (Adafruit
   5776) and cable from Adafruit.**
+- ~~Temperature register floor~~ **Decided 2026-10-27: -40 °C** (-40..60,
+  0.39 °C/step; `supervictor/common/src/levels.rs`, `docs/TELEMETRY.md`).
+- ~~Board inventory / other platforms~~ **Decided 2026-10-27: every rack
+  board is a WROOM** (above); stay ready for other platforms through an
+  application-specific board layer grown from the `board::active` pattern
+  when a second board family arrives (ROADMAP, firmware track).
+- ~~Simulator in production images~~ **Decided 2026-10-27: behind the `sim`
+  feature, off by default** (§7); bench images opt in through `flash.sh`.
+- ~~"On" for heated machines~~ **Decided 2026-10-27: producing** — a
+  per-device minimum on-time beside the threshold on the endpoint
+  (`min_on_s`; the simulated extruder and molder carry 120 s).
 
 ## 12. Later, deliberately not now
 
-- **OTA** (TODO.md P2): single `factory` slot in `partitions.csv` today;
-  otadata + two ~1.9 MB slots on 4 MB flash, one more USB flash per board.
-  Nothing in this kit changes when it lands.
+- ~~**OTA**~~ landed (`docs/OTA.md`): otadata + two A/B slots on 4 MB
+  flash; the rack took its last USB flash 2026-10-27. Nothing in this kit
+  changed.
 - **ST25DV NFC tag** (Adafruit 4701, on the bench from `uplink`): I²C on the
   same UEXT bus (GPO on a free GPIO, LPD optional). Tap-to-provision is the
-  use; it waits for the mesh identity decision.
+  use — naming and binding a mesh leaf in the field now that the identity
+  model is decided (`docs/MESH.md`).
 - **IMU** (`accel_g` / `gyro_dps` / `mag_ut`): ICM-20948 on the same I²C
   bus per `docs/TELEMETRY.md`; also a UEXT plug-in, no new pins.
 - **Enclosure.** An off-the-shelf ABS box, or a DIN-rail clip and a

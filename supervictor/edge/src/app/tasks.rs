@@ -1,7 +1,14 @@
 use crate::config::*;
+#[cfg(feature = "sim")]
 use crate::models::profile::Profile;
-use crate::models::sim::{seed_from, Hardware, Simulator};
+use crate::models::rng::seed_from;
+#[cfg(not(feature = "sim"))]
+use crate::models::rng::{jitter_ms, Xorshift64};
+#[cfg(feature = "sim")]
+use crate::models::sim::{Hardware, Simulator};
 use crate::models::uplink::UplinkAck;
+#[cfg(not(feature = "sim"))]
+use crate::models::uplink::UplinkMessage;
 use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
 use crate::ota::device::Ota;
@@ -18,10 +25,9 @@ use esp_println::println;
 use esp_radio::wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState};
 use mbedtls_rs::{Session, SessionConfig, Tls};
 
-/// Uplink path from API_PATH at compile time: "/" against a custom domain
-/// (base-path mapping supplies the stage), "/<stage>" against a raw
-/// execute-api URL. Must start with '/'. The OTA routes hang off the same
-/// prefix.
+/// Uplink path from API_PATH at compile time: "/" for the endpoint itself,
+/// a prefix when something in front mounts it under one. Must start with
+/// '/'. The OTA routes hang off the same prefix.
 pub const API_PATH: &str = env!("API_PATH");
 const _: () = assert!(!API_PATH.is_empty() && API_PATH.as_bytes()[0] == b'/');
 
@@ -157,6 +163,7 @@ pub const DEVICE_ID_ON_WIRE: &str = match option_env!("DEVICE_NAME") {
 /// Machine the telemetry simulator impersonates: `SIM_PROFILE` at build time
 /// (see `models::profile::Profile::parse` for the names), default the bench
 /// trace. An unknown name is a compile error, not a silent fallback.
+#[cfg(feature = "sim")]
 pub const SIM_PROFILE: Profile = match option_env!("SIM_PROFILE") {
     None => Profile::Generic,
     Some(name) => match Profile::parse(name) {
@@ -167,12 +174,14 @@ pub const SIM_PROFILE: Profile = match option_env!("SIM_PROFILE") {
 
 /// Simulated seconds per real second for the machine model (`SIM_SPEED` at
 /// build time, default 1): a compressed working day for demos.
+#[cfg(feature = "sim")]
 pub const SIM_SPEED: u32 = match option_env!("SIM_SPEED") {
     None => 1,
     Some(s) => parse_u32(s),
 };
 
 /// Decimal `u32` parser usable in a `const`; rejects anything else at build time.
+#[cfg(feature = "sim")]
 const fn parse_u32(s: &str) -> u32 {
     let bytes = s.as_bytes();
     assert!(!bytes.is_empty(), "SIM_SPEED must be a positive integer");
@@ -227,17 +236,31 @@ pub async fn app(
     const _: () = assert!(DEVICE_ID_ON_WIRE.len() <= 64);
     let device_id: heapless::String<64> = DEVICE_ID_ON_WIRE.try_into().unwrap_or_default();
 
-    // Simulated readings until real sensors land (docs/TELEMETRY.md): a
-    // per-board personality from the device id, salted by the hardware RNG
-    // so two boots don't replay the same trace. Heap and uptime stay real.
-    // SIM_PROFILE makes the board act like a machine (models/profile.rs).
+    // Feature `sim`: simulated readings until real sensors land
+    // (docs/TELEMETRY.md): a per-board personality from the device id,
+    // salted by the hardware RNG so two boots don't replay the same trace.
+    // Heap and uptime stay real. SIM_PROFILE makes the board act like a
+    // machine (models/profile.rs).
+    #[cfg(feature = "sim")]
     let mut sim = Simulator::with_profile(seed_from(device_id.as_str(), seed), SIM_PROFILE);
-    sim.set_time_scale(SIM_SPEED);
-    println!(
-        "Telemetry profile: {} (x{} time)",
-        SIM_PROFILE.name(),
-        SIM_SPEED
-    );
+    #[cfg(feature = "sim")]
+    {
+        sim.set_time_scale(SIM_SPEED);
+        println!(
+            "Telemetry profile: {} (x{} time)",
+            SIM_PROFILE.name(),
+            SIM_SPEED
+        );
+    }
+    // Without it the board reports only what it measured. No sensor driver
+    // exists yet (HARDWARE.md §7: `sensor-current`), so `current` is 0 and
+    // the environmental fields stay off the wire — never an invented value.
+    #[cfg(not(feature = "sim"))]
+    let mut rng = Xorshift64::new(seed_from(device_id.as_str(), seed));
+    #[cfg(not(feature = "sim"))]
+    let mut seq: u32 = 0;
+    #[cfg(not(feature = "sim"))]
+    println!("Telemetry: measured fields only (no simulator; current reports 0 until a sensor driver lands)");
 
     let mut backoff = BACKOFF_INITIAL;
     // OTA: the version the endpoint asked for on the last uplink, and when
@@ -314,18 +337,30 @@ pub async fn app(
             let uptime_s = embassy_time::Instant::now()
                 .as_secs()
                 .min(u64::from(u32::MAX)) as u32;
-            let hardware = Hardware {
-                heap_free: Some(esp_alloc::HEAP.free().min(u32::MAX as usize) as u32),
-                rssi_dbm: None,
-            };
+            let heap_free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
+            #[cfg(feature = "sim")]
             #[allow(unused_mut)]
             let mut uplink = sim.uplink(
                 device_id.clone(),
                 uptime_s,
                 UPLINK_INTERVAL_S,
                 UPLINK_BURST,
-                hardware,
+                Hardware {
+                    heap_free: Some(heap_free),
+                    rssi_dbm: None,
+                },
             );
+            #[cfg(not(feature = "sim"))]
+            #[allow(unused_mut)]
+            let mut uplink = {
+                seq = seq.wrapping_add(1);
+                let mut msg = UplinkMessage::new(device_id.clone(), 0);
+                msg.seq = Some(seq);
+                msg.uptime_s = Some(uptime_s);
+                msg.interval_s = Some(UPLINK_INTERVAL_S);
+                msg.heap_free = Some(heap_free);
+                msg
+            };
             // RSSI is a WiFi notion; wired boards leave it off the wire —
             // the scalar and the burst's register alike.
             #[cfg(not(feature = "wifi"))]
@@ -394,7 +429,10 @@ pub async fn app(
             }
 
             // ±20 % jitter so boards flashed together don't phase-lock.
+            #[cfg(feature = "sim")]
             let delay_ms = sim.next_delay_ms(MAIN_LOOP_DELAY.as_millis() as u32);
+            #[cfg(not(feature = "sim"))]
+            let delay_ms = jitter_ms(&mut rng, MAIN_LOOP_DELAY.as_millis() as u32);
             Timer::after(Duration::from_millis(u64::from(delay_ms))).await;
         }
 

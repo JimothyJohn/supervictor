@@ -82,29 +82,45 @@ threshold_for() { # <service> -> mA or empty (fleet default)
     esac
 }
 
+# Heated profiles: "on" means producing (decided 2026-10-27), so the screw
+# or pump must hold above the threshold this long before the device reads
+# on; a heater zone pulsing for seconds never does. The other profiles are
+# settled by the single bar.
+min_on_for() { # <service> -> seconds or empty (last reading alone)
+    case "$1" in
+    sim-extruder-* | sim-molder-*) echo 120 ;;
+    *) echo "" ;;
+    esac
+}
+
 register() { # <device>
     local dir="$REPO_ROOT/certs/devices/$1" subject payload status
     subject="$(openssl x509 -in "$dir/client.pem" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"
-    local threshold
+    local threshold min_on
     threshold="$(threshold_for "$1")"
-    payload="$(printf '{"device_id":"%s","owner_id":"%s","subject_dn":"%s"%s}' \
-        "$1" "$OWNER" "$subject" "${threshold:+,\"power_threshold_ma\":$threshold}")"
+    min_on="$(min_on_for "$1")"
+    payload="$(printf '{"device_id":"%s","owner_id":"%s","subject_dn":"%s"%s%s}' \
+        "$1" "$OWNER" "$subject" "${threshold:+,\"power_threshold_ma\":$threshold}" "${min_on:+,\"min_on_s\":$min_on}")"
     status="$(curl -sS -o /dev/null -w '%{http_code}' "${CA_FLAG[@]}" \
         --cert "$dir/client.pem" --key "$dir/client.key" \
         -X POST "https://$SIM_HOST/devices" -H 'content-type: application/json' -d "$payload")"
     case "$status" in
-    201) log "$1: registered (owner $OWNER${threshold:+, threshold $threshold mA})" ;;
+    201) log "$1: registered (owner $OWNER${threshold:+, threshold $threshold mA}${min_on:+, min on $min_on s})" ;;
     409) log "$1: already registered" ;;
     *) fail "$1: registration returned HTTP $status" ;;
     esac
 }
 
-# Set the per-device threshold on an already-registered device (admin cert).
+# Set the per-device threshold and minimum on-time on an already-registered
+# device (admin cert). The PUT body replaces both parts; `min_on_s` is sent
+# only for profiles that have one, so an endpoint older than 2026-10-27
+# (no such field, deny_unknown_fields → 422) still accepts the others.
 # Idempotent; skipped with a note when no admin cert is available.
 apply_threshold() { # <device>
-    local threshold admin_dir="$REPO_ROOT/certs/admins/${FLEET_ADMIN:-nick}" status
+    local threshold min_on admin_dir="$REPO_ROOT/certs/admins/${FLEET_ADMIN:-nick}" status
     threshold="$(threshold_for "$1")"
-    [[ -n "$threshold" ]] || return 0
+    min_on="$(min_on_for "$1")"
+    [[ -n "$threshold" || -n "$min_on" ]] || return 0
     if [[ ! -f "$admin_dir/admin.pem" ]]; then
         log "$1: no admin cert at $admin_dir; threshold left as is"
         return 0
@@ -112,10 +128,12 @@ apply_threshold() { # <device>
     status="$(curl -sS -o /dev/null -w '%{http_code}' "${CA_FLAG[@]}" \
         --cert "$admin_dir/admin.pem" --key "$admin_dir/admin.key" \
         -X PUT "https://$SIM_HOST/devices/$1/threshold" -H 'content-type: application/json' \
-        -d "{\"power_threshold_ma\":$threshold}")"
+        -d "{\"power_threshold_ma\":${threshold:-null}${min_on:+,\"min_on_s\":$min_on}}")"
     case "$status" in
-    200) log "$1: power threshold $threshold mA" ;;
+    200) log "$1: power threshold ${threshold:-default} mA${min_on:+, producing after $min_on s}" ;;
     404|405) log "$1: endpoint has no threshold route yet (HTTP $status); deploy the endpoint, then re-run" ;;
+    422) [[ -n "$min_on" ]] || fail "$1: threshold update returned HTTP 422"
+         log "$1: endpoint predates min_on_s (HTTP 422); threshold left as is — deploy the endpoint, then re-run" ;;
     *) fail "$1: threshold update returned HTTP $status" ;;
     esac
 }

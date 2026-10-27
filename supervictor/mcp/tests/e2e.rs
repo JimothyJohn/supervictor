@@ -105,6 +105,7 @@ fn seed(store: &dyn DeviceStore) {
                 status: "active".into(),
                 created_at: now_rfc3339(),
                 power_threshold_ma: None,
+                min_on_s: None,
                 style: DeviceStyle::default(),
                 desired_fw: None,
             })

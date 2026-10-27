@@ -7,8 +7,8 @@
 //! on the side (`sha256` in the manifest, also the ETag) so the device can
 //! verify what it wrote to flash before it reboots into it.
 //!
-//! Self-hosted the store is a directory (`FIRMWARE_DIR`); the Lambda path
-//! has no blob store yet and answers 503 on these routes (TODO.md).
+//! The store is a directory (`FIRMWARE_DIR`, under the unit's state dir);
+//! without it the routes answer 503.
 
 use std::collections::HashMap;
 use std::fs;

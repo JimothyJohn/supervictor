@@ -10,6 +10,7 @@ fn make_device(id: &str) -> DeviceRecord {
         status: "active".into(),
         created_at: "2025-01-01T00:00:00Z".into(),
         power_threshold_ma: None,
+        min_on_s: None,
         style: Default::default(),
         desired_fw: None,
     }
@@ -137,7 +138,9 @@ fn set_device_threshold_sets_clears_and_rejects_unknown() {
     let store = common::test_store();
     store.put_device(make_device("saw-1")).unwrap();
 
-    let updated = store.set_device_threshold("saw-1", Some(5_000)).unwrap();
+    let updated = store
+        .set_device_threshold("saw-1", Some(5_000), None)
+        .unwrap();
     assert_eq!(updated.power_threshold_ma, Some(5_000));
     assert_eq!(updated.status, "active", "other fields untouched");
     assert_eq!(
@@ -152,11 +155,11 @@ fn set_device_threshold_sets_clears_and_rejects_unknown() {
     // Extremes are stored as given: the threshold is any i64, like the
     // fleet default.
     for t in [0, -1, i64::MAX, i64::MIN] {
-        let updated = store.set_device_threshold("saw-1", Some(t)).unwrap();
+        let updated = store.set_device_threshold("saw-1", Some(t), None).unwrap();
         assert_eq!(updated.power_threshold_ma, Some(t), "{t}");
     }
 
-    let cleared = store.set_device_threshold("saw-1", None).unwrap();
+    let cleared = store.set_device_threshold("saw-1", None, None).unwrap();
     assert_eq!(cleared.power_threshold_ma, None);
     assert_eq!(
         store
@@ -167,7 +170,9 @@ fn set_device_threshold_sets_clears_and_rejects_unknown() {
         None
     );
 
-    let err = store.set_device_threshold("ghost", Some(1)).unwrap_err();
+    let err = store
+        .set_device_threshold("ghost", Some(1), None)
+        .unwrap_err();
     assert!(
         matches!(
             err,
@@ -181,6 +186,67 @@ fn set_device_threshold_sets_clears_and_rejects_unknown() {
 /// Forward compatibility: a database created by a binary that predates the
 /// column opens cleanly, gains the column, and its old rows read as "no
 /// override". Rollback safety: the old column set is untouched, so an old
+#[test]
+fn min_on_round_trips_and_is_set_and_cleared_with_the_threshold() {
+    let store = common::test_store();
+    let mut device = make_device("extruder-1");
+    device.power_threshold_ma = Some(15_000);
+    device.min_on_s = Some(120);
+    store.put_device(device).unwrap();
+    store.put_device(make_device("plain-1")).unwrap();
+
+    let got = store.get_device("extruder-1").unwrap().unwrap();
+    assert_eq!(got.min_on_s, Some(120));
+    assert_eq!(got.effective_min_on_s(), 120);
+    assert_eq!(store.get_device("plain-1").unwrap().unwrap().min_on_s, None);
+    let listed = store.list_devices().unwrap();
+    assert_eq!(
+        listed
+            .iter()
+            .find(|d| d.device_id == "extruder-1")
+            .unwrap()
+            .min_on_s,
+        Some(120)
+    );
+
+    let updated = store
+        .set_device_threshold("extruder-1", Some(16_000), Some(60))
+        .unwrap();
+    assert_eq!(
+        (updated.power_threshold_ma, updated.min_on_s),
+        (Some(16_000), Some(60))
+    );
+    let updated = store
+        .set_device_threshold("extruder-1", Some(16_000), None)
+        .unwrap();
+    assert_eq!(
+        (updated.power_threshold_ma, updated.min_on_s),
+        (Some(16_000), None)
+    );
+    let updated = store
+        .set_device_threshold("extruder-1", None, Some(u32::MAX))
+        .unwrap();
+    assert_eq!(
+        (updated.power_threshold_ma, updated.min_on_s),
+        (None, Some(u32::MAX))
+    );
+    assert_eq!(
+        updated.effective_min_on_s(),
+        supervictor_endpoint::fleet::MAX_MIN_ON_S,
+        "a stored value beyond the cap is capped when judged"
+    );
+    let err = store
+        .set_device_threshold("ghost", None, Some(1))
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            supervictor_endpoint::error::AppError::DeviceNotFound { .. }
+        ),
+        "{err:?}"
+    );
+}
+
 /// binary's `SELECT device_id, owner_id, subject_dn, status, created_at`
 /// keeps working against the migrated file.
 #[test]
@@ -215,21 +281,22 @@ fn opening_a_pre_threshold_database_migrates_it_in_place() {
     let store = SqliteDeviceStore::new(&path_str).expect("open + migrate");
     let legacy = store.get_device("legacy-1").unwrap().unwrap();
     assert_eq!(legacy.power_threshold_ma, None);
+    assert_eq!(
+        legacy.min_on_s, None,
+        "no column yesterday = no min-on today"
+    );
     assert_eq!(legacy.owner_id, "owner-1");
-    store.set_device_threshold("legacy-1", Some(9_000)).unwrap();
+    store
+        .set_device_threshold("legacy-1", Some(9_000), Some(45))
+        .unwrap();
     drop(store);
 
     // Reopening is idempotent (the column is not added twice) and the
     // override persisted; an old-shaped query still works.
     let store = SqliteDeviceStore::new(&path_str).expect("reopen");
-    assert_eq!(
-        store
-            .get_device("legacy-1")
-            .unwrap()
-            .unwrap()
-            .power_threshold_ma,
-        Some(9_000)
-    );
+    let reopened = store.get_device("legacy-1").unwrap().unwrap();
+    assert_eq!(reopened.power_threshold_ma, Some(9_000));
+    assert_eq!(reopened.min_on_s, Some(45));
     drop(store);
     {
         let conn = rusqlite::Connection::open(&path_str).unwrap();

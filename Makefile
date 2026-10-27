@@ -44,7 +44,7 @@ build:  ## Workspace (host) + every embedded target + the desktop client.
 test-unit:  ## Full workspace test suite on the host.
 	$(QS) unit
 
-test-integration:  ## SAM-local roundtrips and the staging smoke (both skip when unset).
+test-integration:  ## Staging smoke with the admin certificate (skips when STAGING_URL is unset).
 	$(QS) integration
 
 test-all:  ## lint → build → unit → integration.

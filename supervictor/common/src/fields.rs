@@ -57,6 +57,9 @@ pub const STATUS: &str = "status";
 pub const CREATED_AT: &str = "created_at";
 /// Per-device power threshold (mA) field name.
 pub const POWER_THRESHOLD_MA: &str = "power_threshold_ma";
+/// Per-device minimum on-time (seconds) before a device counts as
+/// producing; field name.
+pub const MIN_ON_S: &str = "min_on_s";
 /// Per-device chart colour field name (`s0`–`s7` or `#rrggbb`).
 pub const COLOR: &str = "color";
 /// Per-device chart line style field name.

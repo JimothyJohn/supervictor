@@ -51,6 +51,77 @@ fn set_threshold_parses_every_body_shape() {
 }
 
 #[test]
+fn set_threshold_carries_the_min_on_and_each_part_clears_the_other() {
+    let store = common::test_store();
+    registered(store.as_ref(), "dev-1");
+
+    let resp = handlers::handle_set_device_threshold(
+        "dev-1",
+        Some(r#"{"power_threshold_ma": 15000, "min_on_s": 120}"#),
+        store.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(resp.power_threshold_ma, Some(15_000));
+    assert_eq!(resp.min_on_s, Some(120));
+    let stored = store.get_device("dev-1").unwrap().unwrap();
+    assert_eq!(stored.min_on_s, Some(120));
+    assert_eq!(stored.effective_min_on_s(), 120);
+
+    // A body with only the threshold clears the min-on (the body replaces
+    // both), and a min-on alone clears the threshold.
+    let resp = handlers::handle_set_device_threshold(
+        "dev-1",
+        Some(r#"{"power_threshold_ma": 15000}"#),
+        store.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(
+        (resp.power_threshold_ma, resp.min_on_s),
+        (Some(15_000), None)
+    );
+    let resp =
+        handlers::handle_set_device_threshold("dev-1", Some(r#"{"min_on_s": 60}"#), store.as_ref())
+            .unwrap();
+    assert_eq!((resp.power_threshold_ma, resp.min_on_s), (None, Some(60)));
+
+    // 0 and null are "the last reading alone", stored as unset.
+    for zero in [r#"{"min_on_s": 0}"#, r#"{"min_on_s": null}"#] {
+        let resp =
+            handlers::handle_set_device_threshold("dev-1", Some(zero), store.as_ref()).unwrap();
+        assert_eq!(resp.min_on_s, None, "{zero}");
+    }
+
+    // The cap is the contract: 3600 is the longest window a snapshot reads.
+    let ok = handlers::handle_set_device_threshold(
+        "dev-1",
+        Some(r#"{"min_on_s": 3600}"#),
+        store.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(ok.min_on_s, Some(3600));
+    for bad in [
+        r#"{"min_on_s": 3601}"#,
+        r#"{"min_on_s": -1}"#,
+        r#"{"min_on_s": 1.5}"#,
+        r#"{"min_on_s": "60"}"#,
+        r#"{"min_on_s": 4294967296}"#,
+        r#"{"min_on": 60}"#,
+    ] {
+        let err = handlers::handle_set_device_threshold("dev-1", Some(bad), store.as_ref())
+            .expect_err(bad);
+        assert!(
+            matches!(err, AppError::InvalidPayload { .. }),
+            "{bad}: {err:?}"
+        );
+        assert_eq!(
+            store.get_device("dev-1").unwrap().unwrap().min_on_s,
+            Some(3600),
+            "{bad} must not write"
+        );
+    }
+}
+
+#[test]
 fn set_threshold_rejects_bad_bodies_and_ids_without_writing() {
     use supervictor_endpoint::error::AppError;
     let store = common::test_store();

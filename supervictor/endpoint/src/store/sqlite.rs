@@ -55,6 +55,7 @@ impl SqliteDeviceStore {
         // keep working against the new schema (they never select it).
         for (column, decl) in [
             ("power_threshold_ma", "power_threshold_ma INTEGER"),
+            ("min_on_s", "min_on_s INTEGER"),
             ("color", "color TEXT"),
             ("line_style", "line_style TEXT"),
             ("marker", "marker TEXT"),
@@ -74,7 +75,7 @@ impl SqliteDeviceStore {
 
     /// Column list shared by every device SELECT, in `row_to_device` order.
     const DEVICE_COLUMNS: &'static str =
-        "device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker, desired_fw";
+        "device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker, desired_fw, min_on_s";
 
     fn row_to_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRecord> {
         Ok(DeviceRecord {
@@ -99,6 +100,12 @@ impl SqliteDeviceStore {
                     .and_then(Marker::parse),
             },
             desired_fw: row.get(9)?,
+            // Stored as INTEGER; anything a u32 can't hold (a hand-edited
+            // row) reads as unset rather than failing every listing.
+            min_on_s: row
+                .get::<_, Option<i64>>(10)?
+                .and_then(|v| u32::try_from(v).ok())
+                .filter(|v| *v > 0),
         })
     }
 }
@@ -110,7 +117,7 @@ impl DeviceStore for SqliteDeviceStore {
             .lock()
             .map_err(|_| AppError::Store(StoreError::Poisoned))?;
         conn.execute(
-            "INSERT INTO devices (device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker, desired_fw) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO devices (device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker, desired_fw, min_on_s) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 record.device_id,
                 record.owner_id,
@@ -122,6 +129,7 @@ impl DeviceStore for SqliteDeviceStore {
                 record.style.line_style.map(LineStyle::label),
                 record.style.marker.map(Marker::label),
                 record.desired_fw,
+                record.min_on_s,
             ],
         )
         .map_err(|e| match e {
@@ -219,6 +227,7 @@ impl DeviceStore for SqliteDeviceStore {
         &self,
         device_id: &str,
         threshold_ma: Option<i64>,
+        min_on_s: Option<u32>,
     ) -> Result<DeviceRecord, AppError> {
         {
             let conn = self
@@ -227,8 +236,8 @@ impl DeviceStore for SqliteDeviceStore {
                 .map_err(|_| AppError::Store(StoreError::Poisoned))?;
             let updated = conn
                 .execute(
-                    "UPDATE devices SET power_threshold_ma = ?2 WHERE device_id = ?1",
-                    params![device_id, threshold_ma],
+                    "UPDATE devices SET power_threshold_ma = ?2, min_on_s = ?3 WHERE device_id = ?1",
+                    params![device_id, threshold_ma, min_on_s],
                 )
                 .map_err(|e| AppError::Store(StoreError::io("set_device_threshold", e)))?;
             if updated == 0 {

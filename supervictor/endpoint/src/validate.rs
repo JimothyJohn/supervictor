@@ -45,6 +45,23 @@ pub fn check_text(field: &str, value: &str, max_len: usize) -> Result<(), AppErr
 }
 
 /// Validate a device identifier (uplink `id` / registration `device_id`).
+/// A minimum on-time must fit the snapshot's history read: at most
+/// [`crate::fleet::MAX_MIN_ON_S`] seconds. `None` and 0 are "judge the last
+/// reading alone".
+pub fn check_min_on_s(value: Option<u32>) -> Result<(), AppError> {
+    match value {
+        Some(s) if s > crate::fleet::MAX_MIN_ON_S => Err(AppError::InvalidPayload {
+            detail: format!(
+                "{} must be at most {} seconds",
+                fields::MIN_ON_S,
+                crate::fleet::MAX_MIN_ON_S
+            ),
+            structured: None,
+        }),
+        _ => Ok(()),
+    }
+}
+
 pub fn check_device_id(field: &str, value: &str) -> Result<(), AppError> {
     check_text(field, value, MAX_DEVICE_ID_LEN)
 }

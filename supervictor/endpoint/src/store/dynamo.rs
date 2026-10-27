@@ -65,6 +65,9 @@ impl DynamoDeviceStore {
                 AttributeValue::N(t.to_string()),
             );
         }
+        if let Some(m) = record.min_on_s {
+            item.insert("min_on_s".into(), AttributeValue::N(m.to_string()));
+        }
         for (key, value) in Self::style_attributes(&record.style) {
             if let Some(value) = value {
                 item.insert(key.into(), value);
@@ -136,6 +139,21 @@ impl DynamoDeviceStore {
                             ))
                         })?,
                 ),
+            },
+            min_on_s: match item.get("min_on_s") {
+                None => None,
+                Some(v) => Some(
+                    v.as_n()
+                        .ok()
+                        .and_then(|n| n.parse::<u32>().ok())
+                        .ok_or_else(|| {
+                            AppError::Store(StoreError::io(
+                                "item_to_device",
+                                "min_on_s is not a u32",
+                            ))
+                        })?,
+                )
+                .filter(|m| *m > 0),
             },
             // Unknown style tokens read as unset (a newer binary may have
             // written them); the colour is validated where it is drawn.
@@ -276,26 +294,55 @@ impl DeviceStore for DynamoDeviceStore {
 
     /// One query per device (`limit 1`, newest first). Fine at current fleet
     /// sizes; at 100+ devices pre-aggregate a latest-uplink item instead
-    /// (TODO.md / FRONTEND plan open question).
+    /// (ROADMAP.md, endpoint track, when a fleet that size exists).
     fn set_device_threshold(
         &self,
         device_id: &str,
         threshold_ma: Option<i64>,
+        min_on_s: Option<u32>,
     ) -> Result<DeviceRecord, AppError> {
-        let base = self
+        // One update expression setting the present parts and removing
+        // the absent ones: `SET #t = :t REMOVE #m` and every other combo.
+        let mut request = self
             .client
             .update_item()
             .table_name(&self.devices_table)
             .key("device_id", AttributeValue::S(device_id.to_string()))
             .expression_attribute_names("#t", "power_threshold_ma")
+            .expression_attribute_names("#m", "min_on_s")
             .condition_expression("attribute_exists(device_id)")
             .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew);
-        let request = match threshold_ma {
-            Some(t) => base
-                .update_expression("SET #t = :t")
-                .expression_attribute_values(":t", AttributeValue::N(t.to_string())),
-            None => base.update_expression("REMOVE #t"),
-        };
+        let mut sets: Vec<&str> = Vec::new();
+        let mut removes: Vec<&str> = Vec::new();
+        match threshold_ma {
+            Some(t) => {
+                sets.push("#t = :t");
+                request =
+                    request.expression_attribute_values(":t", AttributeValue::N(t.to_string()));
+            }
+            None => removes.push("#t"),
+        }
+        match min_on_s {
+            Some(m) => {
+                sets.push("#m = :m");
+                request =
+                    request.expression_attribute_values(":m", AttributeValue::N(m.to_string()));
+            }
+            None => removes.push("#m"),
+        }
+        let mut expression = String::new();
+        if !sets.is_empty() {
+            expression.push_str("SET ");
+            expression.push_str(&sets.join(", "));
+        }
+        if !removes.is_empty() {
+            if !expression.is_empty() {
+                expression.push(' ');
+            }
+            expression.push_str("REMOVE ");
+            expression.push_str(&removes.join(", "));
+        }
+        let request = request.update_expression(expression);
 
         match block_on(request.send()) {
             Ok(out) => {
@@ -559,6 +606,7 @@ mod tests {
             status: "active".into(),
             created_at: "2025-01-01T00:00:00Z".into(),
             power_threshold_ma: None,
+            min_on_s: None,
             style: Default::default(),
             desired_fw: None,
         }

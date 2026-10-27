@@ -196,6 +196,7 @@ async fn set_device_threshold(
     tracing::info!(
         device_id = %crate::middleware::sanitize_for_log(&device_id),
         threshold_ma = ?resp.power_threshold_ma,
+        min_on_s = ?resp.min_on_s,
         "device threshold set"
     );
     Ok(Json(resp))

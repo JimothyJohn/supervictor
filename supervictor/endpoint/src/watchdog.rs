@@ -1,10 +1,7 @@
 //! Staleness watchdog: periodic fleet-health logging for long-running
 //! deployments (staging box, containers). Emits a structured summary each
-//! tick and a WARN per device that newly went dark — CloudWatch metric
-//! filters / journalctl alerts key off these lines.
-//!
-//! On Lambda the process freezes between invocations, so ticks only fire
-//! during traffic; use an external scheduled check there instead.
+//! tick and a WARN per device that newly went dark — journalctl alerts
+//! key off these lines.
 
 use std::collections::HashSet;
 use std::sync::Arc;

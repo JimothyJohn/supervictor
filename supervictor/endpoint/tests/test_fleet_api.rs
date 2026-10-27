@@ -33,6 +33,7 @@ fn seed(store: &dyn DeviceStore, id: &str, status: &str) {
             status: status.into(),
             created_at: "2026-07-01T00:00:00+00:00".into(),
             power_threshold_ma: None,
+            min_on_s: None,
             style: Default::default(),
             desired_fw: None,
         })
@@ -65,6 +66,7 @@ fn seed_with_threshold(store: &dyn DeviceStore, id: &str, threshold: Option<i64>
             status: "active".into(),
             created_at: "2026-07-01T00:00:00+00:00".into(),
             power_threshold_ma: threshold,
+            min_on_s: None,
             style: Default::default(),
             desired_fw: None,
         })
@@ -582,4 +584,180 @@ async fn uplink_without_fw_still_accepted() {
     let (name, value) = dn(ADMIN_DN);
     let fleet: serde_json::Value = server.get("/fleet").add_header(name, value).await.json();
     assert!(fleet[0].get("fw").is_none());
+}
+
+// ── Minimum on-time ("producing", decided 2026-10-27) ─────────────────
+
+fn uplink_at(store: &dyn DeviceStore, id: &str, unix: u64, current: i64) {
+    store
+        .put_uplink(UplinkRecord {
+            device_id: id.into(),
+            received_at: supervictor_endpoint::time::format_rfc3339(unix, 0),
+            payload: serde_json::json!({ "current": current }),
+        })
+        .unwrap();
+}
+
+fn seed_producing(store: &dyn DeviceStore, id: &str, threshold: i64, min_on_s: u32) {
+    seed_with_threshold(store, id, Some(threshold));
+    store
+        .set_device_threshold(id, Some(threshold), Some(min_on_s))
+        .unwrap();
+}
+
+/// An extruder whose screw has run for two minutes is producing; one whose
+/// heater zone just energised is not, although both read 24 A right now.
+#[tokio::test]
+async fn fleet_holds_a_device_off_until_its_min_on_time_has_elapsed() {
+    let (server, store) = server_with_store();
+    let now = supervictor_endpoint::time::parse_rfc3339_unix(&now_rfc3339()).unwrap();
+    seed_producing(store.as_ref(), "screw-01", 15_000, 60);
+    seed_producing(store.as_ref(), "heater-01", 15_000, 60);
+    seed_producing(store.as_ref(), "idle-01", 15_000, 60);
+    seed_with_threshold(store.as_ref(), "plain-01", Some(15_000));
+    for t in [120, 90, 60, 30, 0] {
+        uplink_at(store.as_ref(), "screw-01", now - t, 16_500);
+        uplink_at(store.as_ref(), "plain-01", now - t, 16_500);
+    }
+    // heater-01: below until 20 s ago, then pulsing above.
+    for t in [120, 90, 60, 30] {
+        uplink_at(store.as_ref(), "heater-01", now - t, 2_000);
+    }
+    for t in [20, 10, 0] {
+        uplink_at(store.as_ref(), "heater-01", now - t, 24_000);
+    }
+    // idle-01: below right now — off regardless of history.
+    for t in [120, 60] {
+        uplink_at(store.as_ref(), "idle-01", now - t, 24_000);
+    }
+    uplink_at(store.as_ref(), "idle-01", now, 500);
+
+    let (name, value) = dn(ADMIN_DN);
+    let body: serde_json::Value = server.get("/fleet").add_header(name, value).await.json();
+    let by_id = |id: &str| {
+        body.as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["device_id"] == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} missing from {body}"))
+    };
+    let screw = by_id("screw-01");
+    assert_eq!(screw["power"], "on", "{screw}");
+    assert_eq!(screw["min_on_s"], 60, "{screw}");
+    let heater = by_id("heater-01");
+    assert_eq!(heater["power"], "off", "{heater}");
+    assert_eq!(
+        heater["current"], 24_000,
+        "the reading itself is reported: {heater}"
+    );
+    assert_eq!(by_id("idle-01")["power"], "off");
+    let plain = by_id("plain-01");
+    assert_eq!(plain["power"], "on", "{plain}");
+    assert!(
+        plain.get("min_on_s").is_none(),
+        "no min-on, no field: {plain}"
+    );
+
+    let (name, value) = dn(ADMIN_DN);
+    let summary: serde_json::Value = server
+        .get("/fleet/summary")
+        .add_header(name, value)
+        .await
+        .json();
+    assert_eq!(summary["on"], 2, "{summary}");
+    assert_eq!(summary["off"], 2, "{summary}");
+
+    // Thirty seconds of running later the heater device qualifies too.
+    for t in [-30i64, -40, -50, -60] {
+        uplink_at(store.as_ref(), "heater-01", (now as i64 - t) as u64, 24_000);
+    }
+    let (name, value) = dn(ADMIN_DN);
+    let body: serde_json::Value = server.get("/fleet").add_header(name, value).await.json();
+    let heater = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["device_id"] == "heater-01")
+        .unwrap();
+    assert_eq!(heater["power"], "on", "{heater}");
+}
+
+#[tokio::test]
+async fn threshold_route_sets_the_min_on_and_registration_accepts_one() {
+    let (server, store) = server_with_store();
+    seed(store.as_ref(), "factory-01", "active");
+    let put = |body: &'static str| {
+        let (name, value) = dn(ADMIN_DN);
+        server
+            .put("/devices/factory-01/threshold")
+            .add_header(name, value)
+            .add_header(
+                HeaderName::from_static("content-type"),
+                HeaderValue::from_static("application/json"),
+            )
+            .text(body)
+    };
+    let resp = put(r#"{"power_threshold_ma": 15000, "min_on_s": 120}"#).await;
+    assert_eq!(resp.status_code(), 200, "{}", resp.text());
+    let body: serde_json::Value = resp.json();
+    assert_eq!(body["min_on_s"], 120, "{body}");
+    let (name, value) = dn(ADMIN_DN);
+    let device: serde_json::Value = server
+        .get("/devices/factory-01")
+        .add_header(name, value)
+        .await
+        .json();
+    assert_eq!(device["min_on_s"], 120, "{device}");
+
+    let resp = put(r#"{"min_on_s": 3601}"#).await;
+    assert_eq!(resp.status_code(), 422, "{}", resp.text());
+    assert_eq!(
+        store.get_device("factory-01").unwrap().unwrap().min_on_s,
+        Some(120),
+        "a rejected body writes nothing"
+    );
+    let resp = put(r#"{"power_threshold_ma": 15000}"#).await;
+    assert_eq!(resp.status_code(), 200);
+    let body: serde_json::Value = resp.json();
+    assert!(
+        body.get("min_on_s").is_none(),
+        "threshold alone clears it: {body}"
+    );
+
+    // A device certificate cannot set it.
+    let (name, value) = dn(DEVICE_DN);
+    let resp = server
+        .put("/devices/factory-01/threshold")
+        .add_header(name, value)
+        .text(r#"{"min_on_s": 1}"#)
+        .await;
+    assert_eq!(resp.status_code(), 403);
+
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server
+        .post("/devices")
+        .add_header(name, value)
+        .json(&serde_json::json!({
+            "device_id": "molder-01",
+            "owner_id": "owner-1",
+            "power_threshold_ma": 20_000,
+            "min_on_s": 120
+        }))
+        .await;
+    assert_eq!(resp.status_code(), 201, "{}", resp.text());
+    let body: serde_json::Value = resp.json();
+    assert_eq!(body["min_on_s"], 120, "{body}");
+    let (name, value) = dn(ADMIN_DN);
+    let resp = server
+        .post("/devices")
+        .add_header(name, value)
+        .json(&serde_json::json!({
+            "device_id": "molder-02",
+            "owner_id": "owner-1",
+            "min_on_s": 99_999
+        }))
+        .await;
+    assert_eq!(resp.status_code(), 422, "{}", resp.text());
+    assert!(store.get_device("molder-02").unwrap().is_none());
 }

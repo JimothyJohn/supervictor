@@ -320,7 +320,7 @@
       <div class="stat"><div class="n">5 s</div><div class="d">uplink period</div></div>
       <div class="stat"><div class="n">1 cert</div><div class="d">per machine, revocable</div></div>
       <div class="stat"><div class="n">10</div><div class="d">machine profiles to rehearse with</div></div>
-      <div class="stat"><div class="n">1 binary</div><div class="d">serverless or your own box</div></div>
+      <div class="stat"><div class="n">1 binary</div><div class="d">on your own box, anywhere</div></div>
     </div>
 
     <!-- SV-02 PLATFORM -->
@@ -336,7 +336,7 @@
         <ul>
           <li><strong>One-command onboarding</strong> — issue the certificate, register the device, flash the firmware, verify the first handshake. One step, repeatable per unit.</li>
           <li><strong>Certificate authority built in</strong> — device, server, and operator credentials from a single managed root; browser bundles for your team included.</li>
-          <li><strong>Runs where you run</strong> — the same service binary deploys serverless on AWS or on a $5/month box on your own network, terminating mTLS itself. No lock-in decision on day one.</li>
+          <li><strong>Runs where you run</strong> — one static binary on a $5/month VPS, a box on your own network, a Raspberry Pi or an EC2 instance, terminating mTLS itself. No cloud dependency, no lock-in decision on day one.</li>
           <li><strong>Rehearse without hardware</strong> — ten simulated machines (extruder, press brake, CNC mill, saw, oven, compressor, conveyor, molder, welder, pump) run as containers, each with its own certificate and a realistic working day, so the dashboard is proven before the first board is racked.</li>
         </ul>
       </div>
@@ -397,13 +397,11 @@
     <section id="architecture">
       <div class="sechead rv">
         <div class="sheetno">SV·03</div>
-        <h2>Self-host it, or scale it in the cloud</h2>
+        <h2>Self-host it, anywhere</h2>
         <div class="dim"></div>
       </div>
       <pre class="arch rv">
 MACHINE  (ESP32-POE over PoE Ethernet, ESP32-C3 over WiFi, or a simulated machine)
-   │
-   ├──<b>mTLS</b>──►  AWS API Gateway ──► Lambda ──► DynamoDB            <b>serverless</b>
    │
    └──<b>mTLS</b>──►  one static binary on your hardware ──► SQLite   <b>self-hosted</b>
                         │

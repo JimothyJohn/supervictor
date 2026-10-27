@@ -45,8 +45,8 @@ no-reset-no-sync` to attach without rebooting the running firmware.
 - `ethernet` (primary) — wired EMAC + LAN8710A over RMII, PoE-powered.
   Board bring-up (APLL 50 MHz + GPIO17 clock-out, pin map) lives in
   `src/board/poe_iso.rs`; the driver/stack wiring in `src/network/ethernet.rs`.
-  The EMAC driver is `ph-esp32-mac` pinned to a git rev carrying the
-  MDIO-read fix (upstream PR photon-circus/ph-esp32-mac#4).
+  The EMAC driver is `ph-esp32-mac` pinned to the upstream merge commit of
+  the MDIO-read fix (photon-circus/ph-esp32-mac#4); no release carries it yet.
 - `wifi` (fallback) — esp-radio station mode.
 
 ## no_std Constraints
@@ -59,10 +59,16 @@ no-reset-no-sync` to attach without rebooting the running firmware.
   (the one shared dependency); default 50 per 5 s = 10 Hz. `uplink_tests::full_uplink_with_max_id_fits_the_request_buffers`
   pins the JSON (1536) / request (2048) buffers in `network/http.rs`.
 
-## Telemetry simulator
+## Telemetry simulator (feature `sim`, off by default)
 - `src/models/sim.rs` fills the uplink; `src/models/profile.rs` makes it act
   like a machine (`Profile::parse` lists the names). Integer-only, seeded,
   stepped one simulated second at a time; tests run a full day per profile.
+- Behind `--features sim` (decided 2026-10-27): a production image can never
+  report a reading it did not take. Without it the uplink carries `current`
+  0 (no sensor driver yet, HARDWARE.md §7), `seq`, `uptime_s`, `interval_s`,
+  `heap_free` and nothing invented. `scripts/flash.sh` / `ota-push.sh` add
+  `sim` unless `SIM=0`; `desktop` implies it; tests always compile it.
+  `src/models/rng.rs` (xorshift, seed, uplink jitter) stays in every build.
 - `SIM_PROFILE` / `SIM_SPEED`: compile-time (`option_env!`) for the firmware,
   runtime env for `supervictor-desktop`. Unknown profile = compile error.
 - Fleet of containers: `docker-compose.sim.yml` + `Dockerfile.desktop`

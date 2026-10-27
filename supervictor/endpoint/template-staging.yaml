@@ -1,5 +1,13 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Supervictor endpoint - staging (single-node EC2 + Caddy + SQLite)
+Description: Supervictor endpoint - staging (one EC2 box running the single-binary release)
+
+# One t4g.micro that installs a GitHub release of supervictor-endpoint on
+# first boot (scripts/install-endpoint.sh: static musl binary, hardened
+# systemd unit, PEMs from S3, SQLite under /var/lib/supervictor). No Docker,
+# no Caddy, no on-box build. Updates: scripts/staging-stack-update.sh (pins
+# the live AMI so the instance is never replaced); releases go on the box
+# with scripts/install-staging.sh, builds between releases with
+# scripts/deploy-staging-build.sh.
 
 Parameters:
     Hostname:
@@ -19,14 +27,20 @@ Parameters:
         Type: AWS::Route53::HostedZone::Id
         Description: Route53 hosted zone for advin.io
 
+    Repo:
+        Type: String
+        Default: JimothyJohn/supervictor
+        Description: GitHub repository whose release the bootstrap installs
+
+    ReleaseTag:
+        Type: String
+        Default: v0.1.0
+        Description: Release tag the bootstrap installs (scripts/install-endpoint.sh <tag>)
+
     BundleBucket:
         Type: String
         Default: supervictor
-        Description: S3 bucket holding the deploy bundle and certs
-
-    BundleKey:
-        Type: String
-        Default: staging/bundle.tar.gz
+        Description: S3 bucket holding the mTLS PEMs the bootstrap fetches
 
     CaCertKey:
         Type: String
@@ -40,6 +54,18 @@ Parameters:
         Type: String
         Default: staging/server.key
 
+    ExistingAllocationId:
+        Type: String
+        Default: ""
+        Description: >-
+            Allocation ID of an Elastic IP allocated outside this stack (the live
+            box's eipalloc-…); empty allocates one here. Pair with ExistingPublicIp.
+
+    ExistingPublicIp:
+        Type: String
+        Default: ""
+        Description: The address of ExistingAllocationId (for the Route53 record); empty when the stack allocates its own.
+
     VpcId:
         Type: AWS::EC2::VPC::Id
         Description: Default VPC
@@ -51,6 +77,12 @@ Parameters:
     AmiId:
         Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
         Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+        Description: >-
+            Resolved at deploy time. staging-stack-update.sh passes the pinned
+            /supervictor/staging/ami-id so an update never replaces the instance.
+
+Conditions:
+    CreateEip: !Equals [!Ref ExistingAllocationId, ""]
 
 Resources:
     SecurityGroup:
@@ -63,7 +95,7 @@ Resources:
                   FromPort: 443
                   ToPort: 443
                   CidrIp: 0.0.0.0/0
-                  Description: mTLS API (devices)
+                  Description: mTLS API (devices, admins)
             Tags:
                 - Key: Name
                   Value: supervictor-staging
@@ -81,15 +113,16 @@ Resources:
             ManagedPolicyArns:
                 - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
             Policies:
-                - PolicyName: BundleAndCertRead
+                # The three PEMs the bootstrap installs, nothing else in the bucket.
+                - PolicyName: CertRead
                   PolicyDocument:
                       Version: "2012-10-17"
                       Statement:
-                          - Effect: Allow
+                          - Sid: StagingPemsOnly
+                            Effect: Allow
                             Action:
                                 - s3:GetObject
                             Resource:
-                                - !Sub arn:aws:s3:::${BundleBucket}/${BundleKey}
                                 - !Sub arn:aws:s3:::${BundleBucket}/${CaCertKey}
                                 - !Sub arn:aws:s3:::${BundleBucket}/${ServerCertKey}
                                 - !Sub arn:aws:s3:::${BundleBucket}/${ServerKeyKey}
@@ -128,6 +161,7 @@ Resources:
 
     ElasticIp:
         Type: AWS::EC2::EIP
+        Condition: CreateEip
         Properties:
             Domain: vpc
             Tags:
@@ -156,76 +190,43 @@ Resources:
             Tags:
                 - Key: Name
                   Value: supervictor-staging
+            # First boot only. Everything here is what scripts/install-staging.sh
+            # does over SSM for a later release; bash variables are written
+            # $NAME (no braces) so !Sub leaves them alone.
             UserData:
                 Fn::Base64: !Sub |
                     #!/usr/bin/env bash
-                    set -e
-                    set -o pipefail
+                    set -euo pipefail
                     exec > >(tee /var/log/bootstrap.log) 2>&1
 
-                    echo "[bootstrap] installing packages"
-                    dnf update -y
-                    dnf install -y docker tar gzip
+                    echo "[bootstrap] packages"
+                    dnf install -y curl tar gzip
 
-                    echo "[bootstrap] enabling swap (Rust build headroom on t4g.micro)"
-                    if [ ! -f /swapfile ]; then
-                        dd if=/dev/zero of=/swapfile bs=1M count=2048
-                        chmod 600 /swapfile
-                        mkswap /swapfile
-                        swapon /swapfile
-                        echo "/swapfile none swap sw 0 0" >> /etc/fstab
-                    fi
+                    echo "[bootstrap] mTLS material from s3://${BundleBucket}"
+                    install -d -m 0700 /etc/supervictor
+                    aws s3 cp s3://${BundleBucket}/${CaCertKey}     /etc/supervictor/ca.pem
+                    aws s3 cp s3://${BundleBucket}/${ServerCertKey} /etc/supervictor/server.pem
+                    aws s3 cp s3://${BundleBucket}/${ServerKeyKey}  /etc/supervictor/server.key
+                    chmod 0644 /etc/supervictor/ca.pem /etc/supervictor/server.pem
+                    chmod 0600 /etc/supervictor/server.key
 
-                    echo "[bootstrap] starting docker"
-                    systemctl enable docker
-                    systemctl start docker
+                    echo "[bootstrap] installer + unit from ${Repo}@${ReleaseTag}"
+                    RAW=https://raw.githubusercontent.com/${Repo}/${ReleaseTag}
+                    install -d /opt/supervictor/install/scripts /opt/supervictor/install/supervictor/endpoint/deploy
+                    curl -fsSL -o /opt/supervictor/install/scripts/install-endpoint.sh "$RAW/scripts/install-endpoint.sh"
+                    curl -fsSL -o /opt/supervictor/install/supervictor/endpoint/deploy/supervictor-endpoint.service "$RAW/supervictor/endpoint/deploy/supervictor-endpoint.service"
+                    chmod +x /opt/supervictor/install/scripts/install-endpoint.sh
 
-                    echo "[bootstrap] installing docker compose plugin"
-                    mkdir -p /usr/libexec/docker/cli-plugins
-                    curl -sSL \
-                        https://github.com/docker/compose/releases/download/v2.29.2/docker-compose-linux-aarch64 \
-                        -o /usr/libexec/docker/cli-plugins/docker-compose
-                    chmod +x /usr/libexec/docker/cli-plugins/docker-compose
-
-                    echo "[bootstrap] fetching certs + bundle from s3"
-                    mkdir -p /opt/supervictor/certs /opt/supervictor/app /var/lib/supervictor
-                    aws s3 cp s3://${BundleBucket}/${CaCertKey}     /opt/supervictor/certs/ca.pem
-                    aws s3 cp s3://${BundleBucket}/${ServerCertKey} /opt/supervictor/certs/server.pem
-                    aws s3 cp s3://${BundleBucket}/${ServerKeyKey}  /opt/supervictor/certs/server.key
-                    chmod 600 /opt/supervictor/certs/server.key
-                    aws s3 cp s3://${BundleBucket}/${BundleKey}     /tmp/bundle.tar.gz
-                    tar -xzf /tmp/bundle.tar.gz -C /opt/supervictor/app
-
-                    echo "[bootstrap] starting compose stack"
-                    cd /opt/supervictor/app/supervictor/endpoint
-                    docker compose -f docker-compose.staging.yml up -d --build
-
-                    echo "[bootstrap] installing systemd unit for reboot persistence"
-                    cat > /etc/systemd/system/supervictor.service <<'UNIT'
-                    [Unit]
-                    Description=Supervictor staging compose stack
-                    Requires=docker.service
-                    After=docker.service network-online.target
-
-                    [Service]
-                    Type=oneshot
-                    RemainAfterExit=yes
-                    WorkingDirectory=/opt/supervictor/app/supervictor/endpoint
-                    ExecStart=/usr/bin/docker compose -f docker-compose.staging.yml up -d
-                    ExecStop=/usr/bin/docker compose -f docker-compose.staging.yml down
-
-                    [Install]
-                    WantedBy=multi-user.target
-                    UNIT
-                    systemctl daemon-reload
-                    systemctl enable supervictor.service
+                    echo "[bootstrap] installing supervictor-endpoint ${ReleaseTag}"
+                    /opt/supervictor/install/scripts/install-endpoint.sh "${ReleaseTag}"
 
                     echo "[bootstrap] done"
+                    systemctl --no-pager --lines=3 status supervictor-endpoint || true
 
     ElasticIpAssociation:
         Type: AWS::EC2::EIPAssociation
         Properties:
-            AllocationId: !GetAtt ElasticIp.AllocationId
+            AllocationId: !If [CreateEip, !GetAtt ElasticIp.AllocationId, !Ref ExistingAllocationId]
             InstanceId: !Ref Instance
 
     DnsRecord:
@@ -236,11 +237,11 @@ Resources:
             Type: A
             TTL: 60
             ResourceRecords:
-                - !Ref ElasticIp
+                - !If [CreateEip, !Ref ElasticIp, !Ref ExistingPublicIp]
 
 Outputs:
     PublicIp:
-        Value: !Ref ElasticIp
+        Value: !If [CreateEip, !Ref ElasticIp, !Ref ExistingPublicIp]
     Hostname:
         Value: !Ref Hostname
     InstanceId:
@@ -248,4 +249,4 @@ Outputs:
     ShellCommand:
         Value: !Sub aws ssm start-session --target ${Instance} --region ${AWS::Region}
     HealthCheck:
-        Value: !Sub https://${Hostname}/health
+        Value: !Sub https://${Hostname}/health (needs a client certificate)

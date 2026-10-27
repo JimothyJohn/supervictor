@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Resolve when SIGTERM (ECS task stop, Lambda Web Adapter drain) or Ctrl-C
+/// Resolve when SIGTERM (systemd stop, container stop) or Ctrl-C
 /// arrives, letting in-flight requests finish instead of dropping mid-write.
 async fn shutdown_signal() {
     let ctrl_c = async {

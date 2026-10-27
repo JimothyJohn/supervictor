@@ -2,17 +2,17 @@
 # ota-push.sh — build a device's firmware, upload it to the endpoint, set it as
 # the device's target, and watch the device come back on it (docs/OTA.md).
 #
-#   FW_VERSION=0.2.0 ./scripts/ota-push.sh <device> staging [--no-activate] [--no-wait]
+#   FW_VERSION=0.2.0 ./scripts/ota-push.sh <device> <staging|prod> [--no-activate] [--no-wait]
 #
 #   device        DEVICE_NAME baked into the image (certs/devices/<device>/ must
 #                 exist; the image carries that device's cert + key, which is why
 #                 images are per device and only that device's cert may fetch one).
-#   staging       the only target with a firmware blob store today (FIRMWARE_DIR on
-#                 the box). dev/prod run on Lambda without one (TODO.md).
+#   staging|prod  the box to push through (its FIRMWARE_DIR holds the image).
 #   FW_VERSION    version the image reports and the manifest is filed under;
 #                 MAJOR.MINOR.PATCH[-pre], and it must be NEWER than what the
 #                 device runs or the device ignores it (anti-rollback). Required.
-#   FEATURES      as flash.sh: default from certs/rack-inventory.tsv.
+#   FEATURES      as flash.sh: default from certs/rack-inventory.tsv; `sim` added
+#                 unless SIM=0 (see flash.sh).
 #   FW_ROOT       checkout to build from (default: this one).
 #   --no-activate upload only; set desired_fw later with:
 #                 admin curl -X PUT .../devices/<device>/desired_fw -d '{"desired_fw":"X"}'
@@ -28,7 +28,7 @@
 . "$(dirname "$0")/_lib.sh"
 # shellcheck disable=SC2034  # read by _lib.sh's log()
 LOG_TAG=ota
-USAGE="usage: FW_VERSION=X.Y.Z ota-push.sh <device> staging [--no-activate] [--no-wait]"
+USAGE="usage: FW_VERSION=X.Y.Z ota-push.sh <device> <staging|prod> [--no-activate] [--no-wait]"
 DEVICE="${1:?$USAGE}"
 TARGET_ENV="${2:?$USAGE}"
 shift 2
@@ -45,7 +45,7 @@ FW_ROOT="${FW_ROOT:-$REPO_ROOT}"
 INVENTORY="${INVENTORY:-$REPO_ROOT/certs/rack-inventory.tsv}"
 need cargo espflash curl python3 shasum
 need_admin
-[ "$TARGET_ENV" = staging ] || fail "only staging has a firmware store today (dev/prod are Lambda; TODO.md)"
+TARGET_HOST="$(target_host "$TARGET_ENV")"
 [ -d "$FW_ROOT/supervictor/edge" ] || fail "no firmware checkout at $FW_ROOT"
 [ "$FW_ROOT" = "$REPO_ROOT" ] || [ -e "$FW_ROOT/certs" ] || ln -s "$REPO_ROOT/certs" "$FW_ROOT/certs"
 [ -f "$REPO_ROOT/certs/devices/$DEVICE/client.pem" ] || fail "no device cert for $DEVICE"
@@ -55,6 +55,13 @@ if [ -z "${FEATURES:-}" ] && [ -f "$INVENTORY" ]; then
     FEATURES="$(awk -F'\t' -v d="$DEVICE" 'NR > 1 && $1 == d { print $4; exit }' "$INVENTORY")"
 fi
 [ -n "${FEATURES:-}" ] || fail "FEATURES unset and $DEVICE has no row in $INVENTORY"
+
+# Telemetry simulator: the rack has no sensors yet, so bench images keep the
+# simulated traces (feature `sim`, off in Cargo by default — a production
+# image must never invent a reading). SIM=0 builds the measured-only image.
+if [ "${SIM:-1}" != 0 ]; then
+    case ",$FEATURES," in *,sim,*) ;; *) FEATURES="$FEATURES,sim" ;; esac
+fi
 case "$FEATURES" in
 *chip-esp32c3*) RTARGET=riscv32imc-unknown-none-elf; CHIP=esp32c3 ;;
 *)              RTARGET=xtensa-esp32-none-elf;       CHIP=esp32 ;;
@@ -65,13 +72,13 @@ set -a
 # shellcheck source=/dev/null
 . "$REPO_ROOT/.env.dev"
 set +a
-export HOST="$STAGING_HOST" API_PATH=/ CA_PATH="ca/$STAGING_BUNDLE_NAME" CERT_PATH="certs/" DEVICE_NAME="$DEVICE" FW_VERSION
+export HOST="$TARGET_HOST" API_PATH=/ CA_PATH="ca/$STAGING_BUNDLE_NAME" CERT_PATH="certs/" DEVICE_NAME="$DEVICE" FW_VERSION
 if [ -f "$HOME/export-esp.sh" ]; then
     # shellcheck source=/dev/null
     . "$HOME/export-esp.sh" >/dev/null 2>&1 || true
 fi
 
-BASE="https://$STAGING_HOST"
+BASE="https://$TARGET_HOST"
 log "current fleet row for $DEVICE:"
 admin_curl -fsS --cacert "$STAGING_BUNDLE" "$BASE/fleet" \
     | python3 -I -c 'import json,sys; d=sys.argv[1]; rows=[r for r in json.load(sys.stdin) if r.get("device_id")==d]; print("  ", json.dumps(rows[0]) if rows else "NOT REGISTERED"); sys.exit(0 if rows else 1)' "$DEVICE" \

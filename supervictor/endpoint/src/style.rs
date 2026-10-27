@@ -225,6 +225,7 @@ mod tests {
             status: "active".into(),
             created_at: created.into(),
             power_threshold_ma: None,
+            min_on_s: None,
             style: DeviceStyle {
                 color: color.map(Into::into),
                 ..Default::default()

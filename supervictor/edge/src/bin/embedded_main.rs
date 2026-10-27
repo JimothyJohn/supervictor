@@ -206,7 +206,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         stack
     };
 
-    // --- ESP-NOW beside the EMAC (coexistence spike, TODO.md P2) ---
+    // --- ESP-NOW beside the EMAC (the mesh's first module, docs/MESH.md) ---
     // Radio init comes after the wired stack so a radio failure can never
     // take the uplink down with it; the uplink keeps feeding the watchdog.
     #[cfg(feature = "espnow")]

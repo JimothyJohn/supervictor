@@ -134,12 +134,14 @@ pub trait DeviceStore: Send + Sync {
     /// Errors with [`AppError::DeviceNotFound`] if the device does not exist.
     fn set_device_status(&self, device_id: &str, status: &str) -> Result<DeviceRecord, AppError>;
 
-    /// Set (`Some`) or clear (`None`) a device's power threshold override;
-    /// returns the updated record, `DeviceNotFound` for an unknown id.
+    /// Set (`Some`) or clear (`None`) a device's power threshold override
+    /// and its minimum on-time, both at once; returns the updated record,
+    /// `DeviceNotFound` for an unknown id. The caller validates the values.
     fn set_device_threshold(
         &self,
         device_id: &str,
         threshold_ma: Option<i64>,
+        min_on_s: Option<u32>,
     ) -> Result<DeviceRecord, AppError>;
     /// Set (`Some`) or clear (`None`) the firmware version a device should
     /// run next; returns the updated record, `DeviceNotFound` for an
