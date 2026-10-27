@@ -112,7 +112,9 @@ register() { # <device>
 }
 
 # Set the per-device threshold and minimum on-time on an already-registered
-# device (admin cert). The PUT body replaces both parts, so both are sent.
+# device (admin cert). The PUT body replaces both parts; `min_on_s` is sent
+# only for profiles that have one, so an endpoint older than 2026-10-27
+# (no such field, deny_unknown_fields → 422) still accepts the others.
 # Idempotent; skipped with a note when no admin cert is available.
 apply_threshold() { # <device>
     local threshold min_on admin_dir="$REPO_ROOT/certs/admins/${FLEET_ADMIN:-nick}" status
@@ -126,10 +128,12 @@ apply_threshold() { # <device>
     status="$(curl -sS -o /dev/null -w '%{http_code}' "${CA_FLAG[@]}" \
         --cert "$admin_dir/admin.pem" --key "$admin_dir/admin.key" \
         -X PUT "https://$SIM_HOST/devices/$1/threshold" -H 'content-type: application/json' \
-        -d "{\"power_threshold_ma\":${threshold:-null},\"min_on_s\":${min_on:-null}}")"
+        -d "{\"power_threshold_ma\":${threshold:-null}${min_on:+,\"min_on_s\":$min_on}}")"
     case "$status" in
     200) log "$1: power threshold ${threshold:-default} mA${min_on:+, producing after $min_on s}" ;;
     404|405) log "$1: endpoint has no threshold route yet (HTTP $status); deploy the endpoint, then re-run" ;;
+    422) [[ -n "$min_on" ]] || fail "$1: threshold update returned HTTP 422"
+         log "$1: endpoint predates min_on_s (HTTP 422); threshold left as is — deploy the endpoint, then re-run" ;;
     *) fail "$1: threshold update returned HTTP $status" ;;
     esac
 }
