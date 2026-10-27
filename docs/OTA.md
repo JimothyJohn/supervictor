@@ -97,9 +97,11 @@ serverless stages that would have needed an S3 store were retired
   flash of every board. The rack takes that flash once, after PR 105 lands;
   `ota::partitions_tests` pins the layout so the next change is deliberate.
 - **Bench rules.** Never leave a serial monitor attached across an expected
-  reset (CH340 + GPIO0 strap → ROM bootloader); treat `espflash reset` as a
-  power cut in any test design; the revert test passes only on a *new*
-  uplink of the old version.
+  reset (CH340 + GPIO0 strap → ROM bootloader), and never run `espflash
+  board-info` against a board mid-test — it resets the board the same way
+  (2026-10-27: three minutes dark on rack-03; `espflash reset` recovers);
+  treat `espflash reset` as a power cut in any test design; the revert test
+  passes only on a *new* uplink of the old version.
 
 ## The model: pull, never push
 

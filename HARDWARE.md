@@ -343,8 +343,18 @@ Each step has a pass criterion; do not skip ahead on a fail.
   POE2. `rack-flash.sh` already enforces the POE2 order.
 - **Serial monitoring** without rebooting the board:
   `espflash monitor --non-interactive --chip esp32 --after no-reset --before no-reset-no-sync`.
-- **Identity by MAC, not port.** USB enumeration moves; the inventory TSV
-  keys on MAC.
+  Anything else espflash does over the CH340 — `board-info`, `flash`, a
+  monitor left attached across a reset — strobes DTR/RTS, which straps
+  GPIO0 and can park the board in the ROM bootloader (`boot:0x3
+  DOWNLOAD_BOOT`, no uplinks) until `espflash reset --port <port>`.
+  2026-10-27: a `board-info` run to find a port silenced rack-03 for three
+  minutes. Identify a board that must keep uplinking from the inventory,
+  never by probing it.
+- **Identity by MAC, not port.** USB enumeration moves, and every Olimex
+  CH340 enumerates under the *same* `/dev/cu.usbserial-XXXX` name on a given
+  hub position, so the Nth board plugged in looks identical to the one
+  before it. The inventory TSV keys on MAC; `rack-flash.sh` reads the MAC
+  after plug-in and, with a single CH340 present, uses it without asking.
 
 ## 10. Network and rack
 
