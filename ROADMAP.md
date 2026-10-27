@@ -7,8 +7,8 @@ step. Rethought July 2026 from the original orchestration pitch
 emptied. This file is the only backlog: every gated piece of work is a
 bullet here with its trigger. Decisions live where they apply (`HARDWARE.md`
 §11, `docs/MESH.md`, `docs/OTA.md`, `supervictor/endpoint/CLAUDE.md`);
-hands-on steps that are Nick's live in `scratch/README.md` (untracked);
-enterprise/monetization scope in `todo/ENTERPRISE.md`.
+hands-on steps that are Nick's are cards in `TODO.md` backed by tracked
+`scripts/`; enterprise/monetization scope in `todo/ENTERPRISE.md`.
 
 ## Where we are (shipped)
 
@@ -97,7 +97,7 @@ fires, building it is toil.
 - **Alerting beyond logs** (trigger: >1 site or >10 devices). The
   watchdog emits structured `device went dark` WARNs; relay journald → SNS
   so a dark device pages. Shares the SNS topic the billing alarm creates
-  (`scratch/04-billing-alarm.sh`).
+  (`scripts/billing-alarm.sh`).
 - **Cert rotation** (trigger: the first device certificate nearing
   expiry). Issue → deliver over the OTA channel → device swaps → revoke
   old. OTA exists; design the device-side swap with the NVS identity work.
