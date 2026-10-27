@@ -82,6 +82,11 @@ pub struct RegisterDeviceRequest {
     /// "on". Absent means the fleet default (`POWER_THRESHOLD_MA`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_threshold_ma: Option<i64>,
+    /// Seconds the current must stay at or above the threshold before the
+    /// device counts as `on` ("producing", not merely powered); unset or 0
+    /// judges the last reading alone. At most 3600.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_on_s: Option<u32>,
     /// Optional chart colour (see [`DeviceStyle::color`]); absent means the
     /// endpoint assigns the first palette slot the fleet is not using.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -207,8 +212,10 @@ impl DeviceStyle {
     }
 }
 
-/// Per-device power threshold update (`PUT /devices/{id}/threshold`, admin).
-/// `null` or an absent field clears the override back to the fleet default.
+/// Per-device power judgement update (`PUT /devices/{id}/threshold`,
+/// admin): the threshold and the minimum on-time together. The body
+/// replaces both — `null` or an absent field clears that part (threshold
+/// back to the fleet default, min-on back to "the last reading alone").
 /// Unknown fields are rejected so a misspelt key cannot silently clear it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -216,6 +223,11 @@ pub struct DeviceThresholdRequest {
     /// Current (mA) at or above which this device counts as powered on.
     #[serde(default)]
     pub power_threshold_ma: Option<i64>,
+    /// Seconds at or above the threshold before the device counts as
+    /// producing (decided 2026-10-27 for heated machines: a heater zone
+    /// pulsing is not "on"); 0 or absent = the last reading alone. ≤ 3600.
+    #[serde(default)]
+    pub min_on_s: Option<u32>,
 }
 
 /// Per-device target firmware update (`PUT /devices/{id}/desired_fw`,
@@ -279,6 +291,9 @@ pub struct DeviceResponse {
     /// Per-device power threshold (mA), if one overrides the fleet default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_threshold_ma: Option<i64>,
+    /// Minimum on-time (s) before the device counts as producing, if set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_on_s: Option<u32>,
     /// Stored chart colour (`s0`–`s7` or `#rrggbb`), if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,

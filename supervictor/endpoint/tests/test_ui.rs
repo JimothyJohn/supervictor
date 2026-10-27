@@ -33,6 +33,7 @@ fn seed_device(store: &dyn DeviceStore, id: &str, status: &str) {
             status: status.into(),
             created_at: "2026-07-01T00:00:00+00:00".into(),
             power_threshold_ma: None,
+            min_on_s: None,
             style: Default::default(),
             desired_fw: None,
         })
@@ -419,11 +420,89 @@ async fn threshold_form_sets_and_clears_the_override() {
 }
 
 #[tokio::test]
+async fn threshold_form_sets_and_clears_the_min_on_time_too() {
+    let (server, store) = server_with_store();
+    seed_device(store.as_ref(), "extruder-01", "active");
+
+    let mut req = server.post("/ui/devices/extruder-01/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req
+        .form(&[
+            ("csrf", "tok"),
+            ("threshold_ma", "15000"),
+            ("min_on_s", " 120 "),
+        ])
+        .await;
+    assert_eq!(resp.status_code(), 303, "{}", resp.text());
+    let stored = store.get_device("extruder-01").unwrap().unwrap();
+    assert_eq!(
+        (stored.power_threshold_ma, stored.min_on_s),
+        (Some(15_000), Some(120))
+    );
+
+    let (name, value) = dn(ADMIN_DN);
+    let html = server
+        .get("/ui/devices/extruder-01")
+        .add_header(name, value)
+        .await
+        .text();
+    assert!(html.contains(r#"name="min_on_s""#), "{html}");
+    assert!(html.contains(r#"value="120""#), "{html}");
+    assert!(html.contains("producing after 120 s"), "{html}");
+    let (name, value) = dn(ADMIN_DN);
+    let fleet_html = server.get("/ui").add_header(name, value).await.text();
+    assert!(fleet_html.contains("for 120 s"), "{fleet_html}");
+    assert!(fleet_html.contains(r#"data-min-on="120""#), "{fleet_html}");
+
+    // Bad values are 422 and write nothing; the cap holds.
+    for bad in ["abc", "-1", "1.5", "3601", "٣"] {
+        let mut req = server.post("/ui/devices/extruder-01/threshold");
+        for (name, value) in admin_with_cookie("tok") {
+            req = req.add_header(name, value);
+        }
+        let resp = req
+            .form(&[
+                ("csrf", "tok"),
+                ("threshold_ma", "15000"),
+                ("min_on_s", bad),
+            ])
+            .await;
+        assert_eq!(resp.status_code(), 422, "{bad}: {}", resp.text());
+        assert_eq!(
+            store.get_device("extruder-01").unwrap().unwrap().min_on_s,
+            Some(120),
+            "{bad}"
+        );
+    }
+
+    // Empty clears the min-on and keeps the threshold the form carries.
+    let mut req = server.post("/ui/devices/extruder-01/threshold");
+    for (name, value) in admin_with_cookie("tok") {
+        req = req.add_header(name, value);
+    }
+    let resp = req
+        .form(&[("csrf", "tok"), ("threshold_ma", "15000"), ("min_on_s", "")])
+        .await;
+    assert_eq!(resp.status_code(), 303);
+    let stored = store.get_device("extruder-01").unwrap().unwrap();
+    assert_eq!(
+        (stored.power_threshold_ma, stored.min_on_s),
+        (Some(15_000), None)
+    );
+    let (name, value) = dn(ADMIN_DN);
+    let fleet_html = server.get("/ui").add_header(name, value).await.text();
+    assert!(fleet_html.contains(r#"data-min-on="0""#), "{fleet_html}");
+    assert!(!fleet_html.contains("for 120 s"), "{fleet_html}");
+}
+
+#[tokio::test]
 async fn threshold_form_rejects_non_numbers_and_needs_csrf_and_admin() {
     let (server, store) = server_with_store();
     seed_device(store.as_ref(), "factory-01", "active");
     store
-        .set_device_threshold("factory-01", Some(5_000))
+        .set_device_threshold("factory-01", Some(5_000), None)
         .unwrap();
 
     for bad in ["abc", "1.5", "12 000", "1e3", "٣"] {
@@ -530,7 +609,7 @@ async fn fleet_rows_carry_their_power_threshold() {
     seed_device(store.as_ref(), "bench-01", "active");
     seed_device(store.as_ref(), "press-01", "active");
     store
-        .set_device_threshold("press-01", Some(12_000))
+        .set_device_threshold("press-01", Some(12_000), None)
         .unwrap();
 
     let (name, value) = dn(ADMIN_DN);
@@ -1551,9 +1630,11 @@ async fn history_tiles_name_per_device_thresholds_once_one_is_set() {
     // One override (press-01 idles above the default): the tiles say so,
     // counting only active devices.
     store
-        .set_device_threshold("press-01", Some(12_000))
+        .set_device_threshold("press-01", Some(12_000), None)
         .unwrap();
-    store.set_device_threshold("retired", Some(5)).unwrap();
+    store
+        .set_device_threshold("retired", Some(5), None)
+        .unwrap();
     let html = tiles(&get().await);
     let note = format!(
         "per-device thresholds — 1 of 2 set, fleet default {DEFAULT_POWER_THRESHOLD_MA} mA"

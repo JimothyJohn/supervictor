@@ -73,14 +73,27 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   `threshold_ma` there is the fleet default), the fleet table (`≥ N` beside
   an overridden row) and the charts (current chart first, the device's
   threshold drawn).
+  **Minimum on-time** (decided 2026-10-27, "producing" for heated
+  machines): a device with `min_on_s` set reads `on` only once current has
+  held at or above its threshold for that long, judged in `snapshot` by
+  `fleet::producing_state` over `device_uplinks_since` (the last
+  `2 × min_on_s`, ≤ `MIN_ON_ROWS`); one reading can switch it off, never on.
+  `off` / `unknown` and `min_on_s` 0 are the plain judgement; the cap is
+  `MAX_MIN_ON_S` (3600, enforced on input and when judging). `/fleet` rows
+  carry `min_on_s` when set; the history page's power timeline stays the
+  instantaneous reading. The live table patch flips a badge to `off` on an
+  event but leaves `on` to the next server render when `data-min-on` > 0.
 - Per-device threshold: `PUT /devices/{id}/threshold` (admin mTLS) with
-  `{"power_threshold_ma": 12000}`; `{}`, `null` or an empty body clears it
-  (`deny_unknown_fields`, so a misspelt key is 422, never a clear).
-  `POST /devices` accepts an optional `power_threshold_ma`. The device page
-  has the form (`POST /ui/devices/{id}/threshold`, CSRF). SQLite adds the
-  column on open (`ALTER TABLE` guarded by `pragma_table_info`); DynamoDB
-  stores it as an `N` attribute, `REMOVE`d on clear. `scripts/sim-fleet.sh`
-  sets per-profile values for the simulated machines.
+  `{"power_threshold_ma": 12000, "min_on_s": 120}`; the body replaces both
+  parts, so a threshold alone clears the min-on and `{}`, `null` or an
+  empty body clears both (`deny_unknown_fields`, so a misspelt key is 422,
+  never a clear; `min_on_s` > 3600 is 422). `POST /devices` accepts both
+  as optional fields. The device page has the form (`POST
+  /ui/devices/{id}/threshold`, CSRF; two number boxes). SQLite adds the
+  columns on open (`ALTER TABLE` guarded by `pragma_table_info`); DynamoDB
+  stores them as `N` attributes in one `SET … REMOVE …` update.
+  `scripts/sim-fleet.sh` sets per-profile values for the simulated
+  machines (`threshold_for`, `min_on_for`: 120 s for extruder and molder).
 - Live view: `/ui/live` (+ `/ui/live.json` for the polling fallback) shows
   the last 120 s at *sample* resolution as 8-bit register levels
   (`supervictor_common::levels`: 1..=255 spans a fixed range per register,

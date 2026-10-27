@@ -404,6 +404,9 @@ struct ThresholdForm {
     /// Threshold in mA; empty clears the override (back to the fleet default).
     #[serde(default)]
     threshold_ma: String,
+    /// Minimum on-time in seconds; empty or 0 judges the last reading alone.
+    #[serde(default)]
+    min_on_s: String,
 }
 
 async fn set_threshold(
@@ -424,14 +427,25 @@ async fn set_threshold(
             structured: None,
         })?)
     };
+    let raw = form.min_on_s.trim();
+    let min_on_s = if raw.is_empty() {
+        None
+    } else {
+        Some(raw.parse::<u32>().map_err(|_| AppError::InvalidPayload {
+            detail: "min_on_s must be a whole number of seconds, or empty to clear".into(),
+            structured: None,
+        })?)
+    };
     // Same validation and store path as the JSON API.
-    let body = serde_json::json!({ "power_threshold_ma": threshold }).to_string();
+    let body =
+        serde_json::json!({ "power_threshold_ma": threshold, "min_on_s": min_on_s }).to_string();
     crate::handlers::handle_set_device_threshold(&device_id, Some(&body), state.store.as_ref())?;
     tracing::info!(
         admin = %sanitize_for_log(&subject_of(&headers)),
         device_id = %sanitize_for_log(&device_id),
         action = "threshold",
         threshold_ma = ?threshold,
+        min_on_s = ?min_on_s,
         "fleet action"
     );
     Ok(Redirect::to(&format!("/ui/devices/{device_id}")).into_response())

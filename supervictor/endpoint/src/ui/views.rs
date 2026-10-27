@@ -134,10 +134,16 @@ pub const LIVE_SCRIPT: &str = r#"
         var now = row.querySelector('.current-now');
         if (now) now.textContent = ev.current + ' mA';
         var threshold = parseInt(row.getAttribute('data-threshold'), 10);
+        var minOn = parseInt(row.getAttribute('data-min-on'), 10);
         var power = row.querySelector('.badge.power');
         if (power && Number.isFinite(threshold)) {
           var state = ev.current >= threshold ? 'on' : 'off';
-          power.textContent = state; power.className = 'badge power ' + state;
+          // A minimum on-time is judged over history on the server: one
+          // reading can switch a device off, never on. Leave 'on' to the
+          // next server render.
+          if (state === 'off' || !(minOn > 0)) {
+            power.textContent = state; power.className = 'badge power ' + state;
+          }
         }
       }
       flash(row);
@@ -1098,7 +1104,7 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str, now_unix: u64) -
                     ul .glance-list {
                         @for row in rows {
                             @let active = row.device.status == status::ACTIVE;
-                            li .inactive[!active] data-device=(row.device.device_id) data-threshold=(row.threshold_ma) {
+                            li .inactive[!active] data-device=(row.device.device_id) data-threshold=(row.threshold_ma) data-min-on=(row.device.effective_min_on_s()) {
                                 a .glance-row href={ "/ui/devices/" (row.device.device_id) } {
                                     span .name { (charts::key(&row.style)) (row.device.device_id) }
                                     span .pow {
@@ -1132,13 +1138,14 @@ pub fn fleet_page(rows: &[FleetRow], csrf: &str, subject: &str, now_unix: u64) -
                 }
                 tbody {
                     @for row in rows {
-                        tr data-device=(row.device.device_id) data-threshold=(row.threshold_ma) {
+                        tr data-device=(row.device.device_id) data-threshold=(row.threshold_ma) data-min-on=(row.device.effective_min_on_s()) {
                             td { (charts::key(&row.style)) a href={ "/ui/devices/" (row.device.device_id) } { (row.device.device_id) } }
                             td { span .badge.(row.device.status) { (row.device.status) } }
                             td {
                                 span .badge.power.(row.power.label()) { (row.power.label()) }
                                 " " span .current-inline.current-now { @if let Some(c) = row.current { (c) " mA" } }
                                 @if let Some(t) = row.device.power_threshold_ma { " " span .current-inline title="per-device power threshold" { "≥ " (t) } }
+                                @if let Some(m) = row.device.min_on_s { " " span .current-inline.min-on title="minimum on-time: current must hold above the threshold this long before the device counts as producing" { "for " (m) " s" } }
                             }
                             td { (row.device.owner_id) }
                             td .last-uplink { (row.last_uplink.as_deref().unwrap_or("never")) }
@@ -1229,6 +1236,7 @@ pub fn device_page(
                 dd {
                     span .badge.power.(history.power.label()) { (history.power.label()) }
                     @if let Some(c) = history.current { " " span .current-inline { (c) " mA, threshold " (history.threshold_ma) " mA" } }
+                    @if let Some(m) = device.min_on_s { " " span .current-inline.min-on { "producing after " (m) " s above it" } }
                 }
                 dt { "power threshold" }
                 dd { (threshold_form(device, history, csrf)) }
@@ -1279,11 +1287,13 @@ pub fn device_page(
 }
 
 /// Revoke/reactivate toggle for a device (CSRF-protected form post).
-/// Set or clear the device's power threshold override. The number box is
-/// prefilled with the override (empty when the fleet default applies);
-/// submitting it empty clears the override.
+/// Set or clear the device's power judgement: the threshold override and
+/// the minimum on-time. Each number box is prefilled with the stored value
+/// (empty when the fleet default / the last reading alone applies);
+/// submitting a box empty clears that part. Both are submitted together.
 fn threshold_form(device: &DeviceRecord, history: &DeviceHistory<'_>, csrf: &str) -> Markup {
     let own = device.power_threshold_ma.map(|t| t.to_string());
+    let own_min_on = device.min_on_s.map(|m| m.to_string());
     html! {
         form .inline method="post" action={ "/ui/devices/" (device.device_id) "/threshold" } {
             input type="hidden" name="csrf" value=(csrf);
@@ -1293,6 +1303,14 @@ fn threshold_form(device: &DeviceRecord, history: &DeviceHistory<'_>, csrf: &str
                     value=[own.as_deref()]
                     placeholder=(history.fleet_threshold_ma);
                 " mA"
+            }
+            " "
+            label title="producing, not just powered: current must hold above the threshold this long (a heater zone pulsing never qualifies)" {
+                "for "
+                input type="number" name="min_on_s" step="1" min="0" max=(crate::fleet::MAX_MIN_ON_S) size="5"
+                    value=[own_min_on.as_deref()]
+                    placeholder="0";
+                " s"
             }
             button type="submit" { "set" }
             @if own.is_some() {

@@ -82,18 +82,30 @@ threshold_for() { # <service> -> mA or empty (fleet default)
     esac
 }
 
+# Heated profiles: "on" means producing (decided 2026-10-27), so the screw
+# or pump must hold above the threshold this long before the device reads
+# on; a heater zone pulsing for seconds never does. The other profiles are
+# settled by the single bar.
+min_on_for() { # <service> -> seconds or empty (last reading alone)
+    case "$1" in
+    sim-extruder-* | sim-molder-*) echo 120 ;;
+    *) echo "" ;;
+    esac
+}
+
 register() { # <device>
     local dir="$REPO_ROOT/certs/devices/$1" subject payload status
     subject="$(openssl x509 -in "$dir/client.pem" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"
-    local threshold
+    local threshold min_on
     threshold="$(threshold_for "$1")"
-    payload="$(printf '{"device_id":"%s","owner_id":"%s","subject_dn":"%s"%s}' \
-        "$1" "$OWNER" "$subject" "${threshold:+,\"power_threshold_ma\":$threshold}")"
+    min_on="$(min_on_for "$1")"
+    payload="$(printf '{"device_id":"%s","owner_id":"%s","subject_dn":"%s"%s%s}' \
+        "$1" "$OWNER" "$subject" "${threshold:+,\"power_threshold_ma\":$threshold}" "${min_on:+,\"min_on_s\":$min_on}")"
     status="$(curl -sS -o /dev/null -w '%{http_code}' "${CA_FLAG[@]}" \
         --cert "$dir/client.pem" --key "$dir/client.key" \
         -X POST "https://$SIM_HOST/devices" -H 'content-type: application/json' -d "$payload")"
     case "$status" in
-    201) log "$1: registered (owner $OWNER${threshold:+, threshold $threshold mA})" ;;
+    201) log "$1: registered (owner $OWNER${threshold:+, threshold $threshold mA}${min_on:+, min on $min_on s})" ;;
     409) log "$1: already registered" ;;
     *) fail "$1: registration returned HTTP $status" ;;
     esac

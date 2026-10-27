@@ -181,6 +181,7 @@ fn device(id: &str, subject_dn: Option<&str>) -> DeviceRecord {
         status: "active".into(),
         created_at: "2099-07-01T00:00:00+00:00".into(),
         power_threshold_ma: None,
+        min_on_s: None,
         style: Default::default(),
         desired_fw: None,
     }
@@ -338,9 +339,33 @@ async fn set_device_threshold_sets_clears_and_rejects_unknown() {
 
     let updated = fx
         .store
-        .set_device_threshold("dev-1", Some(12_000))
+        .set_device_threshold("dev-1", Some(12_000), None)
         .unwrap();
     assert_eq!(updated.power_threshold_ma, Some(12_000));
+    assert_eq!(updated.min_on_s, None);
+
+    // Every SET/REMOVE combination of the two parts, round-tripped.
+    for (t, m) in [
+        (Some(15_000), Some(120)),
+        (None, Some(60)),
+        (Some(15_000), None),
+        (None, None),
+        (Some(1), Some(u32::MAX)),
+    ] {
+        let updated = fx.store.set_device_threshold("dev-1", t, m).unwrap();
+        assert_eq!((updated.power_threshold_ma, updated.min_on_s), (t, m));
+        let read = fx.store.get_device("dev-1").unwrap().unwrap();
+        assert_eq!(
+            (read.power_threshold_ma, read.min_on_s),
+            (t, m),
+            "{t:?} {m:?}"
+        );
+    }
+    // Back to the state the rest of this test was written against.
+    let updated = fx
+        .store
+        .set_device_threshold("dev-1", Some(12_000), None)
+        .unwrap();
     assert_eq!(
         updated.subject_dn.as_deref(),
         Some("CN=dev-1"),
@@ -356,12 +381,15 @@ async fn set_device_threshold_sets_clears_and_rejects_unknown() {
     );
     // Negative and huge values survive the N attribute round trip.
     for t in [-1, i64::MAX, i64::MIN] {
-        let updated = fx.store.set_device_threshold("dev-1", Some(t)).unwrap();
+        let updated = fx
+            .store
+            .set_device_threshold("dev-1", Some(t), None)
+            .unwrap();
         assert_eq!(updated.power_threshold_ma, Some(t), "{t}");
     }
 
     // Clearing REMOVEs the attribute rather than storing a null.
-    let cleared = fx.store.set_device_threshold("dev-1", None).unwrap();
+    let cleared = fx.store.set_device_threshold("dev-1", None, None).unwrap();
     assert_eq!(cleared.power_threshold_ma, None);
     let listed = fx.store.list_devices().unwrap();
     assert_eq!(listed[0].power_threshold_ma, None);
@@ -379,7 +407,10 @@ async fn set_device_threshold_sets_clears_and_rejects_unknown() {
         Some(5_000)
     );
 
-    let err = fx.store.set_device_threshold("ghost", Some(1)).unwrap_err();
+    let err = fx
+        .store
+        .set_device_threshold("ghost", Some(1), None)
+        .unwrap_err();
     assert!(
         matches!(err, AppError::DeviceNotFound { .. }),
         "got {err:?}"
