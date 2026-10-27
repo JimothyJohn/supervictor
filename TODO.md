@@ -225,15 +225,15 @@ measured draw, unmanaged. Olimex boards pull a watt or two each.
 - [ ] Extend Mode switch OFF (it drops ports 1-4 to 10 Mbps; the ESP32 EMAC
       wants 100 Mbps).
 - [ ] Port 8 → house router (DHCP 10.0.0.x). Ports 1-7 → boards.
-- [ ] POE2 first (`poe2-wifi-01`, MAC 10:97:bd:e5:9b:0c): it already runs the
+- [x] POE2 first (`poe2-wifi-01`, MAC 10:97:bd:e5:9b:0c) — racked on switch port 1, 2026-10-27 01:45Z, fresh on staging: it already runs the
       wired `board-poe2` firmware. Unplug USB *before* cabling — the POE2 has
       no galvanic isolation and Olimex says no Ethernet while USB is attached.
       Expect `poe2-wifi-01` fresh on https://staging.supervictor.advin.io/fleet
       with a new `last_uplink` and no `rssi_dbm`.
-- [ ] POE-ISO (`poe-iso-eth-01`): `./scripts/flash.sh poe-iso-eth-01 staging`
+- [x] POE-ISO (`poe-iso-eth-01`) — racked on switch port 2, 2026-10-27 02:34Z: `./scripts/flash.sh poe-iso-eth-01 staging`
       over USB (re-identify the port by MAC e0:5a:1b:66:50:40 — hub positions
       moved), then rack it. Isolated board, USB + Ethernet together is fine.
-- [ ] **A/B reflash of the rack (the last USB flash)** — decided 2026-10-26:
+- [x] **A/B reflash of the rack (the last USB flash)** — DONE 2026-10-27 01:45–02:37Z: six PoE boards flashed from dev 43fd325 with FW_VERSION=0.1.6 baked, all fresh on staging at 0.1.6 (ports: poe2-wifi-01 →1, poe-iso-eth-01 →2, poe2-rack-01 →3, poe-iso-rack-01 →5, poe-iso-rack-02 →6; rack-03 was already on the table). The two WiFi devkits (c3-wifi-01, wrover-wifi-01) stay on 0.1.0 by Nick's call. rack-flash.sh fixes from the run: PR fix/rack-flash-robust. Decided 2026-10-26:
       once PR 105 is on dev, every board gets `./scripts/rack-flash.sh staging`
       (or `flash.sh <device> staging`) from a checkout on dev so it carries
       `partitions.csv`; after that OTA (`scripts/ota-push.sh`) is the only
