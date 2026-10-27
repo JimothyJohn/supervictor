@@ -125,7 +125,10 @@ fn uplink(id: &str, at: &str, current: i32) -> UplinkRecord {
 /// reload is dropped (nothing changes on a static site).
 fn staticize(html: String, devices: &[&str]) -> String {
     let mut out = html
-        .replace("href=\"/ui/assets/style.css\"", "href=\"style.css\"")
+        .replace(
+            &format!("href=\"{}\"", assets::stylesheet_href()),
+            "href=\"style.css\"",
+        )
         .replace("href=\"/ui\"", "href=\"index.html\"")
         .replace("action=\"/ui/devices\"", "action=\"#\"")
         .replace(" data-refresh=\"60\"", "")

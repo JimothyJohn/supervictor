@@ -50,27 +50,32 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   `localStorage` and restores it when the URL has no `device` key.
 - Themes (`src/ui/themes.css` tokens, `src/ui/themes.rs` registry, picker in
   `views::theme_picker`, bootstrap in `views::THEME_SCRIPT`; docs/THEMES.md):
-  six worlds — `foundry` (default), `clinical`, `boardroom`, `neon`,
-  `phosphor`, `greenhouse` — each a light AND a dark block,
-  `:root[data-theme="<id>"][data-mode="light|dark"]`, declaring every
-  token in `themes::TOKENS`. `style.css` is written against tokens only:
-  colours (`--green` on/fresh, `--red` off/dark, `--warn` stale,
-  `--accent` brand, `--accent-2` gradient partner), type (`--font`,
-  `--font-display`, weight/tracking/transform, `--value-scale`), shape
-  (radii, label casing), and the decorative layers (`--bg-art` drifting
-  gradients, `--grain`, `--floor`, `--wordmark` gradient text, glass
+  six worlds, each its own colour scheme — `foundry` (default, dark),
+  `clinical` (light), `boardroom` (light), `neon` (dark), `phosphor`
+  (dark), `greenhouse` (light) — one `:root[data-theme="<id>"]` block each
+  declaring every token in `themes::TOKENS`. `style.css` is written
+  against tokens only: colours (`--green` on/fresh, `--red` off/dark,
+  `--warn` stale, `--accent` brand, `--accent-2` gradient partner), type
+  (`--font`, `--font-display`, weight/tracking/transform, `--value-scale`),
+  shape (radii, label casing), layout (`--main-max`, `--tile-min`,
+  `--chart-min`) and the decorative layers (`--bg-art` drifting gradients,
+  `--grain`, `--floor`, `--wordmark` gradient text, glass
   `--card-bg`/`--card-ring`/`--card-blur`, `--header-bg`/`--header-rule`).
-  Chart series slots are the two validated reference steps by MODE, never
-  per theme; `figure.chart` keeps the solid `--surface` they were validated
-  on. The script always stamps both attributes (`auto` resolves against the
-  OS and follows it); bare `:root` and the no-script fallback are Foundry.
-  Storage: `sv-theme`, `sv-mode` (absent = auto; an old `light`/`dark` in
-  `sv-theme` is read as a mode), `sv-tweaks` JSON (accent, radius, font,
-  density, texture, motion → inline custom properties / `data-texture` /
-  `data-motion`). `#theme=<id>&mode=…&accent=…` links import once. Header:
-  sun/moon flips the mode, the swatch button opens the picker. Adding a
-  theme: two CSS blocks + a `THEMES` row with both previews; `test_ui`
-  checks blocks, tokens, preview hexes.
+  Per-world layout signatures (masthead, status-line tiles, nav styles)
+  sit at the bottom of themes.css under `@media (min-width: 641px)`;
+  phones keep the one glance layout. Chart series slots are the two
+  validated reference steps by scheme, never per theme; `figure.chart`
+  keeps the solid `--surface` they were validated on. The script always
+  stamps `data-theme` (Foundry when nothing is stored; bare `:root` is
+  Foundry; a stored `light`/`dark` from the original toggle aliases
+  Clinical/Foundry). Storage: `sv-theme`, `sv-tweaks` JSON (accent, radius,
+  font, density, texture, motion → inline custom properties /
+  `data-texture` / `data-motion`). `#theme=<id>&accent=…` links import
+  once. The stylesheet link is `assets::stylesheet_href()` — the content
+  hash in the query defeats the browser cache (a stale cached stylesheet
+  once made the picker look dead); the asset is served immutable. Adding a
+  theme: a CSS block + a `THEMES` row; `test_ui` checks block, tokens,
+  preview hexes, scheme and series rule.
 - Device style (`src/style.rs`, wire types in `supervictor_common::models`):
   `DeviceRecord.style` holds an optional colour (`s0`–`s7` palette slot or
   `#rrggbb`), `LineStyle` and `Marker`. `style::resolve` fills gaps —
