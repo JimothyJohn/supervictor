@@ -50,8 +50,12 @@ Design rules:
 > Since 2026-10-24 the bench firmware and the desktop client fill `seq`,
 > `uptime_s`, `interval_s`, `heap_free`, `rssi_dbm`, `temp_c` and
 > `humidity_pct` on every ping. Until real sensors land the environmental
-> values (and RSSI) come from `supervictor/edge/src/models/sim.rs`, a
-> seeded simulator; `heap_free` and `uptime_s` are real on the ESP32.
+> values (and RSSI, and `current` itself) come from
+> `supervictor/edge/src/models/sim.rs`, a seeded simulator behind the
+> `sim` cargo feature — off by default since 2026-10-27, so an image built
+> without it reports only `current` 0 (no sensor driver yet) plus the real
+> `seq` / `uptime_s` / `interval_s` / `heap_free`. `scripts/flash.sh` adds
+> `sim` for bench boards unless `SIM=0`.
 >
 > With a **machine profile** (`SIM_PROFILE`; `supervictor/edge/src/models/profile.rs`)
 > the simulator impersonates plant equipment instead of the bench trace:
@@ -106,7 +110,7 @@ for exactly this, so the two ends cannot drift.
 | Register | `lo` (level 1) | `hi` (level 255) | step |
 |----------|----------------|------------------|------|
 | `current` (mA) | 0 | 20000 | 78.7 mA |
-| `temp_c` | -20 | 60 | 0.31 °C |
+| `temp_c` | -40 | 60 | 0.39 °C |
 | `humidity_pct` | 0 | 100 | 0.39 %RH |
 | `rssi_dbm` | -100 | -20 | 0.31 dB |
 | `heap_free` (bytes) | 0 | 524288 | 2 KiB |

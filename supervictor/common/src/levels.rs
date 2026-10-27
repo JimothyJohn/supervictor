@@ -60,7 +60,9 @@ pub const REGISTERS: [Register; 5] = [
         key: fields::UPLINK_TEMP_C,
         label: "temperature",
         unit: "°C",
-        lo: -20.0,
+        // -40 °C floor (decided 2026-10-27): an unheated plant in winter,
+        // and the DS18B20 / SHT-class probes' own lower limit. 0.39 °C/step.
+        lo: -40.0,
         hi: 60.0,
     },
     Register {
@@ -261,7 +263,7 @@ mod tests {
             ranges,
             [
                 (0.0, 20_000.0),
-                (-20.0, 60.0),
+                (-40.0, 60.0),
                 (0.0, 100.0),
                 (-100.0, -20.0),
                 (0.0, 524_288.0),

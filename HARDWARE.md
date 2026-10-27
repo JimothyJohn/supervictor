@@ -276,10 +276,11 @@ re-exported through `board::active` like the Ethernet pins already are:
 **Features.** `sensor-current` and `sensor-sht4x`, both off by default so CI
 keeps building what it builds today; `scripts/flash.sh` grows a `FEATURES=`
 row for the kit (`ethernet,sensor-current[,sensor-sht4x]`) in
-`certs/rack-inventory.tsv`. When either sensor feature is on, the simulator
-(`models/sim.rs`, `models/profile.rs`) must not fill that field: this is the
-moment TODO.md P2 "simulator behind a cargo feature" lands as `sim`, on only
-for `SIM_PROFILE` builds.
+`certs/rack-inventory.tsv`. The simulator (`models/sim.rs`,
+`models/profile.rs`) is behind the `sim` feature since 2026-10-27, off by
+default; `flash.sh` adds it unless `SIM=0`. A sensor feature must take its
+field over from the simulator when both are on (today a build without `sim`
+sends `current` 0 and no environmental fields).
 
 **Sampling.** The burst task already samples every 100 ms
 (`UPLINK_BURST = 50` per 5 s uplink, 10 Hz; decided 2026-10-25 — the

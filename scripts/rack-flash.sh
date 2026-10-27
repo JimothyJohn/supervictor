@@ -92,8 +92,8 @@ if [ "${WARM:-1}" = 1 ]; then
         # shellcheck source=/dev/null
         . "$HOME/export-esp.sh" >/dev/null 2>&1 || true
         cd "$FW_ROOT/supervictor/edge"
-        DEVICE_NAME=warm-poe2    cargo build -q --bin supervictor-embedded --features board-poe2
-        DEVICE_NAME=warm-poe-iso cargo build -q --bin supervictor-embedded --features ethernet
+        DEVICE_NAME=warm-poe2    cargo build -q --bin supervictor-embedded --features board-poe2,sim
+        DEVICE_NAME=warm-poe-iso cargo build -q --bin supervictor-embedded --features ethernet,sim
     ) || die "warm build failed — fix the firmware build before racking boards"
     note "both feature sets build"
 fi

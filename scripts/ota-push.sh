@@ -12,7 +12,8 @@
 #   FW_VERSION    version the image reports and the manifest is filed under;
 #                 MAJOR.MINOR.PATCH[-pre], and it must be NEWER than what the
 #                 device runs or the device ignores it (anti-rollback). Required.
-#   FEATURES      as flash.sh: default from certs/rack-inventory.tsv.
+#   FEATURES      as flash.sh: default from certs/rack-inventory.tsv; `sim` added
+#                 unless SIM=0 (see flash.sh).
 #   FW_ROOT       checkout to build from (default: this one).
 #   --no-activate upload only; set desired_fw later with:
 #                 admin curl -X PUT .../devices/<device>/desired_fw -d '{"desired_fw":"X"}'
@@ -55,6 +56,13 @@ if [ -z "${FEATURES:-}" ] && [ -f "$INVENTORY" ]; then
     FEATURES="$(awk -F'\t' -v d="$DEVICE" 'NR > 1 && $1 == d { print $4; exit }' "$INVENTORY")"
 fi
 [ -n "${FEATURES:-}" ] || fail "FEATURES unset and $DEVICE has no row in $INVENTORY"
+
+# Telemetry simulator: the rack has no sensors yet, so bench images keep the
+# simulated traces (feature `sim`, off in Cargo by default — a production
+# image must never invent a reading). SIM=0 builds the measured-only image.
+if [ "${SIM:-1}" != 0 ]; then
+    case ",$FEATURES," in *,sim,*) ;; *) FEATURES="$FEATURES,sim" ;; esac
+fi
 case "$FEATURES" in
 *chip-esp32c3*) RTARGET=riscv32imc-unknown-none-elf; CHIP=esp32c3 ;;
 *)              RTARGET=xtensa-esp32-none-elf;       CHIP=esp32 ;;

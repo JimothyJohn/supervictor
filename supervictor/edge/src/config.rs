@@ -166,19 +166,3 @@ pub const JSON_MAP_ENTRIES_CAPACITY: usize = 2;
 /// in `network/http.rs::post_request` (see HTTP_REQUEST_BUFFER_CAPACITY
 /// note); sized for a worst-case full-telemetry UplinkMessage.
 pub const JSON_SERIALIZED_CAPACITY: usize = 512;
-
-// --- Portal (AP mode) ---
-/// Human-readable device identifier used in portal status responses.
-pub const DEVICE_ID: &str = "supervictor";
-/// SSID broadcast by the device when in access-point mode.
-pub const AP_SSID: &str = "Supervictor";
-/// IPv4 gateway address for the captive portal network.
-pub const AP_GATEWAY: [u8; 4] = [192, 168, 4, 1];
-/// TCP port the captive portal HTTP server listens on.
-pub const PORTAL_PORT: u16 = 80;
-/// Transmit buffer size for portal HTTP connections.
-pub const PORTAL_TX_BUFFER_SIZE: usize = 4096;
-/// Receive buffer size for portal HTTP connections.
-pub const PORTAL_RX_BUFFER_SIZE: usize = 512;
-/// Inactivity timeout for portal HTTP connections.
-pub const PORTAL_TIMEOUT: Duration = Duration::from_secs(30);

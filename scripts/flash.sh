@@ -14,7 +14,9 @@
 # Which firmware, which port:
 #   FEATURES     board-poe2 | ethernet | wifi,chip-esp32 | wifi,chip-esp32c3.
 #                Default: the device's row in certs/rack-inventory.tsv (INVENTORY);
-#                otherwise required.
+#                otherwise required. `sim` (the telemetry simulator) is added
+#                unless SIM=0: the rack has no sensors, so a bench image keeps
+#                the simulated traces; SIM=0 is the measured-only production image.
 #   SERIAL_PORT  /dev/cu.usb* (macOS) or /dev/tty{USB,ACM}* (Linux). Default:
 #                the only serial port present; with several, required. Ports
 #                move with hub position; identify a board by its MAC:
@@ -55,6 +57,13 @@ if [ -z "${FEATURES:-}" ] && [ -f "$INVENTORY" ]; then
     FEATURES="$(awk -F'\t' -v d="$DEVICE" 'NR > 1 && $1 == d { print $4; exit }' "$INVENTORY")"
 fi
 [ -n "${FEATURES:-}" ] || fail "FEATURES unset and $DEVICE has no row in $INVENTORY — FEATURES=board-poe2|ethernet|wifi,chip-esp32|wifi,chip-esp32c3"
+
+# Telemetry simulator: the rack has no sensors yet, so bench images keep the
+# simulated traces (feature `sim`, off in Cargo by default — a production
+# image must never invent a reading). SIM=0 builds the measured-only image.
+if [ "${SIM:-1}" != 0 ]; then
+    case ",$FEATURES," in *,sim,*) ;; *) FEATURES="$FEATURES,sim" ;; esac
+fi
 case "$FEATURES" in
 *chip-esp32c3*) RTARGET=riscv32imc-unknown-none-elf; CHIP=esp32c3 ;;
 *)              RTARGET=xtensa-esp32-none-elf;       CHIP=esp32 ;;

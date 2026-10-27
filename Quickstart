@@ -182,8 +182,10 @@ lint() {
 validate_and_build() {
     log "building workspace (host)"
     cargo build --workspace --target "$HOST_TARGET"
-    log "checking edge embedded ethernet (xtensa, ESP32-POE-ISO primary uplink)"
+    log "checking edge embedded ethernet (xtensa, ESP32-POE-ISO primary uplink; measured-only image)"
     (cd "$EDGE_DIR" && cargo check --features ethernet)
+    log "checking edge embedded ethernet + sim (what the rack runs)"
+    (cd "$EDGE_DIR" && cargo check --features ethernet,sim)
     log "checking edge embedded wifi (fallback interface, ESP32)"
     (cd "$EDGE_DIR" && cargo check --features wifi,chip-esp32)
     log "checking edge embedded wifi (ESP32-C3, riscv)"
