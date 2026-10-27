@@ -1,203 +1,489 @@
-/* Fleet dashboard — the six worlds.
-   One token vocabulary, six restatements. `style.css` is written against the
-   tokens only; a theme is a `:root[data-theme="<id>"]` block, nothing else.
-   The registry that the picker renders from is `themes.rs`; a test keeps
-   each theme's preview colours in step with the `--bg` / `--surface` /
-   `--accent` / `--text` declared here.
+/* Fleet dashboard — six worlds, each in a light and a dark mode.
+   One token vocabulary, twelve restatements. `style.css` is written against
+   the tokens only; a theme is a pair of blocks,
+   `:root[data-theme="<id>"][data-mode="dark"]` and `[data-mode="light"]`.
+   THEME_SCRIPT always stamps both attributes (auto resolves against the OS
+   before first paint); the bare `:root` and the no-script media fallback
+   are Foundry. The registry the picker renders from is `themes.rs`; a test
+   keeps each mode's preview colours in step with `--bg` / `--surface` /
+   `--accent` / `--text` here.
 
    Chart series (`--s0`…`--s7`) never change with the theme: the two
-   validated steps of the reference palette (dataviz skill) are reused on
-   every surface — dark steps on dark themes, light steps on light ones —
-   so a device keeps its colour whichever world the viewer picks, and the
-   categorical contrast stays validated. Semantic colours stay semantic:
-   `--green` is on/fresh, `--red` is off/dark, `--warn` is stale, and
-   `--accent` is the brand. */
+   validated steps of the reference palette (dataviz skill) — dark steps in
+   dark mode, light steps in light mode — so a device keeps its colour in
+   every world and the categorical contrast stays validated. Semantics stay
+   semantic: `--green` on/fresh, `--red` off/dark, `--warn` stale,
+   `--accent` the brand, `--accent-2` its partner in gradients.
 
-/* ── shared series steps ─────────────────────────────────────────────── */
-:root,
-:root[data-theme="foundry"], :root[data-theme="dark"],
-:root[data-theme="neon"], :root[data-theme="phosphor"] {
+   Decorative layers, all tokens: `--bg-art` (gradients under the page,
+   drifting when `--art-anim: running`), `--grain` (film-grain opacity),
+   `--floor` (a fixed strip along the bottom, e.g. a perspective grid),
+   `--wordmark` (gradient text for the title), `--card-bg` / `--card-ring`
+   / `--card-blur` (glass), `--header-bg` / `--header-rule`. */
+
+/* ── series steps by mode ────────────────────────────────────────────── */
+:root, :root[data-mode="dark"] {
   --s0: #3987e5; --s1: #d95926; --s2: #199e70; --s3: #c98500;
   --s4: #d55181; --s5: #008300; --s6: #9085e9; --s7: #e66767;
   --s-other: #71717a;
 }
-:root[data-theme="clinical"], :root[data-theme="light"],
-:root[data-theme="boardroom"], :root[data-theme="greenhouse"] {
+:root[data-mode="light"] {
   --s0: #2a78d6; --s1: #eb6834; --s2: #1baf7a; --s3: #eda100;
   --s4: #e87ba4; --s5: #008300; --s6: #6250d6; --s7: #e34948;
   --s-other: #71717a;
 }
 
-/* ── 1 · foundry — the plant floor ───────────────────────────────────── */
-/* Manufacturing, machine shops, OT control rooms. Charcoal, molten orange,
-   a monospace readout, a faint dot grid under everything. The default
-   when nothing is stored and the OS is dark; `dark` is its alias. */
-:root, :root[data-theme="foundry"], :root[data-theme="dark"] {
+/* ── 1 · foundry ─────────────────────────────────────────────────────── */
+/* Manufacturing, machine shops, control rooms. Condensed industrial type,
+   hazard stripes, a monospace readout. Dark is the furnace: brushed steel
+   with an ember glow rising from the floor. Light is the safety floor:
+   concrete, chevrons, orange and black. */
+:root, :root[data-theme="foundry"][data-mode="dark"] {
   color-scheme: dark;
-  --bg: #0e0e10; --surface: #18181b; --border: #27272a;
-  --text: #e4e4e7; --muted: #a1a1aa;
-  --accent: #f97316; --warn: #f97316;
-  --green: #22c55e; --blue: #3b82f6; --red: #ef4444;
+  --bg: #0b0b0d;
+  --bg-art:
+    radial-gradient(70% 45% at 50% 112%, rgb(255 122 26 / 0.30), transparent 70%),
+    repeating-linear-gradient(135deg, rgb(255 255 255 / 0.028) 0 2px, transparent 2px 7px);
+  --art-size: auto; --art-attach: fixed; --art-anim: paused;
+  --grain: 0.14;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #141417; --surface-2: #1c1c21;
+  --card-bg: linear-gradient(160deg, var(--surface-2), var(--surface));
+  --card-ring: inset 0 1px 0 rgb(255 255 255 / 0.05); --card-blur: 0px;
+  --border: #2b2b31; --text: #ececee; --muted: #9d9da6;
+  --accent: #ff7a1a; --accent-2: #ffb000; --warn: #ffb000;
+  --green: #37d67a; --blue: #4f8cff; --red: #ff4d4d;
   --font: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --font-display: var(--font);
-  --radius: 4px; --radius-lg: 10px;
-  --label-case: none; --label-tracking: 0;
-  --card-shadow: none; --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
-  --header-rule: linear-gradient(90deg, var(--accent) 0 12rem, transparent 32rem);
-  --glow: none;
-  --texture: radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.045) 1px, transparent 1.5px);
-  --texture-size: 22px 22px;
+  --font-display: "DIN Condensed", "Avenir Next Condensed", "Arial Narrow", Impact, sans-serif;
+  --display-weight: 700; --display-tracking: 0.03em; --display-transform: uppercase; --value-scale: 1.4;
+  --wordmark: linear-gradient(90deg, #ffb000, #ff5a00); --wordmark-ink: transparent; --wordmark-style: normal;
+  --wordmark-glow: drop-shadow(0 0 10px rgb(255 122 26 / 0.45));
+  --radius: 3px; --radius-lg: 6px;
+  --label-case: uppercase; --label-tracking: 0.12em;
+  --card-shadow: 0 0 0 transparent; --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
+  --header-bg: linear-gradient(180deg, rgb(255 122 26 / 0.09), transparent); --header-blur: 0px;
+  --header-rule: repeating-linear-gradient(135deg, var(--accent) 0 14px, #121214 14px 28px); --header-rule-h: 6px;
+  --glow: 0 0 16px rgb(255 122 26 / 0.35);
 }
-
-/* ── 2 · clinical — the ward ─────────────────────────────────────────── */
-/* Hospitals, labs, pharma cold rooms: autoclaves, freezers, centrifuges.
-   White, teal, a humanist sans, soft shadows, generous corners. The
-   default when the OS is light; `light` is its alias. */
-:root[data-theme="clinical"], :root[data-theme="light"] {
+:root[data-theme="foundry"][data-mode="light"] {
   color-scheme: light;
-  --bg: #f1f5f8; --surface: #ffffff; --border: #d9e1e9;
-  --text: #0f1b2d; --muted: #526273;
-  --accent: #0e7490; --warn: #b45309;
+  --bg: #e9e7e2;
+  --bg-art:
+    linear-gradient(180deg, rgb(232 93 4 / 0.10), transparent 30vh),
+    repeating-linear-gradient(135deg, rgb(0 0 0 / 0.035) 0 18px, transparent 18px 36px);
+  --art-size: auto; --art-attach: fixed; --art-anim: paused;
+  --grain: 0.09;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #f7f6f3; --surface-2: #ffffff;
+  --card-bg: linear-gradient(160deg, var(--surface-2), var(--surface));
+  --card-ring: 0 0 0 transparent; --card-blur: 0px;
+  --border: #c9c5bb; --text: #141416; --muted: #5b5a60;
+  --accent: #e85d04; --accent-2: #ffb703; --warn: #b45309;
   --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-display: var(--font);
-  --radius: 10px; --radius-lg: 16px;
-  --label-case: none; --label-tracking: 0;
-  --card-shadow: 0 1px 2px rgb(15 27 45 / 0.06), 0 6px 16px rgb(15 27 45 / 0.05);
-  --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
-  --header-rule: none;
+  --font: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-display: "DIN Condensed", "Avenir Next Condensed", "Arial Narrow", Impact, sans-serif;
+  --display-weight: 700; --display-tracking: 0.03em; --display-transform: uppercase; --value-scale: 1.4;
+  --wordmark: linear-gradient(90deg, #e85d04, #9a3412); --wordmark-ink: transparent; --wordmark-style: normal;
+  --wordmark-glow: none;
+  --radius: 3px; --radius-lg: 6px;
+  --label-case: uppercase; --label-tracking: 0.12em;
+  --card-shadow: 0 6px 18px rgb(20 20 22 / 0.08); --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
+  --header-bg: rgb(255 255 255 / 0.55); --header-blur: 0px;
+  --header-rule: repeating-linear-gradient(135deg, var(--accent) 0 14px, #141416 14px 28px); --header-rule-h: 6px;
   --glow: none;
-  --texture: none; --texture-size: auto;
 }
 
-/* ── 3 · boardroom — the annual report ───────────────────────────────── */
-/* Commercial real estate, facilities, energy managers reporting upward.
-   Ivory paper, navy ink, gold hairlines, serif numerals, small caps. */
-:root[data-theme="boardroom"] {
+/* ── 2 · clinical ────────────────────────────────────────────────────── */
+/* Hospitals, labs, pharma cold rooms. Frosted glass over a drifting
+   cyan–violet–pink mesh; heavy rounded sans; everything a pill. Light is
+   the ward at noon, dark is the night shift. */
+:root[data-theme="clinical"][data-mode="light"] {
   color-scheme: light;
-  --bg: #f4efe4; --surface: #fcf9f1; --border: #dfd5c0;
-  --text: #1c1a16; --muted: #6b6457;
-  --accent: #1f3a5f; --warn: #a8731c;
-  --green: #2f6b3a; --blue: #2457a6; --red: #a23b3b;
-  --font: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
-  --font-display: var(--font);
-  --radius: 2px; --radius-lg: 4px;
-  --label-case: uppercase; --label-tracking: 0.08em;
-  --card-shadow: none; --card-top: 2px solid var(--warn); --card-left: 1px solid var(--border);
-  --header-rule: linear-gradient(90deg, var(--warn), var(--warn));
+  --bg: #eef3f8;
+  --bg-art:
+    radial-gradient(40% 35% at 15% 10%, rgb(34 211 238 / 0.38), transparent 70%),
+    radial-gradient(35% 30% at 85% 15%, rgb(167 139 250 / 0.34), transparent 70%),
+    radial-gradient(45% 40% at 70% 92%, rgb(244 114 182 / 0.26), transparent 70%);
+  --art-size: 140% 140%; --art-attach: fixed; --art-anim: running;
+  --grain: 0.05;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #ffffff; --surface-2: #f7fafd;
+  --card-bg: rgb(255 255 255 / 0.70);
+  --card-ring: inset 0 0 0 1px rgb(255 255 255 / 0.7); --card-blur: 16px;
+  --border: rgb(15 27 45 / 0.10); --text: #0b1626; --muted: #4b5b70;
+  --accent: #0891b2; --accent-2: #7c3aed; --warn: #d97706;
+  --green: #059669; --blue: #2563eb; --red: #dc2626;
+  --font: "Avenir Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Avenir Next", Futura, system-ui, sans-serif;
+  --display-weight: 800; --display-tracking: -0.02em; --display-transform: none; --value-scale: 1.3;
+  --wordmark: linear-gradient(90deg, #0891b2, #7c3aed); --wordmark-ink: transparent; --wordmark-style: normal;
+  --wordmark-glow: none;
+  --radius: 14px; --radius-lg: 22px;
+  --label-case: none; --label-tracking: 0;
+  --card-shadow: 0 10px 30px rgb(15 27 45 / 0.08); --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
+  --header-bg: rgb(255 255 255 / 0.55); --header-blur: 14px;
+  --header-rule: linear-gradient(90deg, #0891b2, #7c3aed, #ec4899); --header-rule-h: 3px;
   --glow: none;
-  --texture: none; --texture-size: auto;
+}
+:root[data-theme="clinical"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg: #070b14;
+  --bg-art:
+    radial-gradient(40% 35% at 15% 10%, rgb(34 211 238 / 0.22), transparent 70%),
+    radial-gradient(35% 30% at 85% 15%, rgb(167 139 250 / 0.22), transparent 70%),
+    radial-gradient(45% 40% at 70% 92%, rgb(244 114 182 / 0.16), transparent 70%);
+  --art-size: 140% 140%; --art-attach: fixed; --art-anim: running;
+  --grain: 0.10;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #0f1627; --surface-2: #141d33;
+  --card-bg: rgb(255 255 255 / 0.05);
+  --card-ring: inset 0 0 0 1px rgb(255 255 255 / 0.08); --card-blur: 16px;
+  --border: rgb(255 255 255 / 0.10); --text: #e8eefc; --muted: #93a1ba;
+  --accent: #22d3ee; --accent-2: #a78bfa; --warn: #fbbf24;
+  --green: #34d399; --blue: #60a5fa; --red: #fb7185;
+  --font: "Avenir Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Avenir Next", Futura, system-ui, sans-serif;
+  --display-weight: 800; --display-tracking: -0.02em; --display-transform: none; --value-scale: 1.3;
+  --wordmark: linear-gradient(90deg, #22d3ee, #a78bfa); --wordmark-ink: transparent; --wordmark-style: normal;
+  --wordmark-glow: drop-shadow(0 0 12px rgb(34 211 238 / 0.35));
+  --radius: 14px; --radius-lg: 22px;
+  --label-case: none; --label-tracking: 0;
+  --card-shadow: 0 10px 30px rgb(0 0 0 / 0.35); --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
+  --header-bg: rgb(7 11 20 / 0.55); --header-blur: 14px;
+  --header-rule: linear-gradient(90deg, #22d3ee, #a78bfa, #f472b6); --header-rule-h: 3px;
+  --glow: 0 0 18px rgb(34 211 238 / 0.35);
 }
 
-/* ── 4 · neon — after hours ──────────────────────────────────────────── */
-/* Breweries, venues, hospitality, the startup that bought a rack of
-   ovens. Deep violet, hot magenta, cyan, glow on the big numbers. */
-:root[data-theme="neon"] {
-  color-scheme: dark;
-  --bg: #0d0a1c; --surface: #171233; --border: #2d2457;
-  --text: #efe9ff; --muted: #a79ecb;
-  --accent: #ff2d95; --warn: #ffb02e;
-  --green: #34d399; --blue: #22d3ee; --red: #ff5c7a;
-  --font: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-display: var(--font);
-  --radius: 14px; --radius-lg: 20px;
-  --label-case: none; --label-tracking: 0.02em;
-  --card-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent), 0 10px 32px rgb(0 0 0 / 0.45);
-  --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
-  --header-rule: linear-gradient(90deg, var(--accent), var(--blue));
-  --glow: 0 0 18px color-mix(in srgb, currentColor 60%, transparent);
-  --texture:
-    radial-gradient(1100px 560px at 8% -12%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 62%),
-    radial-gradient(900px 520px at 104% -4%, color-mix(in srgb, var(--blue) 14%, transparent), transparent 60%);
-  --texture-size: auto;
-}
-
-/* ── 5 · phosphor — the machine room ─────────────────────────────────── */
-/* Data centres, IT ops, the people who still read logs. Black glass,
-   green phosphor, amber accents, scanlines, no corners at all. */
-:root[data-theme="phosphor"] {
-  color-scheme: dark;
-  --bg: #000000; --surface: #050b06; --border: #163f1c;
-  --text: #6ef28a; --muted: #3aa352;
-  --accent: #ffb000; --warn: #ffb000;
-  --green: #39ff88; --blue: #4cc9f0; --red: #ff4d4d;
-  --font: "IBM Plex Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
-  --font-display: var(--font);
+/* ── 3 · boardroom ───────────────────────────────────────────────────── */
+/* Facilities, commercial real estate, energy managers. Editorial: Didot
+   numerals at display size, thick ink rules, small caps, paper grain.
+   Light is the magazine spread with a red folio; dark is gilt on ink. */
+:root[data-theme="boardroom"][data-mode="light"] {
+  color-scheme: light;
+  --bg: #f3eee3;
+  --bg-art: linear-gradient(180deg, #f8f4eb, #efe8d8);
+  --art-size: auto; --art-attach: fixed; --art-anim: paused;
+  --grain: 0.18;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #faf6ee; --surface-2: #fffdf7;
+  --card-bg: var(--surface);
+  --card-ring: 0 0 0 transparent; --card-blur: 0px;
+  --border: #1c1a16; --text: #161411; --muted: #6b6356;
+  --accent: #c8102e; --accent-2: #1c1a16; --warn: #b7791f;
+  --green: #1f6b3a; --blue: #1f3a5f; --red: #a3121f;
+  --font: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-display: Didot, "Bodoni 72", "Playfair Display", "Big Caslon", Georgia, serif;
+  --display-weight: 700; --display-tracking: -0.01em; --display-transform: none; --value-scale: 1.7;
+  --wordmark: none; --wordmark-ink: var(--text); --wordmark-style: italic;
+  --wordmark-glow: none;
   --radius: 0px; --radius-lg: 0px;
-  --label-case: uppercase; --label-tracking: 0.1em;
-  --card-shadow: none; --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
-  --header-rule: none;
-  --glow: 0 0 7px color-mix(in srgb, currentColor 55%, transparent);
-  --texture: repeating-linear-gradient(0deg, transparent 0 2px, rgb(0 0 0 / 0.28) 2px 3px);
-  --texture-size: auto;
-}
-
-/* ── 6 · greenhouse — the growing season ─────────────────────────────── */
-/* Farms, vertical growers, cold chain, food production. Cream and sage,
-   terracotta, harvest amber, rounded like a seed tray. */
-:root[data-theme="greenhouse"] {
-  color-scheme: light;
-  --bg: #f1f4ea; --surface: #fbfcf6; --border: #d5ddc6;
-  --text: #1f2a1c; --muted: #5d6b54;
-  --accent: #b65a30; --warn: #c98a16;
-  --green: #2f8f46; --blue: #2b6fa8; --red: #b73a3a;
-  --font: "Avenir Next", "Gill Sans", "Trebuchet MS", system-ui, sans-serif;
-  --font-display: var(--font);
-  --radius: 16px; --radius-lg: 22px;
-  --label-case: none; --label-tracking: 0;
-  --card-shadow: 0 2px 10px rgb(31 42 28 / 0.06);
-  --card-top: 1px solid var(--border); --card-left: 4px solid #9fb88a;
-  --header-rule: none;
+  --label-case: uppercase; --label-tracking: 0.16em;
+  --card-shadow: 0 0 0 transparent; --card-top: 3px solid var(--text); --card-left: 0 solid transparent;
+  --header-bg: none; --header-blur: 0px;
+  --header-rule: linear-gradient(var(--text), var(--text)); --header-rule-h: 3px;
   --glow: none;
-  --texture: linear-gradient(180deg, #e6ecd7, transparent 38%);
-  --texture-size: auto;
+}
+:root[data-theme="boardroom"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg: #0f0e0c;
+  --bg-art: radial-gradient(60% 50% at 50% 0%, rgb(212 167 58 / 0.14), transparent 70%);
+  --art-size: auto; --art-attach: fixed; --art-anim: paused;
+  --grain: 0.16;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #171512; --surface-2: #1d1a16;
+  --card-bg: linear-gradient(180deg, var(--surface-2), var(--surface));
+  --card-ring: 0 0 0 transparent; --card-blur: 0px;
+  --border: #3a3328; --text: #efe6d2; --muted: #a3987f;
+  --accent: #d4a73a; --accent-2: #efe6d2; --warn: #e0a526;
+  --green: #6fbf8a; --blue: #7aa2e8; --red: #e06c6c;
+  --font: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-display: Didot, "Bodoni 72", "Playfair Display", "Big Caslon", Georgia, serif;
+  --display-weight: 700; --display-tracking: -0.01em; --display-transform: none; --value-scale: 1.7;
+  --wordmark: linear-gradient(90deg, #f1d27a, #b8862b); --wordmark-ink: transparent; --wordmark-style: italic;
+  --wordmark-glow: none;
+  --radius: 0px; --radius-lg: 0px;
+  --label-case: uppercase; --label-tracking: 0.16em;
+  --card-shadow: 0 0 0 transparent; --card-top: 2px solid var(--accent); --card-left: 0 solid transparent;
+  --header-bg: none; --header-blur: 0px;
+  --header-rule: linear-gradient(90deg, #f1d27a, #b8862b); --header-rule-h: 2px;
+  --glow: none;
 }
 
-/* ── OS preference, no stored choice ─────────────────────────────────── */
-/* A light OS gets the ward; the picker's "auto" card removes the stamp. */
+/* ── 4 · neon ────────────────────────────────────────────────────────── */
+/* Breweries, venues, hospitality. Dark is synthwave: a striped sun in the
+   header, a perspective grid floor, chrome wordmark, glow on everything
+   that matters. Light is Miami: pastel sherbet, hot pink and teal. */
+:root[data-theme="neon"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg: #0a0618;
+  --bg-art:
+    linear-gradient(180deg, rgb(255 45 149 / 0.28), rgb(123 31 162 / 0.12) 30vh, transparent 55vh),
+    radial-gradient(50% 30% at 50% 100%, rgb(34 211 238 / 0.18), transparent 70%);
+  --art-size: auto; --art-attach: fixed; --art-anim: paused;
+  --grain: 0.08;
+  --floor:
+    linear-gradient(transparent 0 calc(100% - 1px), rgb(34 211 238 / 0.55) calc(100% - 1px)) 0 0 / 100% 34px,
+    linear-gradient(90deg, transparent 0 calc(100% - 1px), rgb(255 45 149 / 0.45) calc(100% - 1px)) 0 0 / 56px 100%;
+  --floor-h: 34vh; --floor-transform: perspective(420px) rotateX(62deg);
+  --surface: #15102e; --surface-2: #1e1545;
+  --card-bg: linear-gradient(160deg, rgb(255 45 149 / 0.12), rgb(34 211 238 / 0.07)), var(--surface);
+  --card-ring: 0 0 0 1px rgb(255 45 149 / 0.35), 0 0 26px rgb(255 45 149 / 0.16); --card-blur: 0px;
+  --border: #3a2a6e; --text: #f3ecff; --muted: #b3a6d9;
+  --accent: #ff2d95; --accent-2: #22d3ee; --warn: #ffb02e;
+  --green: #3ee89c; --blue: #22d3ee; --red: #ff5c7a;
+  --font: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: Futura, "Avenir Next", "Trebuchet MS", sans-serif;
+  --display-weight: 800; --display-tracking: 0.04em; --display-transform: uppercase; --value-scale: 1.3;
+  --wordmark: linear-gradient(180deg, #fff6fb 0%, #ffd1ea 46%, #ff2d95 52%, #7b1fa2 100%); --wordmark-ink: transparent; --wordmark-style: italic;
+  --wordmark-glow: drop-shadow(0 0 10px rgb(255 45 149 / 0.6));
+  --radius: 12px; --radius-lg: 18px;
+  --label-case: uppercase; --label-tracking: 0.08em;
+  --card-shadow: 0 14px 36px rgb(0 0 0 / 0.45); --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
+  --header-bg: linear-gradient(180deg, rgb(10 6 24 / 0.2), rgb(10 6 24 / 0.6)); --header-blur: 6px;
+  --header-rule: linear-gradient(90deg, #ff2d95, #22d3ee); --header-rule-h: 2px;
+  --glow: 0 0 18px currentColor;
+}
+:root[data-theme="neon"][data-mode="light"] {
+  color-scheme: light;
+  --bg: #fff1f6;
+  --bg-art:
+    linear-gradient(135deg, #ffe4ef, #e0f7ff 50%, #f3e8ff),
+    radial-gradient(40% 40% at 20% 0%, rgb(255 45 149 / 0.22), transparent 70%),
+    radial-gradient(40% 40% at 90% 100%, rgb(14 165 201 / 0.22), transparent 70%);
+  --art-size: 140% 140%; --art-attach: fixed; --art-anim: running;
+  --grain: 0.04;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #ffffff; --surface-2: #fff7fb;
+  --card-bg: linear-gradient(160deg, #ffffff, #fff7fb);
+  --card-ring: 0 0 0 1px rgb(230 0 126 / 0.18); --card-blur: 0px;
+  --border: #f3c6dc; --text: #2a1033; --muted: #7a5a86;
+  --accent: #e6007e; --accent-2: #0ea5c9; --warn: #d97706;
+  --green: #059669; --blue: #0284c7; --red: #dc2626;
+  --font: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: Futura, "Avenir Next", "Trebuchet MS", sans-serif;
+  --display-weight: 800; --display-tracking: 0.04em; --display-transform: uppercase; --value-scale: 1.3;
+  --wordmark: linear-gradient(90deg, #e6007e, #0ea5c9); --wordmark-ink: transparent; --wordmark-style: italic;
+  --wordmark-glow: none;
+  --radius: 12px; --radius-lg: 18px;
+  --label-case: uppercase; --label-tracking: 0.08em;
+  --card-shadow: 0 12px 30px rgb(230 0 126 / 0.12); --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
+  --header-bg: rgb(255 255 255 / 0.5); --header-blur: 10px;
+  --header-rule: linear-gradient(90deg, #e6007e, #0ea5c9); --header-rule-h: 3px;
+  --glow: none;
+}
+
+/* ── 5 · phosphor ────────────────────────────────────────────────────── */
+/* Data centres, IT ops. Dark is the CRT: black glass, green phosphor
+   with bloom, amber accents, scanlines and a vignette. Light is the
+   green-bar printout: banded paper, perforated margins, ballpoint blue. */
+:root[data-theme="phosphor"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --bg-art:
+    radial-gradient(80% 60% at 50% 40%, rgb(57 255 136 / 0.06), transparent 70%),
+    repeating-linear-gradient(0deg, transparent 0 2px, rgb(0 0 0 / 0.30) 2px 3px);
+  --art-size: auto; --art-attach: fixed; --art-anim: paused;
+  --grain: 0.10;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #050b06; --surface-2: #081209;
+  --card-bg: var(--surface);
+  --card-ring: inset 0 0 0 1px rgb(57 255 136 / 0.06); --card-blur: 0px;
+  --border: #163f1c; --text: #6ef28a; --muted: #3aa352;
+  --accent: #ffb000; --accent-2: #39ff88; --warn: #ffb000;
+  --green: #39ff88; --blue: #4cc9f0; --red: #ff4d4d;
+  --font: "PT Mono", "Andale Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --font-display: "PT Mono", "Andale Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --display-weight: 700; --display-tracking: 0.12em; --display-transform: uppercase; --value-scale: 1.2;
+  --wordmark: none; --wordmark-ink: var(--accent); --wordmark-style: normal;
+  --wordmark-glow: drop-shadow(0 0 6px rgb(255 176 0 / 0.6));
+  --radius: 0px; --radius-lg: 0px;
+  --label-case: uppercase; --label-tracking: 0.12em;
+  --card-shadow: 0 0 0 transparent; --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
+  --header-bg: none; --header-blur: 0px;
+  --header-rule: none; --header-rule-h: 0;
+  --glow: 0 0 8px currentColor, 0 0 24px rgb(57 255 136 / 0.35);
+}
+:root[data-theme="phosphor"][data-mode="light"] {
+  color-scheme: light;
+  --bg: #f4f7ee;
+  --bg-art: repeating-linear-gradient(180deg, #e2ebd2 0 1.65rem, #f6f8f0 1.65rem 3.3rem);
+  --art-size: auto; --art-attach: scroll; --art-anim: paused;
+  --grain: 0.07;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #ffffff; --surface-2: #fbfcf7;
+  --card-bg: rgb(255 255 255 / 0.88);
+  --card-ring: 0 0 0 transparent; --card-blur: 0px;
+  --border: #8aa37a; --text: #16341c; --muted: #4f6b50;
+  --accent: #1d3f8a; --accent-2: #1f6f3a; --warn: #b45309;
+  --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+  --font: "PT Mono", "Andale Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --font-display: "PT Mono", "Andale Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --display-weight: 700; --display-tracking: 0.12em; --display-transform: uppercase; --value-scale: 1.2;
+  --wordmark: none; --wordmark-ink: var(--accent); --wordmark-style: normal;
+  --wordmark-glow: none;
+  --radius: 0px; --radius-lg: 0px;
+  --label-case: uppercase; --label-tracking: 0.12em;
+  --card-shadow: 0 0 0 transparent; --card-top: 1px solid var(--border); --card-left: 1px solid var(--border);
+  --header-bg: rgb(255 255 255 / 0.6); --header-blur: 0px;
+  --header-rule: repeating-linear-gradient(90deg, var(--border) 0 6px, transparent 6px 12px); --header-rule-h: 1px;
+  --glow: none;
+}
+
+/* ── 6 · greenhouse ──────────────────────────────────────────────────── */
+/* Farms, vertical growers, cold chain. Botanical: soft foliage blobs
+   that drift, an italic serif wordmark, seed-tray corners, terracotta.
+   Light is the glasshouse at noon; dark is the night garden with
+   fireflies. */
+:root[data-theme="greenhouse"][data-mode="light"] {
+  color-scheme: light;
+  --bg: #f4f3e8;
+  --bg-art:
+    radial-gradient(45% 40% at 10% 0%, rgb(140 170 110 / 0.48), transparent 70%),
+    radial-gradient(35% 35% at 95% 20%, rgb(214 150 90 / 0.36), transparent 70%),
+    radial-gradient(50% 40% at 60% 100%, rgb(110 150 100 / 0.38), transparent 70%);
+  --art-size: 140% 140%; --art-attach: fixed; --art-anim: running;
+  --grain: 0.10;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #fbfaf2; --surface-2: #ffffff;
+  --card-bg: linear-gradient(160deg, #ffffff, #f6f5e9);
+  --card-ring: 0 0 0 transparent; --card-blur: 0px;
+  --border: #cdd6bb; --text: #1e2a1a; --muted: #5c6b52;
+  --accent: #c2572b; --accent-2: #5c7a3f; --warn: #c98a16;
+  --green: #2f8f46; --blue: #2b6fa8; --red: #b73a3a;
+  --font: Seravek, Optima, "Gill Sans", "Avenir Next", system-ui, sans-serif;
+  --font-display: Baskerville, "Hoefler Text", Charter, Georgia, serif;
+  --display-weight: 600; --display-tracking: -0.01em; --display-transform: none; --value-scale: 1.35;
+  --wordmark: linear-gradient(90deg, #5c7a3f, #c2572b); --wordmark-ink: transparent; --wordmark-style: italic;
+  --wordmark-glow: none;
+  --radius: 18px; --radius-lg: 26px;
+  --label-case: none; --label-tracking: 0.02em;
+  --card-shadow: 0 8px 24px rgb(31 42 28 / 0.08); --card-top: 1px solid var(--border); --card-left: 5px solid #9fb88a;
+  --header-bg: rgb(251 250 242 / 0.5); --header-blur: 8px;
+  --header-rule: linear-gradient(90deg, #9fb88a, #c2572b 60%, transparent); --header-rule-h: 3px;
+  --glow: none;
+}
+:root[data-theme="greenhouse"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg: #0c140e;
+  --bg-art:
+    radial-gradient(circle at 18% 28%, rgb(255 209 102 / 0.95) 0 1.2px, transparent 2.4px),
+    radial-gradient(circle at 72% 64%, rgb(255 209 102 / 0.8) 0 1px, transparent 2px),
+    radial-gradient(circle at 48% 86%, rgb(255 209 102 / 0.7) 0 1px, transparent 2px),
+    radial-gradient(60% 40% at 50% 112%, rgb(92 122 63 / 0.40), transparent 70%);
+  --art-size: 260px 200px, 340px 260px, 420px 300px, 100% 100%; --art-attach: fixed; --art-anim: running;
+  --grain: 0.12;
+  --floor: none; --floor-h: 0; --floor-transform: none;
+  --surface: #132018; --surface-2: #182a1e;
+  --card-bg: linear-gradient(160deg, var(--surface-2), var(--surface));
+  --card-ring: inset 0 1px 0 rgb(159 207 122 / 0.08); --card-blur: 0px;
+  --border: #2c4232; --text: #e8efdf; --muted: #9bb08f;
+  --accent: #e07a4a; --accent-2: #9fcf7a; --warn: #ffc14d;
+  --green: #5ddb84; --blue: #6fb1ff; --red: #ff6b6b;
+  --font: Seravek, Optima, "Gill Sans", "Avenir Next", system-ui, sans-serif;
+  --font-display: Baskerville, "Hoefler Text", Charter, Georgia, serif;
+  --display-weight: 600; --display-tracking: -0.01em; --display-transform: none; --value-scale: 1.35;
+  --wordmark: linear-gradient(90deg, #9fcf7a, #e07a4a); --wordmark-ink: transparent; --wordmark-style: italic;
+  --wordmark-glow: none;
+  --radius: 18px; --radius-lg: 26px;
+  --label-case: none; --label-tracking: 0.02em;
+  --card-shadow: 0 10px 28px rgb(0 0 0 / 0.35); --card-top: 1px solid var(--border); --card-left: 5px solid #5c7a3f;
+  --header-bg: rgb(12 20 14 / 0.5); --header-blur: 8px;
+  --header-rule: linear-gradient(90deg, #9fcf7a, #e07a4a 60%, transparent); --header-rule-h: 3px;
+  --glow: 0 0 14px rgb(159 207 122 / 0.35);
+}
+
+/* ── no-script fallback ──────────────────────────────────────────────── */
+/* THEME_SCRIPT stamps data-mode before first paint; without it, a light
+   OS gets Foundry's light mode (a restatement of the block above). */
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
+  :root:not([data-mode]) {
     color-scheme: light;
-    --bg: #f1f5f8; --surface: #ffffff; --border: #d9e1e9;
-    --text: #0f1b2d; --muted: #526273;
-    --accent: #0e7490; --warn: #b45309;
+    --bg: #e9e7e2;
+    --bg-art:
+      linear-gradient(180deg, rgb(232 93 4 / 0.10), transparent 30vh),
+      repeating-linear-gradient(135deg, rgb(0 0 0 / 0.035) 0 18px, transparent 18px 36px);
+    --grain: 0.09;
+    --surface: #f7f6f3; --surface-2: #ffffff;
+    --card-bg: linear-gradient(160deg, var(--surface-2), var(--surface));
+    --card-ring: 0 0 0 transparent;
+    --border: #c9c5bb; --text: #141416; --muted: #5b5a60;
+    --accent: #e85d04; --accent-2: #ffb703; --warn: #b45309;
     --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
     --s0: #2a78d6; --s1: #eb6834; --s2: #1baf7a; --s3: #eda100;
     --s4: #e87ba4; --s5: #008300; --s6: #6250d6; --s7: #e34948;
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --radius: 10px; --radius-lg: 16px;
-    --card-shadow: 0 1px 2px rgb(15 27 45 / 0.06), 0 6px 16px rgb(15 27 45 / 0.05);
-    --header-rule: none;
-    --texture: none;
+    --wordmark: linear-gradient(90deg, #e85d04, #9a3412); --wordmark-glow: none;
+    --card-shadow: 0 6px 18px rgb(20 20 22 / 0.08);
+    --header-bg: rgb(255 255 255 / 0.55);
+    --header-rule: repeating-linear-gradient(135deg, var(--accent) 0 14px, #141416 14px 28px);
+    --glow: none;
   }
 }
 
 /* ── signatures ──────────────────────────────────────────────────────── */
-/* The one or two touches per world that style.css cannot express through
-   tokens. Kept short on purpose: a theme is tokens first. */
-:root[data-theme="phosphor"] h1 a::before { content: "> "; }
-:root[data-theme="phosphor"] h1 a::after {
-  content: "▮"; margin-left: 0.15em; font-size: 0.9em;
-  animation: sv-blink 1.1s steps(1) infinite;
+/* The touches per world that tokens cannot say. Short on purpose. */
+
+/* phosphor dark: prompt and cursor on the wordmark, CRT vignette. */
+:root[data-theme="phosphor"][data-mode="dark"] h1 a::before { content: "> "; }
+:root[data-theme="phosphor"][data-mode="dark"] h1 a::after {
+  content: "▮"; margin-left: 0.15em; font-size: 0.9em; animation: sv-blink 1.1s steps(1) infinite;
 }
 @keyframes sv-blink { 50% { opacity: 0; } }
-:root[data-theme="phosphor"] .badge, :root[data-theme="phosphor"] .filters a, :root[data-theme="phosphor"] .filters button, :root[data-theme="phosphor"] button { border-radius: 0; }
-:root[data-theme="phosphor"] body::after {
-  /* CRT vignette over the scanlines; never catches the pointer. */
-  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 9;
-  background: radial-gradient(ellipse at center, transparent 60%, rgb(0 0 0 / 0.55) 100%);
+:root[data-theme="phosphor"][data-mode="dark"] html::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 3; height: auto; transform: none;
+  background: radial-gradient(ellipse at center, transparent 58%, rgb(0 0 0 / 0.6) 100%);
 }
-:root[data-theme="neon"] #live-dot.connected,
-:root[data-theme="neon"] .badge.active, :root[data-theme="neon"] .badge.power.on { text-shadow: var(--glow); }
+:root[data-theme="phosphor"] .badge, :root[data-theme="phosphor"] .filters a,
+:root[data-theme="phosphor"] .filters button, :root[data-theme="phosphor"] button,
+:root[data-theme="phosphor"] .devices a.chip, :root[data-theme="phosphor"] #theme-toggle,
+:root[data-theme="phosphor"] #mode-toggle { border-radius: 0; }
+/* phosphor light: perforated tractor-feed margins. */
+:root[data-theme="phosphor"][data-mode="light"] html::before,
+:root[data-theme="phosphor"][data-mode="light"] html::after {
+  content: ""; position: fixed; top: 0; bottom: 0; width: 1.4rem; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(circle at 50% 50%, #ffffff 0 4px, #c9d4b8 4.5px, transparent 5.5px) 0 0 / 100% 1.65rem,
+    rgb(226 235 210 / 0.6);
+}
+:root[data-theme="phosphor"][data-mode="light"] html::before { left: 0; border-right: 1px dashed #8aa37a; }
+:root[data-theme="phosphor"][data-mode="light"] html::after { right: 0; border-left: 1px dashed #8aa37a; }
+:root[data-theme="phosphor"][data-mode="light"] h1 a::before { content: "> "; }
+
+/* neon dark: the striped sun behind the header, glow on live states. */
+:root[data-theme="neon"][data-mode="dark"] header::before {
+  content: ""; position: absolute; right: -2.6rem; top: -3rem; width: 9rem; height: 9rem; border-radius: 50%;
+  background: linear-gradient(180deg, #ffd166 0%, #ff8a3d 45%, #ff2d95 100%);
+  -webkit-mask-image: repeating-linear-gradient(180deg, #000 0 9px, transparent 9px 12px);
+  mask-image: repeating-linear-gradient(180deg, #000 0 9px, transparent 9px 12px);
+  opacity: 0.75; pointer-events: none; z-index: -1;
+}
+@media (max-width: 640px) {
+  :root[data-theme="neon"][data-mode="dark"] header::before { width: 6rem; height: 6rem; right: -2rem; top: -2.4rem; opacity: 0.45; }
+}
+:root[data-theme="neon"][data-mode="dark"] #live-dot.connected,
+:root[data-theme="neon"][data-mode="dark"] .badge.active,
+:root[data-theme="neon"][data-mode="dark"] .badge.power.on { text-shadow: var(--glow); }
 :root[data-theme="neon"] .devices a.chip.on { box-shadow: inset 0 0 0 1px var(--c), 0 0 14px color-mix(in srgb, var(--c) 45%, transparent); }
-:root[data-theme="boardroom"] .tile-value, :root[data-theme="boardroom"] .verdict-head, :root[data-theme="boardroom"] .hero-state {
-  font-weight: 500; font-variant-numeric: lining-nums tabular-nums;
-}
-:root[data-theme="boardroom"] header h1 a { letter-spacing: 0.04em; }
-:root[data-theme="clinical"] .badge { background: color-mix(in srgb, currentColor 9%, transparent); border-color: transparent; }
+:root[data-theme="neon"] header nav a.current { text-shadow: 0 0 10px currentColor; }
+
+/* boardroom: lining numerals, a drop-cap feel on the verdict, red folio
+   on the current tab. */
+:root[data-theme="boardroom"] .tile-value, :root[data-theme="boardroom"] .verdict-head,
+:root[data-theme="boardroom"] .hero-state { font-variant-numeric: lining-nums tabular-nums; line-height: 1.05; }
+:root[data-theme="boardroom"] header nav a.current { color: var(--accent); text-decoration-thickness: 2px; }
+:root[data-theme="boardroom"] .tile { padding-top: 0.8rem; }
+:root[data-theme="boardroom"] figure.chart, :root[data-theme="boardroom"] figure.strip { border-top-width: 1px; }
+
+/* clinical: tinted pill badges, no outline. */
+:root[data-theme="clinical"] .badge { background: color-mix(in srgb, currentColor 11%, transparent); border-color: transparent; }
 :root[data-theme="clinical"] .badge.active, :root[data-theme="clinical"] .badge.inactive,
 :root[data-theme="clinical"] .badge.power.on, :root[data-theme="clinical"] .badge.power.off { border-color: transparent; }
-:root[data-theme="greenhouse"] .badge { border-radius: 8px; }
+
+/* foundry: stamped verdicts. */
+:root[data-theme="foundry"] .badge { border-radius: 2px; font-family: var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* greenhouse: leaf-shaped tiles (one sharp corner). */
+:root[data-theme="greenhouse"] .tile, :root[data-theme="greenhouse"] .live-card { border-top-left-radius: 4px; }
+
 @media (prefers-reduced-motion: reduce) {
   :root[data-theme="phosphor"] h1 a::after { animation: none; }
 }

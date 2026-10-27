@@ -1,27 +1,29 @@
-//! The dashboard's six worlds: one entry per `:root[data-theme="<id>"]`
-//! block in `themes.css`. The picker renders from this list, so adding a
-//! theme is a CSS block plus one row here; `tests/test_ui.rs` checks that
-//! each row's preview colours match the CSS tokens of the same name.
+//! The dashboard's six worlds, each in two modes: one entry per pair of
+//! `:root[data-theme="<id>"][data-mode="light|dark"]` blocks in
+//! `themes.css`. The picker renders from this list, so adding a theme is
+//! two CSS blocks plus one row here; `tests/test_ui.rs` checks that each
+//! mode's preview colours match the CSS tokens of the same name and that
+//! every block declares every token in [`TOKENS`].
 
-/// Whether a theme asks the browser for light or dark form controls.
+/// Light or dark: the `data-mode` stamp and the `color-scheme` value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scheme {
+pub enum Mode {
     Light,
     Dark,
 }
 
-impl Scheme {
-    /// The `color-scheme` value the theme's CSS block declares.
+impl Mode {
+    /// The `data-mode` / `color-scheme` value.
     pub fn css(self) -> &'static str {
         match self {
-            Scheme::Light => "light",
-            Scheme::Dark => "dark",
+            Mode::Light => "light",
+            Mode::Dark => "dark",
         }
     }
 }
 
-/// One world. The `preview` colours paint the picker card and must equal
-/// the theme's `--bg`, `--surface`, `--accent` and `--text` tokens.
+/// One world. `native` is the mode it was drawn in first (the picker's
+/// tagline describes that one); both modes are complete designs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
     /// The `data-theme` stamp; lowercase, stable, part of the stored contract.
@@ -32,8 +34,19 @@ pub struct Theme {
     pub audience: &'static str,
     /// One line on the look.
     pub tagline: &'static str,
-    pub scheme: Scheme,
-    pub preview: Preview,
+    pub native: Mode,
+    pub light: Preview,
+    pub dark: Preview,
+}
+
+impl Theme {
+    /// The preview for a mode.
+    pub fn preview(&self, mode: Mode) -> &Preview {
+        match mode {
+            Mode::Light => &self.light,
+            Mode::Dark => &self.dark,
+        }
+    }
 }
 
 /// Picker-card colours (hex, lowercase, as written in `themes.css`).
@@ -45,12 +58,58 @@ pub struct Preview {
     pub text: &'static str,
 }
 
-/// Theme applied when nothing is stored and the OS prefers dark (also the
-/// bare `:root` tokens, and the `dark` alias).
-pub const DEFAULT_DARK: &str = "foundry";
-/// Theme applied when nothing is stored and the OS prefers light (the
-/// `light` alias).
-pub const DEFAULT_LIGHT: &str = "clinical";
+/// Theme applied when nothing is stored (also the bare `:root` tokens).
+pub const DEFAULT_THEME: &str = "foundry";
+
+/// Every token a theme block must declare, in the order the blocks list
+/// them. `style.css` is written against these and nothing else.
+pub const TOKENS: &[&str] = &[
+    "--bg",
+    "--bg-art",
+    "--art-size",
+    "--art-attach",
+    "--art-anim",
+    "--grain",
+    "--floor",
+    "--floor-h",
+    "--floor-transform",
+    "--surface",
+    "--surface-2",
+    "--card-bg",
+    "--card-ring",
+    "--card-blur",
+    "--border",
+    "--text",
+    "--muted",
+    "--accent",
+    "--accent-2",
+    "--warn",
+    "--green",
+    "--blue",
+    "--red",
+    "--font",
+    "--font-display",
+    "--display-weight",
+    "--display-tracking",
+    "--display-transform",
+    "--value-scale",
+    "--wordmark",
+    "--wordmark-ink",
+    "--wordmark-style",
+    "--wordmark-glow",
+    "--radius",
+    "--radius-lg",
+    "--label-case",
+    "--label-tracking",
+    "--card-shadow",
+    "--card-top",
+    "--card-left",
+    "--header-bg",
+    "--header-blur",
+    "--header-rule",
+    "--header-rule-h",
+    "--glow",
+];
 
 /// Every theme, in picker order.
 pub const THEMES: &[Theme] = &[
@@ -58,78 +117,114 @@ pub const THEMES: &[Theme] = &[
         id: "foundry",
         name: "Foundry",
         audience: "manufacturing · machine shops · control rooms",
-        tagline: "Charcoal and molten orange, a monospace readout, a dot grid under the floor.",
-        scheme: Scheme::Dark,
-        preview: Preview {
-            bg: "#0e0e10",
-            surface: "#18181b",
-            accent: "#f97316",
-            text: "#e4e4e7",
+        tagline: "Condensed industrial type, hazard stripes, a monospace readout. Dark is the furnace, light is the safety floor.",
+        native: Mode::Dark,
+        dark: Preview {
+            bg: "#0b0b0d",
+            surface: "#141417",
+            accent: "#ff7a1a",
+            text: "#ececee",
+        },
+        light: Preview {
+            bg: "#e9e7e2",
+            surface: "#f7f6f3",
+            accent: "#e85d04",
+            text: "#141416",
         },
     },
     Theme {
         id: "clinical",
         name: "Clinical",
         audience: "hospitals · labs · pharma cold rooms",
-        tagline: "White and teal, soft shadows, generous corners. Autoclaves and freezers at a glance.",
-        scheme: Scheme::Light,
-        preview: Preview {
-            bg: "#f1f5f8",
+        tagline: "Frosted glass over a drifting cyan–violet mesh, heavy rounded sans. The ward at noon, or the night shift.",
+        native: Mode::Light,
+        light: Preview {
+            bg: "#eef3f8",
             surface: "#ffffff",
-            accent: "#0e7490",
-            text: "#0f1b2d",
+            accent: "#0891b2",
+            text: "#0b1626",
+        },
+        dark: Preview {
+            bg: "#070b14",
+            surface: "#0f1627",
+            accent: "#22d3ee",
+            text: "#e8eefc",
         },
     },
     Theme {
         id: "boardroom",
         name: "Boardroom",
         audience: "facilities · commercial real estate · energy managers",
-        tagline: "Ivory paper, navy ink, gold hairlines and serif numerals. Reads like the annual report.",
-        scheme: Scheme::Light,
-        preview: Preview {
-            bg: "#f4efe4",
-            surface: "#fcf9f1",
-            accent: "#1f3a5f",
-            text: "#1c1a16",
+        tagline: "Editorial: Didot numerals, thick ink rules, small caps, paper grain. A magazine spread, or gilt on ink.",
+        native: Mode::Light,
+        light: Preview {
+            bg: "#f3eee3",
+            surface: "#faf6ee",
+            accent: "#c8102e",
+            text: "#161411",
+        },
+        dark: Preview {
+            bg: "#0f0e0c",
+            surface: "#171512",
+            accent: "#d4a73a",
+            text: "#efe6d2",
         },
     },
     Theme {
         id: "neon",
         name: "Neon",
         audience: "breweries · venues · hospitality",
-        tagline: "Deep violet, hot magenta and cyan, glow on the big numbers. After hours.",
-        scheme: Scheme::Dark,
-        preview: Preview {
-            bg: "#0d0a1c",
-            surface: "#171233",
+        tagline: "Synthwave: striped sun, perspective grid floor, chrome wordmark, glow. Light is Miami sherbet.",
+        native: Mode::Dark,
+        dark: Preview {
+            bg: "#0a0618",
+            surface: "#15102e",
             accent: "#ff2d95",
-            text: "#efe9ff",
+            text: "#f3ecff",
+        },
+        light: Preview {
+            bg: "#fff1f6",
+            surface: "#ffffff",
+            accent: "#e6007e",
+            text: "#2a1033",
         },
     },
     Theme {
         id: "phosphor",
         name: "Phosphor",
         audience: "data centres · IT ops · people who read logs",
-        tagline: "Black glass, green phosphor, amber accents, scanlines. No corners at all.",
-        scheme: Scheme::Dark,
-        preview: Preview {
+        tagline: "The CRT: phosphor bloom, amber, scanlines, a vignette. Light is the green-bar printout with tractor-feed margins.",
+        native: Mode::Dark,
+        dark: Preview {
             bg: "#000000",
             surface: "#050b06",
             accent: "#ffb000",
             text: "#6ef28a",
+        },
+        light: Preview {
+            bg: "#f4f7ee",
+            surface: "#ffffff",
+            accent: "#1d3f8a",
+            text: "#16341c",
         },
     },
     Theme {
         id: "greenhouse",
         name: "Greenhouse",
         audience: "farms · vertical growers · cold chain",
-        tagline: "Cream and sage, terracotta and harvest amber, rounded like a seed tray.",
-        scheme: Scheme::Light,
-        preview: Preview {
-            bg: "#f1f4ea",
-            surface: "#fbfcf6",
-            accent: "#b65a30",
-            text: "#1f2a1c",
+        tagline: "Botanical: drifting foliage, an italic serif wordmark, seed-tray corners, terracotta. Dark is the night garden with fireflies.",
+        native: Mode::Light,
+        light: Preview {
+            bg: "#f4f3e8",
+            surface: "#fbfaf2",
+            accent: "#c2572b",
+            text: "#1e2a1a",
+        },
+        dark: Preview {
+            bg: "#0c140e",
+            surface: "#132018",
+            accent: "#e07a4a",
+            text: "#e8efdf",
         },
     },
 ];
@@ -149,8 +244,16 @@ pub fn ids_json() -> String {
 mod tests {
     use super::*;
 
+    fn is_hex(hex: &str) -> bool {
+        hex.len() == 7
+            && hex.starts_with('#')
+            && hex[1..]
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    }
+
     #[test]
-    fn ids_are_unique_lowercase_and_six() {
+    fn ids_are_unique_lowercase_and_six_with_two_previews_each() {
         assert_eq!(THEMES.len(), 6);
         let mut seen = std::collections::HashSet::new();
         for t in THEMES {
@@ -160,29 +263,17 @@ mod tests {
                 t.id
             );
             assert!(seen.insert(t.id), "duplicate id {}", t.id);
-            for hex in [
-                t.preview.bg,
-                t.preview.surface,
-                t.preview.accent,
-                t.preview.text,
-            ] {
-                assert!(
-                    hex.len() == 7
-                        && hex.starts_with('#')
-                        && hex[1..]
-                            .chars()
-                            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
-                    "{}: {hex}",
-                    t.id
-                );
+            for p in [&t.light, &t.dark] {
+                for hex in [p.bg, p.surface, p.accent, p.text] {
+                    assert!(is_hex(hex), "{}: {hex}", t.id);
+                }
             }
+            assert_ne!(t.light.bg, t.dark.bg, "{}: modes must differ", t.id);
+            assert_eq!(t.preview(t.native).bg, t.preview(t.native).bg);
         }
-        assert!(by_id(DEFAULT_DARK).is_some_and(|t| t.scheme == Scheme::Dark));
-        assert!(by_id(DEFAULT_LIGHT).is_some_and(|t| t.scheme == Scheme::Light));
-        assert!(
-            by_id("light").is_none(),
-            "aliases live in CSS and the script, not the registry"
-        );
+        assert_eq!(THEMES[0].id, DEFAULT_THEME, "the default is the first card");
+        assert!(by_id("light").is_none() && by_id("auto").is_none());
+        assert!(TOKENS.len() > 40 && TOKENS.iter().all(|t| t.starts_with("--")));
     }
 
     #[test]

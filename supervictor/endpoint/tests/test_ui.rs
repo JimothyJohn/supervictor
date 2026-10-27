@@ -1178,26 +1178,46 @@ async fn device_page_has_window_filters_and_metric_charts() {
 
 // ── Theme + phones ────────────────────────────────────────────────────
 
-/// Every page carries the appearance button, the picker with one card per
-/// theme (plus auto), and the pre-paint bootstrap; the stylesheet has a
-/// token block per registered theme whose preview colours match, keeps the
-/// `light` / `dark` aliases for choices stored by the old toggle, falls back
-/// to the OS preference, and routes the stale colour through `--warn`.
+/// Every page carries the mode button, the appearance button, the picker
+/// with one card per theme and the mode switch, and the pre-paint
+/// bootstrap; the stylesheet has a light and a dark token block per
+/// registered theme, each declaring every token with preview colours that
+/// match, series steps by mode, a no-script fallback, and routes the stale
+/// colour through `--warn`.
 #[tokio::test]
-async fn every_page_has_the_theme_picker_and_every_theme_has_tokens() {
-    use supervictor_endpoint::ui::themes::{Scheme, DEFAULT_DARK, DEFAULT_LIGHT, THEMES};
+async fn every_page_has_the_theme_picker_and_every_theme_has_both_modes() {
+    use supervictor_endpoint::ui::themes::{Mode, DEFAULT_THEME, THEMES, TOKENS};
     let (server, store) = server_with_store();
     seed_device(store.as_ref(), "factory-01", "active");
     for path in ["/ui", "/ui/history", "/ui/live", "/ui/devices/factory-01"] {
         let (name, value) = dn(ADMIN_DN);
         let html = server.get(path).add_header(name, value).await.text();
-        assert!(html.contains("id=\"theme-toggle\""), "{path}: no button");
+        assert!(
+            html.contains("id=\"theme-toggle\""),
+            "{path}: no appearance button"
+        );
+        assert!(
+            html.contains("id=\"mode-toggle\"")
+                && html.contains("class=\"icon-sun\"")
+                && html.contains("class=\"icon-moon\""),
+            "{path}: no mode button"
+        );
         assert!(
             html.contains("aria-controls=\"theme-picker\"")
                 && html.contains("<dialog id=\"theme-picker\""),
             "{path}: no picker"
         );
-        assert!(html.contains("data-theme-id=\"auto\""), "{path}: auto card");
+        for mode in ["auto", "light", "dark"] {
+            assert_eq!(
+                html.matches(&format!("data-mode-id=\"{mode}\"")).count(),
+                1,
+                "{path}: mode switch {mode}"
+            );
+        }
+        assert!(
+            !html.contains("data-theme-id=\"auto\""),
+            "{path}: auto is a mode, not a world"
+        );
         for theme in THEMES {
             assert!(
                 html.contains(&format!("data-theme-id=\"{}\"", theme.id)),
@@ -1209,26 +1229,30 @@ async fn every_page_has_the_theme_picker_and_every_theme_has_tokens() {
                 "{path}: {}",
                 theme.id
             );
+            // Both modes' previews ride on the card.
+            assert!(
+                html.contains(&format!("--pl-bg:{};", theme.light.bg))
+                    && html.contains(&format!("--pd-bg:{};", theme.dark.bg)),
+                "{path}: {} previews",
+                theme.id
+            );
         }
         let head_end = html.find("</head>").expect("head");
         let head = &html[..head_end];
         assert!(
-            head.contains("sv-theme"),
-            "{path}: theme bootstrap must run in <head>"
+            head.contains("sv-theme") && head.contains("sv-mode") && head.contains("sv-tweaks"),
+            "{path}: bootstrap must run in <head>"
         );
         assert!(
-            head.contains("sv-tweaks"),
-            "{path}: tweak bootstrap must run in <head>"
-        );
-        assert!(
-            head.contains("window.svThemes=[\"foundry\",\"clinical\""),
+            head.contains(&format!(
+                "window.svThemes=[\"{DEFAULT_THEME}\",\"clinical\""
+            )),
             "{path}: the id allow-list precedes the script"
         );
         assert!(
             head.contains("name=\"color-scheme\" content=\"dark light\""),
             "{path}"
         );
-        // Tweak controls and the share box exist exactly once.
         for id in [
             "tw-accent",
             "tw-radius",
@@ -1258,104 +1282,77 @@ async fn every_page_has_the_theme_picker_and_every_theme_has_tokens() {
         .add_header(name, value)
         .await
         .text();
-    let required = [
-        "--bg",
-        "--surface",
-        "--border",
-        "--text",
-        "--muted",
-        "--accent",
-        "--warn",
-        "--green",
-        "--blue",
-        "--red",
-        "--font",
-        "--font-display",
-        "--radius",
-        "--radius-lg",
-        "--label-case",
-        "--card-shadow",
-        "--card-top",
-        "--card-left",
-        "--header-rule",
-        "--glow",
-        "--texture",
-    ];
-    for theme in THEMES {
-        let selector = format!(":root[data-theme=\"{}\"]", theme.id);
-        // The selector also appears in the shared series rule and the
-        // signatures; the token block is the one declaring color-scheme.
-        let block = css
-            .match_indices(&selector)
+    // A selector's token block is the one declaring color-scheme (the
+    // selector also appears in the signatures).
+    let block_of = |selector: &str| -> String {
+        css.match_indices(selector)
             .map(|(at, _)| {
                 let open = at + css[at..].find('{').unwrap();
                 let close = open + css[open..].find('}').unwrap();
-                &css[open..close]
+                css[open..close].to_string()
             })
             .find(|block| block.contains("color-scheme:"))
-            .unwrap_or_else(|| panic!("no token block for {}", theme.id));
-        for token in required {
-            assert!(
-                block.contains(&format!("{token}:")),
-                "{}: missing {token}",
-                theme.id
+            .unwrap_or_else(|| panic!("no token block for {selector}"))
+    };
+    for theme in THEMES {
+        for mode in [Mode::Light, Mode::Dark] {
+            let selector = format!(
+                ":root[data-theme=\"{}\"][data-mode=\"{}\"]",
+                theme.id,
+                mode.css()
             );
-        }
-        assert!(
-            block.contains(&format!("color-scheme: {}", theme.scheme.css())),
-            "{}",
-            theme.id
-        );
-        for (token, hex) in [
-            ("--bg", theme.preview.bg),
-            ("--surface", theme.preview.surface),
-            ("--accent", theme.preview.accent),
-            ("--text", theme.preview.text),
-        ] {
+            let block = block_of(&selector);
+            for token in TOKENS {
+                assert!(
+                    block.contains(&format!("{token}:")),
+                    "{selector}: missing {token}"
+                );
+            }
             assert!(
-                block.contains(&format!("{token}: {hex}")),
-                "{}: preview {token} {hex} is not the CSS token",
-                theme.id
+                block.contains(&format!("color-scheme: {}", mode.css())),
+                "{selector}"
             );
+            let preview = theme.preview(mode);
+            for (token, hex) in [
+                ("--bg", preview.bg),
+                ("--surface", preview.surface),
+                ("--accent", preview.accent),
+                ("--text", preview.text),
+            ] {
+                assert!(
+                    block.contains(&format!("{token}: {hex}")),
+                    "{selector}: preview {token} {hex} is not the CSS token"
+                );
+            }
         }
-        // Series slots are the validated reference steps for the surface.
-        let series_block = if theme.scheme == Scheme::Dark {
-            "--s0: #3987e5"
-        } else {
-            "--s0: #2a78d6"
-        };
-        let series_at = css.find(series_block).unwrap();
-        let series_rule = &css[..series_at];
-        let selectors = &series_rule[series_rule.rfind('}').map_or(0, |i| i + 1)..];
-        assert!(
-            selectors.contains(&selector),
-            "{}: not in the {:?} series rule",
-            theme.id,
-            theme.scheme
-        );
     }
-    // Aliases + OS fallback.
-    assert!(
-        css.contains(":root[data-theme=\"dark\"]") && css.contains(":root[data-theme=\"light\"]")
-    );
+    // Series steps follow the mode, not the world; the bare root is the
+    // default world's dark mode; no script → OS preference.
+    assert!(css.contains(":root, :root[data-mode=\"dark\"] {\n  --s0: #3987e5"));
+    assert!(css.contains(":root[data-mode=\"light\"] {\n  --s0: #2a78d6"));
     assert!(css.contains(&format!(
-        ":root, :root[data-theme=\"{DEFAULT_DARK}\"], :root[data-theme=\"dark\"]"
-    )));
-    assert!(css.contains(&format!(
-        ":root[data-theme=\"{DEFAULT_LIGHT}\"], :root[data-theme=\"light\"]"
+        ":root, :root[data-theme=\"{DEFAULT_THEME}\"][data-mode=\"dark\"] {{"
     )));
     assert!(css.contains("@media (prefers-color-scheme: light)"));
-    assert!(css.contains(":root:not([data-theme])"));
-    // Semantics: stale is --warn, never the brand accent; tweaks compose.
+    assert!(css.contains(":root:not([data-mode])"));
+    // Semantics: stale is --warn, never the brand accent; tweaks compose;
+    // the decorative layers are tokens the texture tweak can switch off.
     assert!(css.contains(".badge.stale { color: var(--warn); }"));
     assert!(css.contains(".tile.stale .tile-value { color: var(--warn); }"));
     assert!(
         !css.contains("stale { color: var(--accent)"),
         "stale must not borrow the brand colour"
     );
-    assert!(css.contains(":root[data-texture=\"off\"] body { background-image: none; }"));
+    assert!(css
+        .contains(":root[data-texture=\"off\"] body { background-image: none; animation: none; }"));
     assert!(css.contains(":root[data-motion=\"off\"]"));
     assert!(css.contains("html { font-size: calc(16px * var(--density)); }"));
+    assert!(
+        css.contains("background-image: var(--bg-art);")
+            && css.contains("opacity: var(--grain);")
+            && css.contains("background: var(--floor);")
+    );
+    assert!(css.contains("background: var(--wordmark); -webkit-background-clip: text;"));
     assert!(
         !css.contains("border-radius: 4px") && !css.contains("border-radius: 6px"),
         "radii are tokens"
