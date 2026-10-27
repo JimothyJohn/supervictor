@@ -117,11 +117,19 @@ fires, building it is toil.
   (2026-03-03, sha256 `CD:AC:FD:B1…`) signed everything in use; an older
   2026-03-08 CA (`E7:3F:86:F4…`) whose key is not on the Studio sat in a
   retired truststore. Retire that key when the CA moves.
-- **A production box** (trigger: a customer). `PROD_HOST`
-  (`supervictor.advin.io`) is wired through every script as a second box
-  on the single-binary path; nothing answers there since the Lambda stage
-  was torn down. Same template, a bigger instance class, Let's Encrypt
-  from day one.
+- **A production box** (decided 2026-10-27: Path A, "make prod a
+  staging-shaped box"; in progress). `PROD_HOST` (`supervictor.advin.io`)
+  is wired through every script as a second box on the single-binary path,
+  and `STAGE=prod` points the box scripts (`deploy-staging.sh`,
+  `install-staging.sh`, `staging-letsencrypt.sh`, `staging-stack-update.sh`,
+  `deploy-staging-build.sh`, `teardown-staging.sh`) at it: stack
+  `supervictor-endpoint-prod`, PEMs under `s3://supervictor/prod/`, AMI pin
+  `/supervictor/prod/ami-id`. Order: tear down the Lambda stacks (frees the
+  name), cut v0.2.0, `STAGE=prod TAG=v0.2.0 deploy-staging.sh`,
+  `STAGE=prod staging-letsencrypt.sh`, then move boards with
+  `VIA=staging ota-push.sh <device> prod` after registering them on prod.
+  One fleet CA across both boxes, so a board moves by OTA; a bigger
+  instance class when the fleet grows (`staging-stack-update.sh InstanceType=`).
 - **Long-running services** (trigger: persistent connections — MQTT
   ingest, sub-second commands). The binary already is one; a sibling
   service on the same box or a second box, not a platform change.

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# deploy-staging-build.sh — put THIS CHECKOUT's endpoint on the staging box.
+# deploy-staging-build.sh — put THIS CHECKOUT's endpoint on a box (STAGE=staging|prod).
 #
 #   ./scripts/deploy-staging-build.sh            # build + upload + install + probe
+#   STAGE=prod ./scripts/deploy-staging-build.sh # the prod box (a release is the normal prod path)
 #
 # For builds between releases (a release goes through install-staging.sh).
 # Builds a static aarch64 musl binary in an arm64 rust container (into
 # target-pi/, which keeps the cargo caches between runs), strips it, uploads
-# tarball + sha256 to s3://<bucket>/staging/builds/<sha>/, presigns both for
+# tarball + sha256 to s3://<bucket>/<stage>/builds/<sha>/, presigns both for
 # 30 min, and has the box fetch, verify and install them over SSM with the
 # installer left in /opt/supervictor/install (install-endpoint.sh --local).
 # Ends by probing /health, /ui/history and /fleet/history with the admin cert.
@@ -48,7 +49,7 @@ file '"$BIN"' | grep -q "statically linked"'
 DIST="$(mktemp -d)"; trap 'rm -rf "$DIST"' EXIT
 cp "$BIN" "$DIST/supervictor-endpoint"
 (cd "$DIST" && tar czf "$TARBALL" supervictor-endpoint && shasum -a 256 "$TARBALL" > "$TARBALL.sha256")
-KEY="staging/builds/$SHA/$TARBALL"
+KEY="$S3_PREFIX/builds/$SHA/$TARBALL"
 aws s3 cp --only-show-errors "$DIST/$TARBALL" "s3://$BUCKET/$KEY"
 aws s3 cp --only-show-errors "$DIST/$TARBALL.sha256" "s3://$BUCKET/$KEY.sha256"
 URL="$(aws s3 presign "s3://$BUCKET/$KEY" --expires-in 1800)"
@@ -73,4 +74,4 @@ for p in /health /ui/history /fleet/history; do
     printf '  %-16s ' "$p"
     admin_curl -m 10 --cacert "$STAGING_BUNDLE" -o /dev/null -w '%{http_code}\n' "https://$STAGING_HOST$p"
 done
-log "staging is on $SHA — install-staging.sh TAG=<tag> puts a release back on it"
+log "$STAGE is on $SHA — install-staging.sh TAG=<tag> puts a release back on it"

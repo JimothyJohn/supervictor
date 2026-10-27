@@ -7,7 +7,15 @@
 #   device        DEVICE_NAME baked into the image (certs/devices/<device>/ must
 #                 exist; the image carries that device's cert + key, which is why
 #                 images are per device and only that device's cert may fetch one).
-#   staging|prod  the box to push through (its FIRMWARE_DIR holds the image).
+#   staging|prod  the endpoint the image is built FOR (HOST baked into it) and,
+#                 unless VIA says otherwise, the box that stores and serves it.
+#   VIA           staging|prod: the box the device talks to TODAY, which must
+#                 serve the image (default: the target). Moving a board from
+#                 staging to prod is `VIA=staging ota-push.sh <device> prod`:
+#                 the prod-bound image is uploaded to staging, the device
+#                 pulls it there, boots, and confirms on its first prod uplink
+#                 (prod must have the device registered and cert-bound first,
+#                 or the trial fails and the device rolls back to staging).
 #   FW_VERSION    version the image reports and the manifest is filed under;
 #                 MAJOR.MINOR.PATCH[-pre], and it must be NEWER than what the
 #                 device runs or the device ignores it (anti-rollback). Required.
@@ -46,6 +54,8 @@ INVENTORY="${INVENTORY:-$REPO_ROOT/certs/rack-inventory.tsv}"
 need cargo espflash curl python3 shasum
 need_admin
 TARGET_HOST="$(target_host "$TARGET_ENV")"
+VIA="${VIA:-$TARGET_ENV}"
+VIA_HOST="$(target_host "$VIA")"
 [ -d "$FW_ROOT/supervictor/edge" ] || fail "no firmware checkout at $FW_ROOT"
 [ "$FW_ROOT" = "$REPO_ROOT" ] || [ -e "$FW_ROOT/certs" ] || ln -s "$REPO_ROOT/certs" "$FW_ROOT/certs"
 [ -f "$REPO_ROOT/certs/devices/$DEVICE/client.pem" ] || fail "no device cert for $DEVICE"
@@ -78,7 +88,8 @@ if [ -f "$HOME/export-esp.sh" ]; then
     . "$HOME/export-esp.sh" >/dev/null 2>&1 || true
 fi
 
-BASE="https://$TARGET_HOST"
+BASE="https://$VIA_HOST"
+[ "$VIA" = "$TARGET_ENV" ] || log "image for $TARGET_HOST, served and activated via $VIA_HOST"
 log "current fleet row for $DEVICE:"
 admin_curl -fsS --cacert "$STAGING_BUNDLE" "$BASE/fleet" \
     | python3 -I -c 'import json,sys; d=sys.argv[1]; rows=[r for r in json.load(sys.stdin) if r.get("device_id")==d]; print("  ", json.dumps(rows[0]) if rows else "NOT REGISTERED"); sys.exit(0 if rows else 1)' "$DEVICE" \
@@ -122,10 +133,13 @@ admin_curl -fsS --cacert "$STAGING_BUNDLE" -X PUT -H 'Content-Type: application/
     -d "{\"desired_fw\":\"$FW_VERSION\"}" "$BASE/devices/$DEVICE/desired_fw" >/dev/null || fail "desired_fw rejected"
 [ "$WAIT" = 1 ] || { log "target set; the device picks it up on its next uplink"; exit 0; }
 
-log "waiting up to 6 min for $DEVICE to report fw=$FW_VERSION (poll every 10 s)"
+# The device reports to the host baked into the NEW image: watch the target,
+# which is also BASE unless VIA split them (a migrating board goes dark on VIA).
+WATCH="https://$TARGET_HOST"
+log "waiting up to 6 min for $DEVICE to report fw=$FW_VERSION on $TARGET_HOST (poll every 10 s)"
 for _ in $(seq 1 36); do
     sleep 10
-    ROW="$(admin_curl -fsS --cacert "$STAGING_BUNDLE" "$BASE/fleet" \
+    ROW="$(admin_curl -fsS --cacert "$STAGING_BUNDLE" "$WATCH/fleet" \
         | python3 -I -c 'import json,sys; d=sys.argv[1]; rows=[r for r in json.load(sys.stdin) if r.get("device_id")==d]; r=rows[0] if rows else {}; print(r.get("fw","-"), r.get("staleness","-"), r.get("fw_pending"), (r.get("last_uplink") or "-")[11:19])' "$DEVICE")"
     log "  fw=$ROW"
     case "$ROW" in "$FW_VERSION "*) log "$DEVICE is on $FW_VERSION"; exit 0 ;; esac
