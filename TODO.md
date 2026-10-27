@@ -135,6 +135,36 @@ the rest are independent.
       id: rack-switch-ports
       asked: 2026-10-27
       by: decisions session
+- [ ] **Create the prod box** — a second instance of `template-staging.yaml` ("Path A", decided 2026-10-27): stack `supervictor-endpoint-prod`, A record for `supervictor.advin.io`, AMI pinned in SSM; polls /health until the release is installed. The script lands with PR 124 (`feat/prod-box`).
+      needs: teardown-lambda-stacks (frees supervictor.advin.io); cut-v0-2-0 (the release it installs); PR 124 on dev; ~5 min
+      result: supervictor-endpoint-prod up on the release, strict registration from day one
+      depends: teardown-lambda-stacks, cut-v0-2-0
+      est: 20m
+      difficulty: med
+      id: prod-box-create
+      asked: 2026-10-27
+      by: prod-box session (feat/prod-box, PR 124)
+      notes: TAG=v0.2.0 ./scripts/prod-box-create.sh
+- [ ] **Let's Encrypt on prod** — DNS-01 via Route53 from the box, renew timer; restarts the prod service.
+      needs: prod-box-create; ~3 min
+      result: a public server certificate on supervictor.advin.io (boards trust it through the staging bundle's ISRG Root X1)
+      depends: prod-box-create
+      est: 10m
+      difficulty: low
+      id: prod-letsencrypt
+      asked: 2026-10-27
+      by: prod-box session (PR 124)
+      notes: ./scripts/prod-letsencrypt.sh
+- [ ] **Move the boards to prod by OTA** — registers each device on prod with its certificate, then `VIA=staging ota-push.sh <device> prod` serves the prod-bound image from the box the board talks to today; canary rack-03 first. Staging rows go dark afterwards — expected.
+      needs: prod-letsencrypt; the esp toolchain; ~3 min per board
+      result: the six PoE boards fresh on prod; staging keeps the simulated fleet
+      depends: prod-letsencrypt
+      est: 30m
+      difficulty: med
+      id: boards-to-prod
+      asked: 2026-10-27
+      by: prod-box session (PR 124)
+      notes: ./scripts/boards-to-prod.sh poe-iso-rack-03, then ./scripts/boards-to-prod.sh
 
 ## Notes — local state (not tasks)
 
