@@ -4,9 +4,10 @@
 use axum::http::header;
 use axum::response::IntoResponse;
 
-/// Dashboard stylesheet. Palette lifted from `docs/index.html` so the
-/// dashboard and landing page read as one product.
-pub const STYLESHEET: &str = include_str!("style.css");
+/// Dashboard stylesheet: the theme tokens (`themes.css`, six worlds plus
+/// the OS fallback) ahead of the layout rules (`style.css`), served as one
+/// file so a theme switch never waits on a second request.
+pub const STYLESHEET: &str = concat!(include_str!("themes.css"), "\n", include_str!("style.css"));
 
 /// `GET /ui/assets/style.css`
 pub async fn stylesheet() -> impl IntoResponse {

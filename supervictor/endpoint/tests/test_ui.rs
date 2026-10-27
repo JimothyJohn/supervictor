@@ -1178,29 +1178,78 @@ async fn device_page_has_window_filters_and_metric_charts() {
 
 // ── Theme + phones ────────────────────────────────────────────────────
 
-/// Every page carries the theme toggle and the pre-paint bootstrap; the
-/// stylesheet defines light tokens for both the explicit toggle and the OS
-/// preference, plus a phone breakpoint.
+/// Every page carries the appearance button, the picker with one card per
+/// theme (plus auto), and the pre-paint bootstrap; the stylesheet has a
+/// token block per registered theme whose preview colours match, keeps the
+/// `light` / `dark` aliases for choices stored by the old toggle, falls back
+/// to the OS preference, and routes the stale colour through `--warn`.
 #[tokio::test]
-async fn every_page_has_the_theme_toggle_and_light_tokens_exist() {
+async fn every_page_has_the_theme_picker_and_every_theme_has_tokens() {
+    use supervictor_endpoint::ui::themes::{Scheme, DEFAULT_DARK, DEFAULT_LIGHT, THEMES};
     let (server, store) = server_with_store();
     seed_device(store.as_ref(), "factory-01", "active");
-    for path in ["/ui", "/ui/history", "/ui/devices/factory-01"] {
+    for path in ["/ui", "/ui/history", "/ui/live", "/ui/devices/factory-01"] {
         let (name, value) = dn(ADMIN_DN);
         let html = server.get(path).add_header(name, value).await.text();
-        assert!(html.contains("id=\"theme-toggle\""), "{path}: no toggle");
+        assert!(html.contains("id=\"theme-toggle\""), "{path}: no button");
         assert!(
-            html.contains("class=\"icon-sun\"") && html.contains("class=\"icon-moon\""),
-            "{path}: icons"
+            html.contains("aria-controls=\"theme-picker\"")
+                && html.contains("<dialog id=\"theme-picker\""),
+            "{path}: no picker"
         );
+        assert!(html.contains("data-theme-id=\"auto\""), "{path}: auto card");
+        for theme in THEMES {
+            assert!(
+                html.contains(&format!("data-theme-id=\"{}\"", theme.id)),
+                "{path}: no card for {}",
+                theme.id
+            );
+            assert!(
+                html.contains(theme.name) && html.contains(theme.audience),
+                "{path}: {}",
+                theme.id
+            );
+        }
         let head_end = html.find("</head>").expect("head");
+        let head = &html[..head_end];
         assert!(
-            html[..head_end].contains("sv-theme"),
+            head.contains("sv-theme"),
             "{path}: theme bootstrap must run in <head>"
         );
         assert!(
-            html.contains("name=\"color-scheme\" content=\"dark light\""),
+            head.contains("sv-tweaks"),
+            "{path}: tweak bootstrap must run in <head>"
+        );
+        assert!(
+            head.contains("window.svThemes=[\"foundry\",\"clinical\""),
+            "{path}: the id allow-list precedes the script"
+        );
+        assert!(
+            head.contains("name=\"color-scheme\" content=\"dark light\""),
             "{path}"
+        );
+        // Tweak controls and the share box exist exactly once.
+        for id in [
+            "tw-accent",
+            "tw-radius",
+            "tw-density",
+            "tw-font",
+            "tw-texture",
+            "tw-motion",
+            "tw-json",
+            "tw-import",
+            "tw-copy-link",
+            "tw-reset",
+        ] {
+            assert_eq!(
+                html.matches(&format!("id=\"{id}\"")).count(),
+                1,
+                "{path}: {id}"
+            );
+        }
+        assert!(
+            !html.contains("<form method=\"dialog\""),
+            "{path}: the picker is not a form"
         );
     }
     let (name, value) = dn(ADMIN_DN);
@@ -1209,9 +1258,108 @@ async fn every_page_has_the_theme_toggle_and_light_tokens_exist() {
         .add_header(name, value)
         .await
         .text();
-    assert!(css.contains(":root[data-theme=\"light\"]"));
+    let required = [
+        "--bg",
+        "--surface",
+        "--border",
+        "--text",
+        "--muted",
+        "--accent",
+        "--warn",
+        "--green",
+        "--blue",
+        "--red",
+        "--font",
+        "--font-display",
+        "--radius",
+        "--radius-lg",
+        "--label-case",
+        "--card-shadow",
+        "--card-top",
+        "--card-left",
+        "--header-rule",
+        "--glow",
+        "--texture",
+    ];
+    for theme in THEMES {
+        let selector = format!(":root[data-theme=\"{}\"]", theme.id);
+        // The selector also appears in the shared series rule and the
+        // signatures; the token block is the one declaring color-scheme.
+        let block = css
+            .match_indices(&selector)
+            .map(|(at, _)| {
+                let open = at + css[at..].find('{').unwrap();
+                let close = open + css[open..].find('}').unwrap();
+                &css[open..close]
+            })
+            .find(|block| block.contains("color-scheme:"))
+            .unwrap_or_else(|| panic!("no token block for {}", theme.id));
+        for token in required {
+            assert!(
+                block.contains(&format!("{token}:")),
+                "{}: missing {token}",
+                theme.id
+            );
+        }
+        assert!(
+            block.contains(&format!("color-scheme: {}", theme.scheme.css())),
+            "{}",
+            theme.id
+        );
+        for (token, hex) in [
+            ("--bg", theme.preview.bg),
+            ("--surface", theme.preview.surface),
+            ("--accent", theme.preview.accent),
+            ("--text", theme.preview.text),
+        ] {
+            assert!(
+                block.contains(&format!("{token}: {hex}")),
+                "{}: preview {token} {hex} is not the CSS token",
+                theme.id
+            );
+        }
+        // Series slots are the validated reference steps for the surface.
+        let series_block = if theme.scheme == Scheme::Dark {
+            "--s0: #3987e5"
+        } else {
+            "--s0: #2a78d6"
+        };
+        let series_at = css.find(series_block).unwrap();
+        let series_rule = &css[..series_at];
+        let selectors = &series_rule[series_rule.rfind('}').map_or(0, |i| i + 1)..];
+        assert!(
+            selectors.contains(&selector),
+            "{}: not in the {:?} series rule",
+            theme.id,
+            theme.scheme
+        );
+    }
+    // Aliases + OS fallback.
+    assert!(
+        css.contains(":root[data-theme=\"dark\"]") && css.contains(":root[data-theme=\"light\"]")
+    );
+    assert!(css.contains(&format!(
+        ":root, :root[data-theme=\"{DEFAULT_DARK}\"], :root[data-theme=\"dark\"]"
+    )));
+    assert!(css.contains(&format!(
+        ":root[data-theme=\"{DEFAULT_LIGHT}\"], :root[data-theme=\"light\"]"
+    )));
     assert!(css.contains("@media (prefers-color-scheme: light)"));
-    assert!(css.contains(":root:not([data-theme=\"dark\"])"));
+    assert!(css.contains(":root:not([data-theme])"));
+    // Semantics: stale is --warn, never the brand accent; tweaks compose.
+    assert!(css.contains(".badge.stale { color: var(--warn); }"));
+    assert!(css.contains(".tile.stale .tile-value { color: var(--warn); }"));
+    assert!(
+        !css.contains("stale { color: var(--accent)"),
+        "stale must not borrow the brand colour"
+    );
+    assert!(css.contains(":root[data-texture=\"off\"] body { background-image: none; }"));
+    assert!(css.contains(":root[data-motion=\"off\"]"));
+    assert!(css.contains("html { font-size: calc(16px * var(--density)); }"));
+    assert!(
+        !css.contains("border-radius: 4px") && !css.contains("border-radius: 6px"),
+        "radii are tokens"
+    );
     assert!(css.contains("@media (max-width: 640px)"));
     // Two layers: the glance is phone-only, the deep layer hides on phones
     // until the viewer lifts it.

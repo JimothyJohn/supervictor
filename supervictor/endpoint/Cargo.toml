@@ -43,7 +43,7 @@ rustls-pki-types = { version = "1", features = ["std"], optional = true }
 x509-parser = { version = "0.18", optional = true }
 # OTA image digests (firmware.rs). Already in the workspace lock through
 # ring/rustls-adjacent crates and the edge build; adds an edge, not a crate.
-sha2 = "0.10"
+sha2 = "0.11"
 
 # Renders a seeded, static copy of the dashboard for the GitHub Pages demo.
 [[example]]

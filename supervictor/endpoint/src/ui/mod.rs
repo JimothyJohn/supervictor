@@ -12,6 +12,8 @@ pub mod assets;
 pub mod charts;
 /// Server-Sent Events uplink stream.
 pub mod sse;
+/// The six themes the picker offers.
+pub mod themes;
 /// maud page templates.
 pub mod views;
 
