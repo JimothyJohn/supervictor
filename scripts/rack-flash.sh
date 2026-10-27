@@ -39,8 +39,8 @@ OWNER="${OWNER:-${USER:-owner}}"
 GEN_CERTS="$REPO_ROOT/supervictor/endpoint/scripts/gen_certs.sh"
 FLASH="$REPO_ROOT/scripts/flash.sh"
 
-say()   { printf '\n\033[1m[rack] %s\033[0m\n' "$*"; }
-note()  { printf '[rack] %s\n' "$*"; }
+say()   { printf '\n\033[1m[rack] %s\033[0m\n' "$*" >&2; }
+note()  { printf '[rack] %s\n' "$*" >&2; }
 ask()   { local __v; read -r -p "$1 " __v </dev/tty; printf '%s' "$__v"; }
 pause() { read -r -p "$1 [Enter] " _ </dev/tty; }
 die()   { printf '\033[31m[rack] %s\033[0m\n' "$*" >&2; exit 1; }
@@ -68,7 +68,15 @@ note "$TARGET_ENV reachable"
 
 # Warm the build cache for both wired feature sets while boards get unboxed.
 # DEVICE_NAME is baked at compile time, so each board still recompiles the edge
-# crate, but with warm deps that is about a minute instead of ten.
+# crate, but with warm deps that is about a minute instead of ten. tls.rs
+# include_str!s certs/devices/$DEVICE_NAME/client.{pem,key}, so the warm build
+# must use a device that has a cert: the first inventory row per feature set.
+warm_device() { # <features regex> -> a device_id from the inventory that has a cert, or nothing
+    local d
+    for d in $(awk -F'\t' -v f="$1" 'NR>1 && $4 ~ f {print $1}' "$INVENTORY"); do
+        [ -f "$REPO_ROOT/certs/devices/$d/client.pem" ] && { printf '%s' "$d"; return; }
+    done
+}
 if [ "${WARM:-1}" = 1 ]; then
     say "warming the build cache (WARM=0 to skip) — unbox the boards meanwhile"
     (
@@ -81,17 +89,53 @@ if [ "${WARM:-1}" = 1 ]; then
         # shellcheck source=/dev/null
         . "$HOME/export-esp.sh" >/dev/null 2>&1 || true
         cd "$FW_ROOT/supervictor/edge"
-        DEVICE_NAME=warm-poe2    cargo build -q --bin supervictor-embedded --features board-poe2,sim
-        DEVICE_NAME=warm-poe-iso cargo build -q --bin supervictor-embedded --features ethernet,sim
+        for pair in "board-poe2:^board-poe2" "ethernet:^ethernet"; do
+            feats="${pair%%:*}"; dev="$(warm_device "${pair#*:}")"
+            if [ -z "$dev" ]; then note "no inventory device with a cert for $feats — not warming it"; continue; fi
+            note "warming $feats,sim as $dev"
+            DEVICE_NAME="$dev" cargo build -q --bin supervictor-embedded --features "$feats,sim"
+        done
     ) || die "warm build failed — fix the firmware build before racking boards"
-    note "both feature sets build"
+    note "wired feature sets build"
 fi
+
+# ── board table: inventory ⋈ staging fleet, so boards can be labelled ───────
+FLEET_JSON="$REPO_ROOT/.logs/rack-fleet.json"
+fleet_snapshot() { # refresh FLEET_JSON (staging only; empty list elsewhere)
+    case "$TARGET_ENV" in
+    staging) admin_curl -f -m 15 --cacert "$CA" "https://$HOST/fleet" > "$FLEET_JSON" 2>/dev/null || echo '[]' > "$FLEET_JSON" ;;
+    *) echo '[]' > "$FLEET_JSON" ;;
+    esac
+}
+fleet_fw() { # <device> -> fw the fleet reports, or -
+    python3 -I -c 'import json,sys; d=sys.argv[2]; rows=json.load(open(sys.argv[1])); rows=rows if isinstance(rows,list) else rows.get("devices",rows); print(next((str(r.get("fw") or "-") for r in rows if r.get("device_id")==d), "-"))' "$FLEET_JSON" "$1"
+}
+board_table() { # <title>; inventory joined with the fleet rows (fw, staleness, last uplink); FW_VERSION marks what is left
+    say "$1"
+    python3 -I - "$INVENTORY" "$FLEET_JSON" "${FW_VERSION:-}" <<'PYTABLE' >&2
+import json, sys
+inv, fleet, want = sys.argv[1:]
+rows = json.load(open(fleet)); rows = rows if isinstance(rows, list) else rows.get("devices", rows)
+by = {r.get("device_id"): r for r in rows}
+lines = [l.split("\t") for l in open(inv).read().splitlines()[1:] if l.strip()]
+print(f'  {"device":<18} {"board":<24} {"mac":<18} {"features":<16} {"sw":<3} {"fw":<7} {"state":<8} {"last uplink (UTC)":<20} flashed')
+for cells in lines:
+    cells += ["-"] * (8 - len(cells))
+    d, board, mac, feat, sp, _tgt, flashed, _up = cells[:8]
+    r = by.get(d, {})
+    fw = str(r.get("fw") or "-"); st = str(r.get("staleness") or "-")
+    mark = ""
+    if want:
+        mark = "  ok on " + want if fw == want else "  <- needs flash"
+    print(f'  {d:<18} {board:<24} {mac:<18} {feat:<16} {sp:<3} {fw:<7} {st:<8} {str(r.get("last_uplink") or "-")[:19]:<20} {flashed[:16]}{mark}')
+PYTABLE
+}
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 list_ports() { ls /dev/cu.usbserial-* /dev/cu.usbmodem* /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | sort || true; }
 
-wait_for_port() { # prints the new port
-    local before after new
+wait_for_port() { # prints the chosen port on stdout; everything else goes to stderr
+    local before after new cands
     before="$(list_ports)"
     say "plug the NEXT board into USB (POE2 / non-ISO: it must NOT be on the switch at the same time)"
     pause "Then press"
@@ -99,12 +143,20 @@ wait_for_port() { # prints the new port
     new="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | grep -v '^$' || true)"
     if [ "$(printf '%s\n' "$new" | grep -c .)" -eq 1 ]; then printf '%s' "$new"; return; fi
     if [ -n "$new" ]; then
-        note "several new ports appeared:"; printf '%s\n' "$new" | sed 's/^/   /'
-        printf '%s' "$(ask 'which one?')"; return
+        note "several new ports appeared:"; printf '%s\n' "$new" | sed 's/^/   /' >&2
+        ask 'which one?'; return
     fi
-    note "no new serial port. Present now:"; printf '%s\n' "$after" | sed 's/^/   /'
+    # No new name: the CH340 on every Olimex board enumerates under the same
+    # usbserial-XXXX name on a given hub position, so the Nth board looks
+    # identical to the (N-1)th. One candidate present -> it is the board.
+    cands="$(printf '%s\n' "$after" | grep -E 'usbserial|ttyUSB' || true)"
+    if [ "$(printf '%s\n' "$cands" | grep -c .)" -eq 1 ]; then
+        note "no new port name; using the only CH340 port present: $cands"
+        printf '%s' "$cands"; return
+    fi
+    note "no new serial port. Present now:"; printf '%s\n' "$after" | sed 's/^/   /' >&2
     note "(CH340 boards enumerate as usbserial-XXXX; if nothing new, try the cable / another hub port)"
-    printf '%s' "$(ask 'port to use (blank = retry):')"
+    ask 'port to use (blank = retry):'
 }
 
 board_info() { # <port> -> "chip mac" ; retries the CH340 connect timeout
@@ -170,6 +222,8 @@ poll_uplink() { # <device> <flashed_at> -> 0 when seen
     echo; return 1
 }
 
+fleet_snapshot
+board_table "known boards — a board in hand is identified by its MAC once plugged in"
 # ── the loop ────────────────────────────────────────────────────────────────
 : > "$LOG.tmp"; done_count=0
 while :; do
@@ -192,7 +246,13 @@ while :; do
         IFS=$'\t' read -r device board _ features switch_port _ _ _ <<<"$row"
         [ "$switch_port" = - ] && switch_port=""
         note "known board: $device ($board, features=$features, port ${switch_port:-?})"
-        [ "$(ask "re-flash $device? [Y/n]")" = n ] && continue
+        fw_now="$(fleet_fw "$device")"
+        say "LABEL  $device  |  $board  |  $mac  |  switch port ${switch_port:-?}  |  fleet fw=$fw_now"
+        if [ -n "${FW_VERSION:-}" ] && [ "$fw_now" = "$FW_VERSION" ]; then
+            [ "$(ask "$device already reports fw=$FW_VERSION — re-flash anyway? [y/N]")" = y ] || continue
+        else
+            [ "$(ask "re-flash $device? [Y/n]")" = n ] && continue
+        fi
     else
         say "new board (MAC $mac). What does the silkscreen say?"
         cat <<'MENU'
@@ -250,15 +310,11 @@ MENU
     fi
     inv_upsert "$device" "$board" "$mac" "$features" "$switch_port" "$TARGET_ENV" "$flashed_at" "$uplinked"
     done_count=$((done_count+1))
+    fleet_snapshot; board_table "after $device: $done_count board(s) this run"
 
     [ "$(ask 'next board? [Y/n]')" = n ] && break
 done
 rm -f "$LOG.tmp"
 
-say "done: $done_count board(s) this run. Inventory ($INVENTORY):"
-column -t -s $'\t' "$INVENTORY"
-if [ "$TARGET_ENV" = staging ]; then
-    say "fleet rows on staging"
-    admin_curl -f --cacert "$CA" "https://$HOST/fleet" \
-        | python3 -I -c 'import json,sys; rows=json.load(sys.stdin); rows=rows if isinstance(rows,list) else rows.get("devices",rows); [print(f"{r.get(\"device_id\"):<20} {r.get(\"staleness\"):<8} fw={r.get(\"fw\")} {r.get(\"last_uplink\")}") for r in rows if not str(r.get("device_id")).startswith("sim-")]'
-fi
+fleet_snapshot
+board_table "done: $done_count board(s) this run — inventory $INVENTORY"
