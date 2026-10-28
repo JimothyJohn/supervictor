@@ -14,28 +14,29 @@ card here, never an untracked note; `scratch/` holds only throwaway output.
 
 ## Hands-on — Nick (gates an agent session cannot pass)
 
-State as of 2026-10-27 ~03:30Z, after PR 122. `depends:` gives the order;
-the rest are independent.
+State as of 2026-10-28 ~12:30Z, after the prod cutover (PRs 131–133: the
+Lambda stacks are gone, v0.2.0 is released, supervictor-endpoint-prod is up on
+Let's Encrypt). `depends:` gives the order; the rest are independent.
 
-- [ ] **Tear down the Lambda stacks** — `supervictor-dev` and `supervictor-prod` (API Gateway, the Lambda, the DynamoDB tables, the custom domains `dev.supervictor.advin.io` / `supervictor.advin.io`, their ACM certs and Route53 records). The script exports both DynamoDB tables to `scratch/lambda-export-<ts>/` first, deletes, waits, and prints any DELETE_FAILED resource. Afterwards `s3://supervictor/truststore*.pem` can go by hand. Deletes are denied to agent sessions.
-      needs: PR 122 on dev; a native terminal with aws; ~10 min
-      result: no serverless stack exists; supervictor.advin.io is free for the prod box
-      est: 30m
+- [ ] **Delete what the Lambda teardown left behind** — the two SAM ECR companion stacks (`supervictor-{dev,prod}-<hash>-CompanionStack`, ~500 MB of Lambda images), `s3://supervictor/truststore*.pem`, a CloudFront distribution still aliased to supervictor.advin.io with the deleted execute-api as its origin (outside any stack; the A record already points at the prod box, so it serves nothing), its ACM certificate, and the two ACM validation CNAMEs. The script disables CloudFront and waits before deleting (~15 min) and refuses if the origin is no longer execute-api.
+      needs: a terminal with aws delete rights (denied to sessions); ~20 min
+      result: no Lambda-era resource left in the account; `supervictor-endpoint-{staging,prod}` are the only supervictor stacks
+      options: run it | keep some (say which)
+      est: 20m
       difficulty: low
-      id: teardown-lambda-stacks
-      asked: 2026-10-27
-      by: decisions session (chore/decisions-20261027)
-      notes: ./scripts/teardown-lambda-stacks.sh
-- [ ] **Land the rewritten staging template on the live stack** — the bootstrap now installs a GitHub release (no Docker/Caddy), the IAM policy drops the bundle object, ReleaseTag/Repo/ExistingAllocationId params appear. Goes through `scripts/staging-stack-update.sh` (pins the live AMI, refuses a change set that replaces the instance); read the change set it prints before answering y. `FOLD_EIP=1` also hands the stack the out-of-band Elastic IP 100.56.171.238 — CloudFormation may fail to "delete" the stack's long-released ElasticIp resource and roll back; if so run once without it.
+      id: teardown-lambda-leftovers
+      asked: 2026-10-28
+      by: dep-review session (docs/post-cutover-cleanup)
+      notes: ./scripts/teardown-lambda-leftovers.sh — s3://supervictor/debian.cert.pem and supervictor.cert.pem are left alone: what are they?
+- [ ] **Land the rewritten staging template on the live stack** — the bootstrap now installs a GitHub release (no Docker/Caddy), the IAM policy drops the bundle object, ReleaseTag/Repo/ExistingAllocationId params appear. Goes through `scripts/staging-stack-update.sh` (pins the live AMI, refuses a change set that replaces the instance); read the change set it prints before answering y. `FOLD_EIP=1` also hands the stack the out-of-band Elastic IP 100.56.171.238 — CloudFormation may fail to "delete" the stack's long-released ElasticIp resource and roll back; if so run once without it. The live stack was last updated 2026-10-25.
       needs: PR 122 on dev; a native terminal
       result: the stack matches the template in the tree; a rebuild would come up on the release install
-      depends: teardown-lambda-stacks
       est: 20m
       difficulty: med
       id: staging-stack-changeset
       asked: 2026-10-27
       by: decisions session
-      notes: ./scripts/staging-stack-changeset.sh (YES=1 to skip the prompt; TAG=v0.2.0 once it exists)
+      notes: TAG=v0.2.0 ./scripts/staging-stack-changeset.sh (YES=1 to skip the prompt)
 - [ ] **Flip staging to strict registration** — `REQUIRE_REGISTRATION=true` on the box (new boxes already default to it). The script lists devices without a bound certificate first and refuses unless the list is empty or `FORCE=1`; today `c3-wifi-01`, `c3-wifi-02`, `wrover-wifi-01` and `pi-edge-01` are unbound and dark — revoke them on /ui or re-register (`rack-flash.sh staging`, `Quickstart onboard`) first. Edits `/etc/supervictor/env` over SSM and restarts the unit (a restart is yours), then pings with a device cert and reads the summary.
       needs: a decision on the four unbound devices; a native terminal
       result: only registered, active, certificate-bound devices can uplink to staging
@@ -63,19 +64,18 @@ the rest are independent.
       asked: 2026-10-27
       by: decisions session
       notes: ./scripts/dev-branch-protection.sh
-- [ ] **Cut v0.2.0 and put the release on staging** — everything since v0.1.0 (simulator + profiles, per-device threshold and min-on, live windows, POE2, history, themes, OTA, the single-binary deploy) ships only as hand-installed staging builds; `install-staging.sh` without a TAG rolls the box back to v0.1.0, and `deploy-staging.sh`'s default tag is the newest release.
-      needs: tag push (yours); dev at the commit you want to ship
+- [ ] **Put v0.2.0 on staging** — v0.2.0 is released (2026-10-28) and runs on prod; staging still runs whatever was hand-installed before it (nothing outside the box reports the version). `install-staging.sh` without a TAG installs the newest release.
+      needs: a native terminal (the restart is yours)
       result: staging runs a reproducible release; the extruder/molder min-on can be applied (`./scripts/sim-fleet.sh thresholds staging`)
-      est: 20m
+      est: 10m
       difficulty: low
       id: cut-v0-2-0
       asked: 2026-10-26
       by: decisions session
-      notes: git tag -a v0.2.0 <dev merge> -m v0.2.0 && TAG=v0.2.0 ./scripts/release.sh, then TAG=v0.2.0 ./scripts/install-staging.sh
-- [ ] **Promote dev → master** — your manual merge; also activates `.github/workflows/mutants.yml` (scheduled workflows run from the default branch only) and publishes the docs site from the new tree.
-      needs: PR 122 (and whatever else you want) on dev
+      notes: TAG=v0.2.0 ./scripts/install-staging.sh
+- [ ] **Promote dev → master** — your manual merge (master is 10 commits behind dev on 2026-10-28: PRs 131–133 and the cutover fixes); also activates `.github/workflows/mutants.yml` (scheduled workflows run from the default branch only) and publishes the docs site from the new tree.
+      needs: whatever you want on dev
       result: master carries the single-binary reality; mutants run monthly
-      depends: cut-v0-2-0
       est: 5m
       difficulty: low
       id: promote-dev-master
@@ -135,36 +135,15 @@ the rest are independent.
       id: rack-switch-ports
       asked: 2026-10-27
       by: decisions session
-- [ ] **Create the prod box** — a second instance of `template-staging.yaml` ("Path A", decided 2026-10-27): stack `supervictor-endpoint-prod`, A record for `supervictor.advin.io`, AMI pinned in SSM; polls /health until the release is installed. The script lands with PR 124 (`feat/prod-box`).
-      needs: teardown-lambda-stacks (frees supervictor.advin.io); cut-v0-2-0 (the release it installs); PR 124 on dev; ~5 min
-      result: supervictor-endpoint-prod up on the release, strict registration from day one
-      depends: teardown-lambda-stacks, cut-v0-2-0
-      est: 20m
-      difficulty: med
-      id: prod-box-create
-      asked: 2026-10-27
-      by: prod-box session (feat/prod-box, PR 124)
-      notes: TAG=v0.2.0 ./scripts/prod-box-create.sh
-- [ ] **Let's Encrypt on prod** — DNS-01 via Route53 from the box, renew timer; restarts the prod service.
-      needs: prod-box-create; ~3 min
-      result: a public server certificate on supervictor.advin.io (boards trust it through the staging bundle's ISRG Root X1)
-      depends: prod-box-create
-      est: 10m
-      difficulty: low
-      id: prod-letsencrypt
-      asked: 2026-10-27
-      by: prod-box session (PR 124)
-      notes: ./scripts/prod-letsencrypt.sh
-- [ ] **Move the boards to prod by OTA** — registers each device on prod with its certificate, then `VIA=staging ota-push.sh <device> prod` serves the prod-bound image from the box the board talks to today; canary rack-03 first. Staging rows go dark afterwards — expected.
-      needs: prod-letsencrypt; the esp toolchain; ~3 min per board
+- [ ] **Finish moving the boards to prod** — fresh on prod at 0.1.8 (2026-10-28 12:17Z): poe-iso-eth-01, poe-iso-rack-01, poe-iso-rack-03, poe2-wifi-01. Left: poe2-rack-01 (fresh on staging at 0.1.6, not yet registered on prod — rerun in progress) and poe-iso-rack-02 (registered on prod, dark on staging since 02:10:28Z; the 300 s watchdog did not recover it after the port-8 cable was re-seated — re-seat its own cable, then USB serial if still dark; it moves itself once it uplinks).
+      needs: hands on rack-02; the esp toolchain; ~3 min per board
       result: the six PoE boards fresh on prod; staging keeps the simulated fleet
-      depends: prod-letsencrypt
       est: 30m
       difficulty: med
       id: boards-to-prod
       asked: 2026-10-27
       by: prod-box session (PR 124)
-      notes: ./scripts/boards-to-prod.sh poe-iso-rack-03, then ./scripts/boards-to-prod.sh
+      notes: ./scripts/boards-to-prod.sh (idempotent: skips boards already fresh on prod)
 
 ## Notes — local state (not tasks)
 
@@ -184,8 +163,10 @@ the rest are independent.
   bootloader; `espflash reset --port <port>` recovers. `espflash reset` is
   a power-on reset and wipes the RTC OTA records (the trial count recovers
   from otadata; a download restarts from zero).
-- Rack 2026-10-27: six PoE boards on the A/B table at 0.1.6, all fresh;
-  the WiFi devkits were left dark on purpose; USB flash is recovery only.
+- Rack 2026-10-28: the PoE boards move to prod at 0.1.8 by OTA (card
+  above); the WiFi devkits stay dark on staging on purpose; USB flash is
+  recovery only. The LS108GP port-8 uplink cable has no latch — every board
+  dark at once while the sims stay fresh means it slid out.
 
 ## Open questions for Nick
 

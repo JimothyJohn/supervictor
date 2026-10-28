@@ -2,7 +2,7 @@
 
 ## Context
 
-Supervictor is a full-stack Rust IoT system (device firmware + cloud API + CLI tooling) that's currently a working but tightly-coupled project built around one specific use case (ESP32 current sensor → AWS Lambda). The goal is to evolve it into a **portable, reusable framework** that others can adopt for their own device-to-cloud projects, with a **unified API** contract across all layers.
+Supervictor is a full-stack Rust IoT system (device firmware + cloud API + CLI tooling) that's currently a working but tightly-coupled project built around one specific use case (ESP32 current sensor → one self-hosted mTLS endpoint). The goal is to evolve it into a **portable, reusable framework** that others can adopt for their own device-to-cloud projects, with a **unified API** contract across all layers.
 
 The architecture already has strong framework-like bones: pluggable storage (`DeviceStore` trait), framework-agnostic handlers, feature-gated backends, mTLS throughout, and a phase-based CLI orchestrator. But these patterns are implicit and interleaved with supervictor-specific logic.
 
@@ -108,11 +108,11 @@ The architecture already has strong framework-like bones: pluggable storage (`De
 
 ## Workstream 6: Portability
 
-**Problem**: Currently tied to ESP32 + AWS Lambda. A "portable framework" should support other targets.
+**Problem**: Currently tied to the ESP32. A "portable framework" should support other targets.
 
 **Work**:
 - **Device targets**: Document how to add new boards (ESP32-S3, nRF, RP2040) — the feature-gate pattern (`embedded`/`desktop`) already supports this
-- **Cloud targets**: Endpoint already runs anywhere (Docker, bare metal, Lambda). Document deployment options: Docker Compose (local), fly.io, Railway, AWS ECS, Lambda
+- **Cloud targets**: The endpoint is one static binary that terminates mTLS itself (systemd on any Linux box, or plain HTTP behind Caddy in Docker Compose); the `bring-your-own` skill covers both. Serverless is out: API Gateway could not carry the client certificate's identity to the binary (retired 2026-10-27)
 - **Storage backends**: SQLite and DynamoDB exist. Document how to add new ones (Postgres, Turso, etc.) via the `DeviceStore` trait
 - **TLS options**: Support both mTLS (current) and simpler auth (API keys, JWT) for users who don't need mutual TLS
 - **Config**: Move from scattered env vars to a unified config file (`supervictor.toml`) with env var overrides
