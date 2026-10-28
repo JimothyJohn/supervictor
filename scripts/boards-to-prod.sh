@@ -29,7 +29,9 @@ admin_curl -fsS -m 10 --cacert "$STAGING_BUNDLE" -o /dev/null "$PROD/health" || 
 
 if [ $# -gt 0 ]; then DEVICES=("$@"); else
     # every PoE board in the inventory (wired features); the WiFi devkits stay where they are
-    mapfile -t DEVICES < <(awk -F'\t' 'NR>1 && ($4 ~ /ethernet|board-poe2/) {print $1}' "$INVENTORY")
+    # bash 3.2 (macOS /usr/bin/env bash) has no mapfile
+    DEVICES=()
+    while IFS= read -r d; do DEVICES+=("$d"); done < <(awk -F'\t' 'NR>1 && ($4 ~ /ethernet|board-poe2/) {print $1}' "$INVENTORY")
 fi
 [ "${#DEVICES[@]}" -gt 0 ] || fail "no devices given and none with wired features in $INVENTORY"
 log "moving to prod at FW_VERSION=$FW_VERSION: ${DEVICES[*]}"
