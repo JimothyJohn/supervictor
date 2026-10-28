@@ -374,8 +374,8 @@
   <p>An all-Rust IoT template: ESP32 edge device, axum cloud API, and mutual TLS authentication&mdash;wired together with a single CLI.</p>
   <div class="badges">
     <span class="badge rust">Rust</span>
-    <span class="badge esp">ESP32-C3</span>
-    <span class="badge aws">AWS SAM</span>
+    <span class="badge esp">ESP32</span>
+    <span class="badge aws">Single binary</span>
     <span class="badge mtls">mTLS</span>
   </div>
   <div class="cta">
@@ -390,8 +390,8 @@
   <div class="arch">
     <div class="arch-node">
       <div class="label">Edge</div>
-      <div class="name">ESP32-C3</div>
-      <div class="detail">Rust / no_std / Embassy</div>
+      <div class="name">ESP32-POE-ISO</div>
+      <div class="detail">Rust / no_std / Embassy / PoE or WiFi</div>
     </div>
     <div class="arch-arrow">&rarr;</div>
     <div class="arch-node">
@@ -403,7 +403,7 @@
     <div class="arch-node">
       <div class="label">Cloud</div>
       <div class="name">Axum API</div>
-      <div class="detail">Rust / tokio / SQLite or DynamoDB</div>
+      <div class="detail">Rust / tokio / SQLite / systemd</div>
     </div>
   </div>
 </section>
@@ -413,21 +413,24 @@
   <h2>Repository Layout</h2>
   <div class="tree">
 <span class="dir">supervictor/</span>
-<span class="dir">  device/</span>                       <span class="comment"># ESP32-C3 firmware (no_std, Embassy)</span>
+<span class="dir">  edge/</span>                         <span class="comment"># ESP32 firmware (no_std, Embassy) + desktop simulator</span>
 <span class="file">    src/bin/embedded_main.rs</span>   <span class="comment"># firmware entry point</span>
-<span class="file">    src/bin/desktop_main.rs</span>    <span class="comment"># desktop mTLS test client</span>
-<span class="dir">    src/app/</span>                   <span class="comment"># application logic</span>
+<span class="file">    src/bin/desktop_main.rs</span>    <span class="comment"># desktop mTLS client / simulated machine</span>
 <span class="dir">    src/network/</span>               <span class="comment"># HTTP, TLS, DNS, TCP</span>
-<span class="dir">    src/models/</span>                <span class="comment"># uplink message types</span>
-<span class="dir">  endpoint/</span>                     <span class="comment"># cloud API (axum + tokio)</span>
+<span class="dir">    src/ota/</span>                   <span class="comment"># A/B over-the-air updates</span>
+<span class="dir">  endpoint/</span>                     <span class="comment"># fleet API (axum + tokio), terminates mTLS itself</span>
 <span class="file">    src/handlers.rs</span>            <span class="comment"># request handlers</span>
 <span class="file">    src/routes.rs</span>              <span class="comment"># axum router</span>
-<span class="dir">    src/store/</span>                 <span class="comment"># SQLite + DynamoDB backends</span>
-<span class="file">    template.yaml</span>              <span class="comment"># SAM/CloudFormation</span>
-<span class="file">    docker-compose.yml</span>         <span class="comment"># local dev with Caddy mTLS</span>
-<span class="file">  Quickstart</span>                    <span class="comment"># single entry point: build, test, deploy, fleet ops</span>
-<span class="dir">  certs/</span>                        <span class="comment"># generated certs (gitignored)</span>
-<span class="dir">  docs/</span>                         <span class="comment"># this page</span>
+<span class="dir">    src/store/</span>                 <span class="comment"># SQLite store (DynamoDB behind a feature)</span>
+<span class="dir">    deploy/</span>                    <span class="comment"># systemd unit for the single binary</span>
+<span class="file">    template-staging.yaml</span>      <span class="comment"># the EC2 box (staging and prod)</span>
+<span class="file">    docker-compose.yml</span>         <span class="comment"># optional: plain HTTP behind Caddy mTLS</span>
+<span class="dir">  common/</span>                       <span class="comment"># wire contract shared by edge and endpoint</span>
+<span class="dir">  mcp/</span>                          <span class="comment"># MCP server over the admin API</span>
+<span class="file">Quickstart</span>                      <span class="comment"># local setup, build, test, fleet ops</span>
+<span class="dir">scripts/</span>                        <span class="comment"># deploy, release, OTA, board hand-offs</span>
+<span class="dir">certs/</span>                          <span class="comment"># generated certs (gitignored)</span>
+<span class="dir">docs/</span>                           <span class="comment"># this page</span>
   </div>
 </section>
 
@@ -486,24 +489,28 @@
       </thead>
       <tbody>
         <tr>
-          <td>./Quickstart dev</td>
-          <td>Unit tests, build endpoint, start local server, run integration tests</td>
+          <td>./Quickstart</td>
+          <td>Start to finish: toolchain, .env, certs, build, tests, local mTLS endpoint, then a simulated machine or a board</td>
         </tr>
         <tr>
-          <td>./Quickstart dev --serve</td>
-          <td>Same as above but keeps the server running for manual testing</td>
+          <td>./Quickstart status | down</td>
+          <td>What the local endpoint and simulator are doing; stop them</td>
+        </tr>
+        <tr>
+          <td>./Quickstart -t</td>
+          <td>lint &rarr; build &rarr; unit &rarr; integration (staging smoke)</td>
         </tr>
         <tr>
           <td>./Quickstart edge</td>
-          <td>Build + flash ESP32-C3 firmware via espflash 3.3.0</td>
+          <td>Build + flash the ESP32-POE-ISO firmware via espflash</td>
         </tr>
         <tr>
-          <td>./Quickstart staging</td>
-          <td>Dev gate &rarr; deploy to dev stack &rarr; integration tests against live endpoint</td>
+          <td>./Quickstart deploy</td>
+          <td>Deploy the self-hosted staging box (<code>scripts/deploy-staging.sh</code>)</td>
         </tr>
         <tr>
-          <td>./Quickstart prod</td>
-          <td>Dev gate &rarr; staging gate &rarr; confirm &rarr; deploy prod &rarr; mTLS verification</td>
+          <td>./scripts/ship.sh</td>
+          <td>Release what is on master to the prod box, resumably (plan; <code>go</code> to run)</td>
         </tr>
         <tr>
           <td>./Quickstart certs ca</td>
@@ -530,6 +537,10 @@
           <td>mTLS GET to verify the server is reachable</td>
         </tr>
         <tr>
+          <td>./Quickstart fleet</td>
+          <td>Fleet health table over admin mTLS</td>
+        </tr>
+        <tr>
           <td>./Quickstart onboard</td>
           <td>End-to-end device onboarding (certs + flash + verify)</td>
         </tr>
@@ -537,7 +548,7 @@
     </table>
   </div>
   <p style="color:var(--muted); margin-top:16px; font-size:0.85rem;">
-    All commands accept <code>-v</code> (verbose) and <code>--dry-run</code> flags.
+    <code>TRACE=1</code> traces any command; <code>ENV</code> selects <code>.env.&lt;stage&gt;</code>.
   </p>
 </section>
 
@@ -547,18 +558,18 @@
   <div class="tiers">
     <div class="tier">
       <h3><span class="dot" style="background:var(--green)"></span> Unit</h3>
-      <p>In-memory SQLite, no infra required. Validates handlers, models, and store logic.</p>
-      <p><code>cargo test --features sqlite</code></p>
+      <p>The whole workspace on the host: in-memory SQLite, in-process mTLS, no infra required.</p>
+      <p><code>./Quickstart unit</code></p>
     </div>
     <div class="tier">
-      <h3><span class="dot" style="background:var(--blue)"></span> Local Integration</h3>
-      <p>HTTP against the running endpoint. Requires Docker + Caddy for mTLS.</p>
-      <p><code>docker compose up</code></p>
+      <h3><span class="dot" style="background:var(--blue)"></span> Local mTLS</h3>
+      <p>The endpoint on this machine terminating mTLS itself, with a simulated machine posting to it.</p>
+      <p><code>./Quickstart up --sim</code></p>
     </div>
     <div class="tier">
-      <h3><span class="dot" style="background:var(--purple)"></span> Remote / mTLS</h3>
-      <p>HTTPS + client certs against the deployed production endpoint.</p>
-      <p><code>./Quickstart ping --certs certs/device/</code></p>
+      <h3><span class="dot" style="background:var(--purple)"></span> Staging smoke</h3>
+      <p>HTTPS + client certs against the deployed staging box.</p>
+      <p><code>./Quickstart integration</code></p>
     </div>
   </div>
 </section>
@@ -569,15 +580,15 @@
   <div class="env-grid">
     <div class="env-card">
       <h3>Dev</h3>
-      <p>Local endpoint via <code>docker compose</code> with Caddy mTLS reverse proxy</p>
+      <p>Local endpoint from <code>./Quickstart</code>, terminating mTLS in-process</p>
     </div>
     <div class="env-card">
       <h3>Staging</h3>
-      <p>Deployed dev stack on <code>execute-api</code>, no mTLS enforcement</p>
+      <p><code>staging.supervictor.advin.io</code>: one EC2 box, systemd unit, SQLite; carries the simulated fleet</p>
     </div>
     <div class="env-card">
       <h3>Production</h3>
-      <p>Custom domain <code>supervictor.advin.io</code> with mTLS, Route53, ACM certificate</p>
+      <p><code>supervictor.advin.io</code>: a second box from the same template, Let's Encrypt server cert, strict registration</p>
     </div>
   </div>
 </section>
@@ -590,7 +601,7 @@
   </p>
   <pre>./Quickstart certs ca                          <span style="color:#52525b"># Create root CA</span>
 ./Quickstart certs device esp32                <span style="color:#52525b"># Issue device cert</span>
-./Quickstart certs server caddy                <span style="color:#52525b"># Issue server cert</span>
+./Quickstart certs server &lt;host&gt;               <span style="color:#52525b"># Issue server cert</span>
 ./Quickstart certs verify                      <span style="color:#52525b"># Verify cert chain</span>
 ./Quickstart certs handshake                   <span style="color:#52525b"># Simulate mTLS handshake</span></pre>
 </section>
