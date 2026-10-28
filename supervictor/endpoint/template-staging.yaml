@@ -208,7 +208,10 @@ Resources:
                     exec > >(tee /var/log/bootstrap.log) 2>&1
 
                     echo "[bootstrap] packages"
-                    dnf install -y curl tar gzip
+                    # Not curl: the AL2023 AMI ships curl-minimal (enough for -fsSL
+                    # over https), and asking for full curl conflicts with it, so
+                    # dnf exits 1 and set -e ends the bootstrap before anything installs.
+                    dnf install -y tar gzip
 
                     echo "[bootstrap] mTLS material from s3://${BundleBucket}"
                     install -d -m 0700 /etc/supervictor
