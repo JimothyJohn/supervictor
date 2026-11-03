@@ -165,6 +165,7 @@ fn current() -> Settings {
         device_name: "c3-wifi-01".try_into().unwrap(),
         uplink_interval_s: 0,
         threshold_ma: 0,
+        config_version: 0,
     }
 }
 
@@ -221,6 +222,7 @@ fn pages_fit_their_buffers_at_maximum_field_lengths() {
         device_name: "<".repeat(NAME_MAX).as_str().try_into().unwrap(),
         uplink_interval_s: 0,
         threshold_ma: 0,
+        config_version: 0,
     };
     let name = "<".repeat(NAME_MAX);
     let page = form_page(&name, "0.10.100", &max, Outcome::Tls);

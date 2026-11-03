@@ -15,6 +15,7 @@ fn sample() -> Settings {
         device_name: "poe2-wifi-01".try_into().unwrap(),
         uplink_interval_s: 0,
         threshold_ma: 0,
+        config_version: 0,
     }
 }
 
@@ -38,6 +39,7 @@ fn round_trips() {
                 device_name: HString::try_from(&"n".repeat(NAME_MAX)[..]).unwrap(),
                 uplink_interval_s: 600,
                 threshold_ma: 1234,
+                config_version: 0xdead_beef,
             },
             7,
         ),
@@ -229,6 +231,7 @@ fn arb_settings() -> impl Strategy<Value = Settings> {
                 device_name: HString::try_from(name.as_str()).unwrap(),
                 uplink_interval_s: interval,
                 threshold_ma: threshold,
+                config_version: interval.rotate_left(7) ^ threshold,
             },
         )
 }

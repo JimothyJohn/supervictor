@@ -17,14 +17,34 @@ const _: () = assert!(
     "FW_VERSION must fit the 16-byte fw field"
 );
 
-/// What the device reads back out of the uplink response: today only the
-/// OTA target. Every other key (`message`, `device_id`, `current`,
-/// `client_subject`) is skipped, so the endpoint may add fields freely.
+/// The pushed settings block in an uplink response (`config`): the
+/// endpoint's `DeviceConfig`. Every field defaults so a block from a newer
+/// endpoint with a key missing here still reads; `version` 0 is ignored.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub struct AckConfig {
+    /// `supervictor_common::config::version` of the values; never 0 when real.
+    #[serde(default)]
+    pub version: u32,
+    /// Seconds between uplinks; 0 = the compiled default.
+    #[serde(default)]
+    pub uplink_interval_s: u32,
+    /// Power-on threshold the dashboard judges this device by, in mA.
+    #[serde(default)]
+    pub threshold_ma: i64,
+}
+
+/// What the device reads back out of the uplink response: the OTA target
+/// and the pushed settings. Every other key (`message`, `device_id`,
+/// `current`, `client_subject`) is skipped, so the endpoint may add
+/// fields freely.
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct UplinkAck {
     /// Version the endpoint wants this device to run, if an operator set one.
     #[serde(default)]
     pub desired_fw: Option<HString<32>>,
+    /// Settings the endpoint wants this device to run, when registered.
+    #[serde(default)]
+    pub config: Option<AckConfig>,
 }
 
 impl UplinkAck {
@@ -76,6 +96,10 @@ pub struct UplinkMessage {
     /// Configured uplink period in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_s: Option<u32>,
+    /// Version of the pushed settings block this device runs
+    /// (`settings::Settings::config_version`); absent before the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_version: Option<u32>,
     /// Free heap in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heap_free: Option<u32>,
@@ -121,6 +145,7 @@ impl UplinkMessage {
             seq: None,
             uptime_s: None,
             interval_s: None,
+            config_version: None,
             heap_free: None,
             rssi_dbm: None,
             temp_c: None,

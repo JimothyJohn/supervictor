@@ -36,6 +36,7 @@ fn seed_device(store: &dyn DeviceStore, id: &str, status: &str) {
             min_on_s: None,
             style: Default::default(),
             desired_fw: None,
+            uplink_interval_s: None,
         })
         .unwrap();
 }

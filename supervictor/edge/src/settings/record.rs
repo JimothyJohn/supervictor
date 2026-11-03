@@ -11,7 +11,7 @@
 //!   0  magic "SVST"      4  version (1)   6  reserved    8  seq
 //!  12  ssid len + 32    45  password len + 64
 //! 110  host len + 64   175  device_name len + 64
-//! 240  uplink_interval_s   244  threshold_ma   248  reserved   252  checksum
+//! 240  uplink_interval_s   244  threshold_ma   248  config_version   252  checksum
 //! ```
 
 use heapless::String as HString;
@@ -37,8 +37,9 @@ const OFF_HOST: usize = OFF_PASSWORD + 1 + PASSWORD_MAX;
 const OFF_NAME: usize = OFF_HOST + 1 + HOST_MAX;
 const OFF_INTERVAL: usize = OFF_NAME + 1 + NAME_MAX;
 const OFF_THRESHOLD: usize = OFF_INTERVAL + 4;
+const OFF_CONFIG_VERSION: usize = OFF_THRESHOLD + 4;
 const OFF_CHECKSUM: usize = LEN - 4;
-const _: () = assert!(OFF_THRESHOLD + 4 + 4 == OFF_CHECKSUM);
+const _: () = assert!(OFF_CONFIG_VERSION + 4 == OFF_CHECKSUM);
 
 /// Which of the two slots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,6 +126,7 @@ pub fn encode(settings: &Settings, seq: u32, frame: &mut [u8; LEN]) {
     put_str(frame, OFF_NAME, settings.device_name.as_str());
     put_u32(frame, OFF_INTERVAL, settings.uplink_interval_s);
     put_u32(frame, OFF_THRESHOLD, settings.threshold_ma);
+    put_u32(frame, OFF_CONFIG_VERSION, settings.config_version);
     let sum = checksum(frame);
     put_u32(frame, OFF_CHECKSUM, sum);
 }
@@ -152,6 +154,7 @@ pub fn decode(frame: &[u8]) -> Option<(u32, Settings)> {
         device_name: HString::try_from(get_str(frame, OFF_NAME, NAME_MAX)?).ok()?,
         uplink_interval_s: get_u32(frame, OFF_INTERVAL),
         threshold_ma: get_u32(frame, OFF_THRESHOLD),
+        config_version: get_u32(frame, OFF_CONFIG_VERSION),
     };
     Some((get_u32(frame, OFF_SEQ), settings))
 }

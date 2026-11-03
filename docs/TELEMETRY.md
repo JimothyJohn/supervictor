@@ -18,6 +18,32 @@ Design rules:
 - **Units live in field names** (`temp_c`, `gyro_dps`), so stored payloads
   are self-describing forever.
 
+## The response (settings come back down)
+
+The uplink's `200` body is the one message a device receives. Besides the
+echo (`message`, `device_id`, `current`, `client_subject`) it may carry
+two instructions, both keyed off the device record:
+
+```json
+{
+  "desired_fw": "0.2.0",
+  "config": { "version": 2543917486, "uplink_interval_s": 10, "threshold_ma": 12000 }
+}
+```
+
+- `desired_fw` — OTA target (`docs/OTA.md`); absent until an operator sets one.
+- `config` — the pushed settings, present for every registered device
+  (`supervictor_common::models::DeviceConfig`): seconds between uplinks
+  (`0` = the firmware's compiled default; `PUT /devices/{id}/config`) and
+  the power threshold the dashboard judges the device by (its override,
+  else the fleet default; `PUT /devices/{id}/threshold`). `version` is
+  `supervictor_common::config::version(interval, threshold)` — a pure
+  function of the values, never `0` — so neither side keeps a counter.
+  The device applies a block whose version differs from the one in its
+  settings record (interval clamped to 1–600 s), writes the record, and
+  reports `config_version` in every uplink from then on; `/fleet` and
+  the device page show `config_pending` until that echo matches.
+
 ## Example packet (full telemetry)
 
 ```json
@@ -28,6 +54,7 @@ Design rules:
   "seq": 17,
   "uptime_s": 86400,
   "interval_s": 300,
+  "config_version": 2543917486,
   "heap_free": 73728,
   "rssi_dbm": -67,
   "temp_c": 23.5,
@@ -79,6 +106,7 @@ Design rules:
 | `seq` | u32 | count | Reset → reboot; gap → dropped pings |
 | `uptime_s` | u32 | seconds | Reboot forensics, watchdog correlation |
 | `interval_s` | u32 | seconds | Device's own cadence (see below) |
+| `config_version` | u32 | — | Version of the pushed `config` block the device runs (see "The response"); absent before the first push |
 | `heap_free` | u32 | bytes | Leak canary — should be flat over days |
 | `rssi_dbm` | i8 | dBm | WiFi link quality; absent on wired Ethernet |
 

@@ -41,6 +41,7 @@ fn seed(store: &dyn DeviceStore, id: &str, status: &str) {
             min_on_s: None,
             style: Default::default(),
             desired_fw: None,
+            uplink_interval_s: None,
         })
         .unwrap();
 }
@@ -70,6 +71,7 @@ async fn power_timeline_uses_per_device_thresholds() {
             min_on_s: None,
             style: Default::default(),
             desired_fw: None,
+            uplink_interval_s: None,
         })
         .unwrap();
     let now = now_unix();
