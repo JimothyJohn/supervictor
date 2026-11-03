@@ -28,6 +28,9 @@ pub mod network;
 /// Over-the-air update: manifest, download framing, slot installer, boot
 /// policy (host-testable core) and the flash/bootloader glue (embedded).
 pub mod ota;
+/// Runtime settings (network, endpoint, device id) in the `nvs` partition:
+/// the record format (host-testable) and the flash glue (embedded).
+pub mod settings;
 
 /// Embassy async application tasks (WiFi, networking, main loop).
 #[cfg(feature = "embedded")]

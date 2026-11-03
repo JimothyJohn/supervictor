@@ -3,8 +3,10 @@ use esp_println::println;
 use mbedtls_rs::{Certificate, ClientSessionConfig, Credentials, PrivateKey, TlsVersion, X509};
 
 /// Load CA chain, client certificate, and private key from compile-time paths
-/// and return a configured mTLS session config.
-pub fn load_certificates() -> ClientSessionConfig<'static> {
+/// and return a configured mTLS session config. `server_name` is the host
+/// the certificate must be issued for — the one from the settings record,
+/// which lives as long as the board runs.
+pub fn load_certificates(server_name: &'static CStr) -> ClientSessionConfig<'static> {
     // CA chain — null-terminated PEM wrapped as CStr.
     // Paths are anchored to the crate manifest (…/supervictor/edge) so builds
     // are cwd-independent: CERT_PATH is repo-root-relative, e.g. "certs/".
@@ -97,16 +99,10 @@ pub fn load_certificates() -> ClientSessionConfig<'static> {
         }
     };
 
-    // Server name for verification
-    let host_cstr = {
-        let host_bytes = concat!(env!("HOST"), "\0").as_bytes();
-        unsafe { CStr::from_bytes_with_nul_unchecked(host_bytes) }
-    };
-
     ClientSessionConfig {
         ca_chain,
         creds,
-        server_name: Some(host_cstr),
+        server_name: Some(server_name),
         min_version: match option_env!("TLS_VERSION") {
             Some("1.3") => TlsVersion::Tls1_3,
             _ => TlsVersion::Tls1_2,

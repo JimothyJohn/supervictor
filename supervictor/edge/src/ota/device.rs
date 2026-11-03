@@ -25,10 +25,11 @@ use super::http::{self, HeadError, MAX_HEAD_LEN};
 use super::install::{InstallError, Installer, Slot, SECTOR};
 use super::manifest::{self, Manifest, ManifestError};
 use super::policy::{self, BootDecision, State};
-use crate::app::tasks::{API_PATH, DEVICE_ID_ON_WIRE};
+use crate::app::tasks::API_PATH;
 use crate::config::*;
 use crate::models::uplink::FIRMWARE_VERSION;
 use crate::network::tls::load_certificates;
+use crate::settings::Settings;
 
 /// Chip this build runs on; a manifest for anything else is refused.
 #[cfg(feature = "chip-esp32")]
@@ -139,6 +140,8 @@ pub struct Ota {
     pt_buf: &'static mut [u8; PARTITION_TABLE_MAX_LEN],
     sector: &'static mut [u8; SECTOR],
     confirming: bool,
+    /// Endpoint host and device id for the manifest and image requests.
+    settings: &'static Settings,
 }
 
 impl Ota {
@@ -150,12 +153,14 @@ impl Ota {
         flash: esp_hal::peripherals::FLASH<'static>,
         pt_buf: &'static mut [u8; PARTITION_TABLE_MAX_LEN],
         sector: &'static mut [u8; SECTOR],
+        settings: &'static Settings,
     ) -> Option<Ota> {
         let mut me = Ota {
             flash: FlashStorage::new(flash),
             pt_buf,
             sector,
             confirming: false,
+            settings,
         };
         match OtaUpdater::new(&mut me.flash, &mut *me.pt_buf) {
             Ok(mut updater) => {
@@ -273,9 +278,14 @@ impl Ota {
         // 1. Manifest.
         let mut buf = [0u8; READ_BUF];
         let manifest = {
-            let request = http::manifest_request(HOST, API_PATH, DEVICE_ID_ON_WIRE, desired)
-                .map_err(|_| OtaError::Framing)?;
-            let mut session = connect(stack, tls, rx, tx).await?;
+            let request = http::manifest_request(
+                self.settings.host.as_str(),
+                API_PATH,
+                self.settings.device_name.as_str(),
+                desired,
+            )
+            .map_err(|_| OtaError::Framing)?;
+            let mut session = connect(self.settings, stack, tls, rx, tx).await?;
             write_all(&mut session, request.as_bytes()).await?;
             let (head, body_len) = read_head_and_body(&mut session, &mut buf, started).await?;
             let _ = session.close().await;
@@ -323,15 +333,15 @@ impl Ota {
 
         // 3. Image, from `committed` to the end, pinned to this digest.
         let request = http::image_request(
-            HOST,
+            self.settings.host.as_str(),
             API_PATH,
-            DEVICE_ID_ON_WIRE,
+            self.settings.device_name.as_str(),
             desired,
             committed,
             sha_hex.as_str(),
         )
         .map_err(|_| OtaError::Framing)?;
-        let mut session = connect(stack, tls, rx, tx).await?;
+        let mut session = connect(self.settings, stack, tls, rx, tx).await?;
         write_all(&mut session, request.as_bytes()).await?;
         let (head, first_body) = read_head(&mut session, &mut buf, started).await?;
         let expected_status = if committed == 0 { 200 } else { 206 };
@@ -415,13 +425,14 @@ impl Ota {
 
 /// DNS + TCP + TLS to the endpoint, same path as the uplink.
 async fn connect<'a>(
+    settings: &'static Settings,
     stack: Stack<'static>,
     tls: TlsReference<'a>,
     rx: &'a mut [u8],
     tx: &'a mut [u8],
 ) -> Result<Session<'a, TcpSocket<'a>>, OtaError> {
     let addresses = stack
-        .dns_query(HOST, embassy_net::dns::DnsQueryType::A)
+        .dns_query(settings.host.as_str(), embassy_net::dns::DnsQueryType::A)
         .await
         .map_err(|_| OtaError::Connect)?;
     let address = *addresses.first().ok_or(OtaError::Connect)?;
@@ -431,7 +442,7 @@ async fn connect<'a>(
         .connect((address, AWS_IOT_PORT))
         .await
         .map_err(|_| OtaError::Connect)?;
-    let config = load_certificates();
+    let config = load_certificates(settings.host.as_cstr());
     let mut session = Session::new(tls, socket, &SessionConfig::Client(config.clone()))
         .map_err(|_| OtaError::Connect)?;
     match with_timeout(TLS_HANDSHAKE_TIMEOUT, session.connect()).await {

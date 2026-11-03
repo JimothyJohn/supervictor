@@ -2,8 +2,9 @@
 
 use embassy_time::Duration;
 
-/// Remote API hostname, set at compile time.
-pub const HOST: &str = env!("HOST");
+// HOST, SSID, PASSWORD and DEVICE_NAME are no longer constants: the board
+// reads them from the `nvs` partition at boot (`settings`), and the values
+// the image was built with only seed an empty partition.
 // CERT_PATH / CA_PATH have no runtime consts: network/tls.rs consumes them
 // directly via env! inside include_str! at compile time.
 
