@@ -101,7 +101,8 @@ EXTRA=()
 [ "$RTARGET" = riscv32imc-unknown-none-elf ] && EXTRA=(--target "$RTARGET")
 cargo build --bin supervictor-embedded --features "$FEATURES" ${EXTRA[@]+"${EXTRA[@]}"}
 ELF="$FW_ROOT/target/$RTARGET/debug/supervictor-embedded"
-strings "$ELF" | grep -Fx -- "$HOST" >/dev/null || fail "baked HOST not found in $ELF"
+# Substring: HOST is packed beside SSID and DEVICE_NAME (edge src/settings).
+strings "$ELF" | grep -F -- "$HOST" >/dev/null || fail "baked HOST not found in $ELF"
 strings "$ELF" | grep -Fx -- "$FW_VERSION" >/dev/null || fail "FW_VERSION $FW_VERSION not found in $ELF — did the build pick up the env?"
 
 WORK="$(mktemp -d)"
