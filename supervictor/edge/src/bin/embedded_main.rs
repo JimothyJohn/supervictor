@@ -153,7 +153,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     // On Xtensa esp-rtos starts without a software interrupt; on riscv it
     // needs SoftwareInterrupt<0> for its scheduler.
-    #[cfg(feature = "chip-esp32")]
+    #[cfg(any(feature = "chip-esp32", feature = "chip-esp32s3"))]
     esp_rtos::start(timg0.timer0);
     #[cfg(feature = "chip-esp32c3")]
     esp_rtos::start(

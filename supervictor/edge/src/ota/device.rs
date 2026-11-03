@@ -37,6 +37,9 @@ pub const THIS_CHIP: ChipId = ChipId::Esp32;
 /// Chip this build runs on; a manifest for anything else is refused.
 #[cfg(feature = "chip-esp32c3")]
 pub const THIS_CHIP: ChipId = ChipId::Esp32C3;
+/// Chip this build runs on; a manifest for anything else is refused.
+#[cfg(feature = "chip-esp32s3")]
+pub const THIS_CHIP: ChipId = ChipId::Esp32S3;
 
 /// Per-read timeout while streaming the image.
 const READ_TIMEOUT: Duration = Duration::from_secs(10);

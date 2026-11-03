@@ -12,7 +12,7 @@
 #             on the single-binary path; nothing answers there until it exists.
 #
 # Which firmware, which port:
-#   FEATURES     board-poe2 | ethernet | wifi,chip-esp32 | wifi,chip-esp32c3.
+#   FEATURES     board-poe2 | ethernet | wifi,chip-esp32 | wifi,chip-esp32c3 | wifi,chip-esp32s3.
 #                Default: the device's row in certs/rack-inventory.tsv (INVENTORY);
 #                otherwise required. `sim` (the telemetry simulator) is added
 #                unless SIM=0: the rack has no sensors, so a bench image keeps
@@ -56,7 +56,7 @@ need cargo espflash strings
 if [ -z "${FEATURES:-}" ] && [ -f "$INVENTORY" ]; then
     FEATURES="$(awk -F'\t' -v d="$DEVICE" 'NR > 1 && $1 == d { print $4; exit }' "$INVENTORY")"
 fi
-[ -n "${FEATURES:-}" ] || fail "FEATURES unset and $DEVICE has no row in $INVENTORY — FEATURES=board-poe2|ethernet|wifi,chip-esp32|wifi,chip-esp32c3"
+[ -n "${FEATURES:-}" ] || fail "FEATURES unset and $DEVICE has no row in $INVENTORY — FEATURES=board-poe2|ethernet|wifi,chip-esp32|wifi,chip-esp32c3|wifi,chip-esp32s3"
 
 # Telemetry simulator: the rack has no sensors yet, so bench images keep the
 # simulated traces (feature `sim`, off in Cargo by default — a production
@@ -66,6 +66,7 @@ if [ "${SIM:-1}" != 0 ]; then
 fi
 case "$FEATURES" in
 *chip-esp32c3*) RTARGET=riscv32imc-unknown-none-elf; CHIP=esp32c3 ;;
+*chip-esp32s3*) RTARGET=xtensa-esp32s3-none-elf;     CHIP=esp32s3 ;;
 *)              RTARGET=xtensa-esp32-none-elf;       CHIP=esp32 ;;
 esac
 
@@ -98,7 +99,7 @@ fi
 log "$DEVICE -> $TARGET_ENV  HOST=$HOST API_PATH=$API_PATH CA_PATH=$CA_PATH  features=$FEATURES  port=$SERIAL_PORT"
 cd "$FW_ROOT/supervictor/edge"
 EXTRA=()
-[ "$RTARGET" = riscv32imc-unknown-none-elf ] && EXTRA=(--target "$RTARGET")
+[ "$RTARGET" != xtensa-esp32-none-elf ] && EXTRA=(--target "$RTARGET")
 cargo build --bin supervictor-embedded --features "$FEATURES" ${EXTRA[@]+"${EXTRA[@]}"}
 ELF="$FW_ROOT/target/$RTARGET/debug/supervictor-embedded"
 # grep without -q: it must drain stdin, or strings dies of SIGPIPE and pipefail fails the check.
