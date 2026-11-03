@@ -170,4 +170,12 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
 
 ## Open questions for Nick
 
-(none)
+- [ ] **Which board is on /dev/cu.usbserial-11220, and may I reset it — or plug the C3 in?** — PR 136 (settings record in the nvs partition) and PR 137 (provisioning portal) are green in CI and need a bench boot before they un-draft; the interview picked the C3 first. At 04:47Z the only serial port was one CH340 (`usbserial-11220`, a new hub number) that printed nothing in 20 s attached without reset — probably poe-iso-eth-01, dark on prod since 00:32Z. No `usbmodem` port, so the C3 is not plugged in. Identifying the CH340 board takes `espflash board-info`, which resets it.
+      needs: the C3 on USB (its own usbmodem port), or a yes to resetting the CH340 board
+      result: PR 136 boots on a bench board (seed line, then record line on reboot, normal uplinks); PR 137 runs the checklist in `../supervictor-provision/scratch/pr-b.md`; both un-draft
+      options: plug the C3 in | reset usbserial-11220 and use whatever it is | wait
+      est: 45m
+      difficulty: med
+      id: bench-settings-portal
+      asked: 2026-11-03
+      by: provisioning session (worktree supervictor-provision)
