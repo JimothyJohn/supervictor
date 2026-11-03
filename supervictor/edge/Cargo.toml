@@ -105,6 +105,8 @@ embassy-net = { version = "0.9.1", features = [
   "medium-ethernet",
   "tcp",
   "dns",
+  # The provisioning portal's DHCP + DNS answers on the board's own AP.
+  "udp",
 ], optional = true }
 
 tokio = { version = "1.0", optional = true, features = ["full"] }

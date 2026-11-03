@@ -181,6 +181,16 @@ impl Ota {
         }
     }
 
+    /// Lend the flash driver and partition-table buffer to something else
+    /// that lives in flash — the settings record, when the portal or a
+    /// dashboard push rewrites it. Synchronous: no await while lent.
+    pub fn with_flash<R>(
+        &mut self,
+        f: impl FnOnce(&mut FlashStorage<'static>, &mut [u8; PARTITION_TABLE_MAX_LEN]) -> R,
+    ) -> R {
+        f(&mut self.flash, &mut *self.pt_buf)
+    }
+
     /// Count this boot against an unconfirmed image; revert and reset when
     /// the budget is spent. Call before anything that could wedge.
     pub fn boot_check(&mut self) -> BootDecision {

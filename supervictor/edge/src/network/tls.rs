@@ -2,11 +2,22 @@ use core::ffi::CStr;
 use esp_println::println;
 use mbedtls_rs::{Certificate, ClientSessionConfig, Credentials, PrivateKey, TlsVersion, X509};
 
+/// The device's own certificate as baked in, for anything that needs to
+/// show or derive from it (the portal's passphrase is its fingerprint).
+pub const CLIENT_CERT_PEM: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../",
+    env!("CERT_PATH"),
+    "devices/",
+    env!("DEVICE_NAME"),
+    "/client.pem"
+));
+
 /// Load CA chain, client certificate, and private key from compile-time paths
 /// and return a configured mTLS session config. `server_name` is the host
-/// the certificate must be issued for — the one from the settings record,
-/// which lives as long as the board runs.
-pub fn load_certificates(server_name: &'static CStr) -> ClientSessionConfig<'static> {
+/// the certificate must be issued for — the settings record's for the
+/// uplink, a candidate's while the portal verifies it.
+pub fn load_certificates(server_name: &CStr) -> ClientSessionConfig<'_> {
     // CA chain — null-terminated PEM wrapped as CStr.
     // Paths are anchored to the crate manifest (…/supervictor/edge) so builds
     // are cwd-independent: CERT_PATH is repo-root-relative, e.g. "certs/".
