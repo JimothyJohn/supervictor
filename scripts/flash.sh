@@ -103,7 +103,9 @@ EXTRA=()
 cargo build --bin supervictor-embedded --features "$FEATURES" ${EXTRA[@]+"${EXTRA[@]}"}
 ELF="$FW_ROOT/target/$RTARGET/debug/supervictor-embedded"
 # grep without -q: it must drain stdin, or strings dies of SIGPIPE and pipefail fails the check.
-strings "$ELF" | grep -Fx -- "$HOST" >/dev/null || fail "baked HOST not found in $ELF — the build did not pick up the env"
+# Substring, not whole line: since the settings record (edge src/settings)
+# HOST is an ordinary &str the linker packs beside SSID and DEVICE_NAME.
+strings "$ELF" | grep -F -- "$HOST" >/dev/null || fail "baked HOST not found in $ELF — the build did not pick up the env"
 
 PARTITIONS="$FW_ROOT/supervictor/edge/partitions.csv"
 [ -f "$PARTITIONS" ] || fail "partition table missing at $PARTITIONS"
