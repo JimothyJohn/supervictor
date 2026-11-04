@@ -118,15 +118,6 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-26
       by: decisions session
       notes: on the Air: scp nick@10.0.0.41:github/supervictor/scripts/iphone-cert.sh ~/ && ~/iphone-cert.sh (AirDrop the identity)
-- [ ] **Tear down the moot phone-preview stack in `../supervictor-mobile`** — endpoint :8443, extruder sim, demo http server on :8000; the session was denied the kill.
-      needs: 1 min
-      result: the ports and the worktree free
-      est: 5m
-      difficulty: low
-      id: teardown-mobile-preview
-      asked: 2026-10-26
-      by: decisions session
-      notes: ./scratch/teardown-mobile-preview.sh in the main checkout (untracked there)
 - [ ] **Fill the switch-port column** — `certs/rack-inventory.tsv` still has `-` for every board, so a dark fleet row does not map to a cable (HARDWARE.md §10).
       needs: a look at the rack
       result: device → LS108GP port recorded
@@ -144,6 +135,16 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-27
       by: prod-box session (PR 124)
       notes: ./scripts/boards-to-prod.sh (idempotent: skips boards already fresh on prod)
+- [ ] **Prune merged worktrees and branches** — deep clean 2026-11-03: 14 sibling worktrees (13 merged + the stale `dev` checkout in `../supervictor-live-scaled`), 50 merged local branches, 11 unmerged ones triaged as superseded (each reason is in the script's SUPERSEDED list; a branch that moved since triage is kept), 9 origin branches, and the main checkout from `fix/boards-to-prod-bash32` onto `dev`. Also removes the Python/Lambda-era caches (`supervictor/endpoint/.aws-sam/`, `.pytest_cache/`, `.ruff_cache/`, `.python-version`) and `.claude/handoff-pr85-live-levels.md`. Dry run by default; worktrees that are dirty, active in the last 6 h, have a process inside, or have an open PR are kept. Every deleted ref and its SHA goes to `.logs/prune-<utc>.tsv`.
+      needs: the chore/clean-* PRs merged (their worktrees are kept until then); a terminal (branch deletion is denied to sessions)
+      result: one worktree, local branches = dev, master and live work; origin holds only dev, master and open-PR heads
+      options: run it | keep some (say which)
+      est: 5m
+      difficulty: low
+      id: prune-merged
+      asked: 2026-11-03
+      by: deep-clean session (chore/clean-git-prune)
+      notes: ./scripts/prune-merged.sh (read the plan) → GO=1 ./scripts/prune-merged.sh; rerun any time, it is idempotent
 
 ## Notes — local state (not tasks)
 
