@@ -357,7 +357,6 @@ pub async fn app(
                 .min(u64::from(u32::MAX)) as u32;
             let heap_free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
             #[cfg(feature = "sim")]
-            #[allow(unused_mut)]
             let mut uplink = sim.uplink(
                 device_id.clone(),
                 uptime_s,
@@ -369,7 +368,6 @@ pub async fn app(
                 },
             );
             #[cfg(not(feature = "sim"))]
-            #[allow(unused_mut)]
             let mut uplink = {
                 seq = seq.wrapping_add(1);
                 let mut msg = UplinkMessage::new(device_id.clone(), 0);
