@@ -6,7 +6,9 @@
 //! POE-ISO is PoE-powered, wired is the main connection; implies chip-esp32)
 //! or `wifi` (fallback for boards deployed off-cable, any chip).
 //!
-//! WiFi builds read SSID/PASSWORD from the environment at compile time.
+//! SSID, password, endpoint host and device id come from the settings
+//! record in the `nvs` partition; the values the image was built with
+//! (SSID/PASSWORD/HOST/DEVICE_NAME) seed it on first boot.
 
 #![no_std]
 #![no_main]
@@ -31,11 +33,10 @@ use mbedtls_rs::Tls;
 
 use supervictor::app::tasks::app;
 use supervictor::config::*;
+use supervictor::settings::Settings;
 
 #[cfg(feature = "ethernet")]
 use esp_hal::gpio::{Level, Output, OutputConfig};
-#[cfg(feature = "espnow")]
-use supervictor::app::tasks::DEVICE_ID_ON_WIRE;
 #[cfg(feature = "espnow")]
 use supervictor::network::espnow;
 #[cfg(feature = "ethernet")]
@@ -47,6 +48,8 @@ use embassy_net::StackResources;
 use esp_radio::wifi::{self, ClientConfig, ModeConfig};
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
 use supervictor::app::tasks::{connection, net_task};
+#[cfg(all(feature = "wifi", not(feature = "ethernet")))]
+use supervictor::network::portal;
 
 // Application descriptor: the version is FIRMWARE_VERSION (FW_VERSION at
 // build time, else the crate version) so `espflash board-info` and the
@@ -89,7 +92,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     #[cfg(feature = "chip-esp32")]
     esp_alloc::heap_allocator!(#[link_section = ".dram2_uninit"] size: DRAM2_HEAP_SIZE);
 
-    let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    let mut peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
     // RTC watchdog, armed before radio/network init: it sits in the RTC
@@ -103,6 +106,26 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     );
     rwdt.enable();
 
+    // Settings (network, endpoint, device id) from the nvs partition,
+    // seeded from the image on first boot (settings::device). Read on a
+    // reborrow before OTA takes the flash peripheral for good; the record
+    // lives in a static for the life of the board.
+    let pt_buf = make_static!(
+        [u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN],
+        [0; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN]
+    );
+    let settings: &'static Settings = {
+        let mut flash = esp_storage::FlashStorage::new(peripherals.FLASH.reborrow());
+        make_static!(
+            Settings,
+            supervictor::settings::device::boot(&mut flash, pt_buf)
+        )
+    };
+    if !settings.has_endpoint() {
+        println!("FATAL: no endpoint host / device id on flash or in the image — unprovisioned; reflash with HOST and DEVICE_NAME set");
+        halt().await;
+    }
+
     // OTA: count this boot against an unconfirmed image (reverts + resets
     // when the budget is spent), before anything that could wedge. None on
     // the factory partition table — the board still uplinks.
@@ -110,14 +133,12 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     // frame or the app task's future (see `ota::device::Ota`).
     let ota = supervictor::ota::device::Ota::new(
         peripherals.FLASH,
-        make_static!(
-            [u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN],
-            [0; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN]
-        ),
+        pt_buf,
         make_static!(
             [u8; supervictor::ota::install::SECTOR],
             [0; supervictor::ota::install::SECTOR]
         ),
+        settings,
     );
     let mut ota = ota.map(|o| &mut *make_static!(supervictor::ota::device::Ota, o));
     if let Some(o) = ota.as_mut() {
@@ -132,7 +153,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     // On Xtensa esp-rtos starts without a software interrupt; on riscv it
     // needs SoftwareInterrupt<0> for its scheduler.
-    #[cfg(feature = "chip-esp32")]
+    #[cfg(any(feature = "chip-esp32", feature = "chip-esp32s3"))]
     esp_rtos::start(timg0.timer0);
     #[cfg(feature = "chip-esp32c3")]
     esp_rtos::start(
@@ -172,11 +193,32 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
             }
         );
 
-        // WiFi station config
+        // Provisioning portal (network/portal): no SSID anywhere, or the
+        // previous boot never joined the one it has, and the board becomes
+        // an access point serving the settings form instead of a station.
+        // `run` reboots the board when it is done; nothing below runs.
+        if let Some(reason) = portal::should_open(settings) {
+            portal::run(
+                spawner,
+                esp_radio_ctrl,
+                peripherals.WIFI,
+                settings,
+                ota,
+                rwdt,
+                net_seed,
+                reason,
+            )
+            .await
+        }
+        // Station boot: on the record. `connection()` upgrades it to
+        // "joined" on association; a watchdog reset before that opens
+        // the portal next boot.
+        portal::mark_booted();
+
         let client_config = ModeConfig::Client(
             ClientConfig::default()
-                .with_ssid(env!("SSID").into())
-                .with_password(env!("PASSWORD").into()),
+                .with_ssid(settings.ssid.as_str().into())
+                .with_password(settings.password.as_str().into()),
         );
         let (mut controller, interfaces) =
             match wifi::new(esp_radio_ctrl, peripherals.WIFI, wifi::Config::default()) {
@@ -227,13 +269,16 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
                 let _ = make_static!(esp_radio::wifi::WifiController<'static>, controller);
                 let (_manager, sender, receiver) = esp_now.split();
                 spawner
-                    .spawn(espnow::espnow_beacon_task(sender, DEVICE_ID_ON_WIRE))
+                    .spawn(espnow::espnow_beacon_task(
+                        sender,
+                        settings.device_name.as_str(),
+                    ))
                     .ok();
                 spawner.spawn(espnow::espnow_listen_task(receiver)).ok();
                 println!(
                     "ESP-NOW up on channel {} as {} (heap used {} free {})",
                     ESPNOW_CHANNEL,
-                    DEVICE_ID_ON_WIRE,
+                    settings.device_name.as_str(),
                     esp_alloc::HEAP.used(),
                     esp_alloc::HEAP.free()
                 );
@@ -264,6 +309,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         .spawn(app(
             stack,
             tls,
+            settings,
             rwdt,
             sim_seed,
             ota,

@@ -6,7 +6,7 @@ stock firmware" to "ten lines in any language".
 
 ## The wire contract (every path)
 
-`POST https://<HOST>:443/` (or `<API_PATH>` on a raw API Gateway URL), body
+`POST https://<HOST>:443/` (or `<API_PATH>` behind a path-prefixed proxy), body
 `application/json`, over TLS 1.2+ with the device's client certificate:
 
 ```json
@@ -53,12 +53,13 @@ Build + flash from `supervictor/edge/` (Quickstart loads `.env.dev` and
 cargo run --bin supervictor-embedded --features ethernet                                   # POE-ISO
 cargo run --bin supervictor-embedded --features board-poe2                                 # POE2 (Ethernet)
 cargo run --bin supervictor-embedded --features wifi,chip-esp32c3 --target riscv32imc-unknown-none-elf   # C3
+cargo run --bin supervictor-embedded --features wifi,chip-esp32s3 --target xtensa-esp32s3-none-elf      # S3 (XIAO ESP32S3 Sense)
 ```
 
 `QS_HARDWARE=flash QS_BOARD=<poe-iso|poe2|c3> ./Quickstart` does the same
-with the menu answered. Flashing is USB only (no OTA yet — `docs/OTA.md` is
-the plan); PoE boards: never USB and Ethernet at once on the POE2, it has
-no galvanic isolation.
+with the menu answered. The first flash is USB; after that a board takes
+new images over OTA (`scripts/ota-push.sh`, `docs/OTA.md`). PoE boards:
+never USB and Ethernet at once on the POE2, it has no galvanic isolation.
 
 ## Path 2: another classic-ESP32 Ethernet board (RMII PHY)
 
@@ -111,12 +112,13 @@ Bring-up order and what each log line means is at the top of
 `network/ethernet.rs`; `MDIO reads 0xffffffff` means the PHY has no clock
 or no power, not a wrong driver.
 
-## Path 3: another ESP32-family chip over WiFi (S3, C6, …)
+## Path 3: another ESP32-family chip over WiFi (C6, …)
 
-Not wired today. The build axis is `chip-esp32` / `chip-esp32c3`, each
+The S3 is wired (`chip-esp32s3`, build line above). Anything else is not.
+The build axis is `chip-esp32` / `chip-esp32c3` / `chip-esp32s3`, each
 fanning out to `esp-hal`, `esp-backtrace`, `esp-rtos`, `esp-radio`,
-`esp-bootloader-esp-idf` and a `--target`. A new chip means a new
-`chip-<x>` feature with those five forwards, the matching target in
+`esp-bootloader-esp-idf`, `esp-storage` and a `--target`. A new chip means a new
+`chip-<x>` feature with those six forwards, the matching target in
 `.cargo/config.toml`, a `HEAP_SIZE` in `config.rs`, the `esp_rtos::start`
 arm in `embedded_main.rs` (Xtensa vs RISC-V differ), and a CI line.
 `esp-hal` is pinned to `=1.0.0` for esp-rtos/esp-radio compatibility, so

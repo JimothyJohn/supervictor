@@ -13,7 +13,7 @@ git clone https://github.com/JimothyJohn/supervictor.git && cd supervictor
 
 One command, start to finish: it checks the toolchain, writes `.env.dev`, issues the fleet CA and your admin, server and device certificates, builds, runs the test suite, starts the endpoint with mTLS on `https://localhost:8443`, then asks what should post telemetry — a simulated machine on your computer, an ESP32 over USB, or nothing yet. It is idempotent: rerun it after any fix and it skips what already exists. It only prompts on a terminal and only where a choice is ambiguous; `QS_HARDWARE=sim ./Quickstart` answers ahead of time for scripts and CI. `./Quickstart status` and `./Quickstart down` manage what it started.
 
-- `make` is the same path with the usual names (`make help`, `lint`, `test-unit`, `flash`, `deploy`).
+- `make` is the same path with the usual names (`make help`, `lint`, `test-unit`, `flash`, `deploy`, `ship`).
 - In Claude Code, `/quickstart` runs it with an agent that reads your serial ports and environment first and fixes what fails. `/bring-your-own` is the next step: the endpoint on a server you own (Linux box, VPS, Pi, container, macOS or WSL) and telemetry from a board that is not the bench Olimex — another ESP32, a Linux SBC, or anything that can do mTLS — with a checker that proves the server from a device's point of view before you flash.
 - Rust is the only requirement. Flashing adds `espflash` and the esp toolchain, which `./Quickstart install` sets up.
 
@@ -63,6 +63,7 @@ Three crates: `supervictor/common` (wire contract, `no_std`), `supervictor/edge`
 | `GET`/`POST` | `/devices` | List / register (`device_id`, `owner_id`, `subject_dn`, optional `power_threshold_ma`, `color`, `line_style`, `marker`) |
 | `GET` | `/devices/{id}`, `/devices/{id}/uplinks` | Device record, recent uplinks |
 | `PUT` | `/devices/{id}/threshold` | Set or clear the device's power threshold (admin) |
+| `PUT` | `/devices/{id}/config` | Set or clear the uplink interval pushed to the device, 1–600 s; interval and threshold reach it as the `config` block of its next uplink response, and `/fleet` reports `config_pending` until it echoes the version (admin) |
 | `PUT` | `/devices/{id}/style` | Replace how the dashboard draws the device: `color` (`s0`–`s7` or `#rrggbb`), `line_style`, `marker` (admin) |
 | `GET` | `/fleet`, `/fleet/summary` | Per-device health; aggregate counts for alerting (admin) |
 | `GET` | `/fleet/history?window=` | Bucketed telemetry plus status and power timelines, `1m`…`7d` (admin) |
@@ -74,7 +75,7 @@ Handlers are pure functions with no framework types; `routes.rs` is the only axu
 
 **Endpoint configuration** is environment only: `PORT`, `TLS_CERT` / `TLS_KEY` / `TLS_CLIENT_CA` (all three → mTLS in-process; none → plain HTTP behind a proxy that terminates it), `STORE_BACKEND`, `SQLITE_DB_PATH`, `POWER_THRESHOLD_MA`, `REQUIRE_REGISTRATION`, `WATCHDOG_INTERVAL_SECS`, `UPLINK_TTL_DAYS`. A malformed value fails the boot rather than disabling a check.
 
-**Firmware.** `cargo run --bin supervictor-embedded --features <ethernet | board-poe2 | wifi,chip-esp32c3>` from `supervictor/edge/` builds and flashes. `HOST`, `DEVICE_NAME`, `CERT_PATH`, `CA_PATH`, `SSID`, `PASSWORD` and `TLS_VERSION` are baked in at compile time from `.env.dev`; the device certificate is embedded, so each board is its own identity. `SIM_PROFILE` (`extruder`, `press-brake`, `cnc`, `saw`, `oven`, `compressor`, `conveyor`, `molder`, `welder`, `pump`) makes a board or the desktop client act like that machine; `scripts/sim-fleet.sh up` runs all ten as containers against an endpoint.
+**Firmware.** `cargo run --bin supervictor-embedded --features <ethernet | board-poe2 | wifi,chip-esp32c3>` from `supervictor/edge/` builds and flashes. `DEVICE_NAME`, `CERT_PATH`, `CA_PATH` and `TLS_VERSION` are baked in at compile time from `.env.dev`; the device certificate is embedded, so each board is its own identity. `HOST`, `SSID`, `PASSWORD` and the device id on the wire are runtime settings in the board's `nvs` partition (`supervictor/edge/src/settings/`): the values in `.env.dev` seed an empty partition on first boot, after which the image no longer decides them. A WiFi board with nothing to join, or that could not join for five minutes, opens a provisioning access point (`supervictor-<device>`, WPA2, passphrase printed by `flash.sh`) at `http://192.168.4.1/`; it joins the network you enter and completes a TLS handshake with the host before saving anything. `SIM_PROFILE` (`extruder`, `press-brake`, `cnc`, `saw`, `oven`, `compressor`, `conveyor`, `molder`, `welder`, `pump`) makes a board or the desktop client act like that machine; `scripts/sim-fleet.sh up` runs all ten as containers against an endpoint.
 
 ## Deploy
 
@@ -82,12 +83,12 @@ The endpoint is one static musl binary. On any Linux box, as root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JimothyJohn/supervictor/master/scripts/install-endpoint.sh \
-  | sudo bash -s -- v0.1.0                                # verifies the sha256, installs binary + unit
+  | sudo bash -s -- v0.2.0                                # verifies the sha256, installs binary + unit
 sudo cp server.pem server.key ca.pem /etc/supervictor/   # from ./Quickstart certs
 sudo systemctl start supervictor-endpoint
 ```
 
-It listens on `:443`, requires a client certificate chaining to `ca.pem`, and takes each device's identity from the certificate it presented. The unit runs as a dynamic user with `ProtectSystem=strict`, a syscall filter, `MemoryDenyWriteExecute` and only `CAP_NET_BIND_SERVICE`; the PEMs are passed as systemd credentials and the database lives in `/var/lib/supervictor`. Re-run the installer with a newer tag to upgrade. `make deploy` stands up the staging box this way on a t4g.micro. The same binary runs on any Linux box, a Pi, a VPS or in a container (`endpoint/docker-compose.yml`, Caddy terminating mTLS in front), wherever you are; nothing in it depends on AWS.
+It listens on `:443`, requires a client certificate chaining to `ca.pem`, and takes each device's identity from the certificate it presented. The unit runs as a dynamic user with `ProtectSystem=strict`, a syscall filter, `MemoryDenyWriteExecute` and only `CAP_NET_BIND_SERVICE`; the PEMs are passed as systemd credentials and the database lives in `/var/lib/supervictor`. Re-run the installer with a newer tag to upgrade. The project's own two boxes are EC2 t4g.micro instances built this way from `supervictor/endpoint/template-staging.yaml`: staging (`make deploy` creates it) and prod at supervictor.advin.io with a Let's Encrypt server certificate. Once `dev` is merged into `master`, getting it running on prod is one resumable command: `./scripts/ship.sh` prints the plan, `./scripts/ship.sh go` runs it (tag, release, install on the prod box, Let's Encrypt, boards moved by OTA — [docs/OTA.md](docs/OTA.md)); `make ship [GO=1]` is the same. The same binary runs on any Linux box, a Pi, a VPS or in a container (`supervictor/endpoint/docker-compose.yml`, Caddy terminating mTLS in front), wherever you are; nothing in it depends on AWS.
 
 ## Security
 

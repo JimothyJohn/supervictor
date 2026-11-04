@@ -295,7 +295,7 @@ floats into `null`, which the endpoint rejects).
 1 000 000) applied after 6.1, baked like `UPLINK_INTERVAL_S`; per-board
 value lives in a new column of `certs/rack-inventory.tsv` so `flash.sh`
 carries it. **Decided 2026-10-26: compile-time is the only path.** A
-recalibration is a rebuild (OTA once that lands, USB until then); no NVS
+recalibration is a rebuild delivered by OTA (`docs/OTA.md`); no NVS
 write path, no second source of truth.
 
 ## 8. Bring-up checklist

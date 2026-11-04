@@ -209,6 +209,7 @@ fn record(id: &str, subject_dn: Option<&str>) -> DeviceRecord {
         min_on_s: None,
         style: Default::default(),
         desired_fw: None,
+        uplink_interval_s: None,
     }
 }
 

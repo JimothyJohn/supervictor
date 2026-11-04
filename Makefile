@@ -9,7 +9,7 @@
 QS := ./Quickstart
 
 .PHONY: help up down status install-dev lint fmt build test-unit test-integration test-all \
-        flash onboard certs-ca certs-device certs-admin certs-server fleet ping deploy release-check mcp
+        flash onboard certs-ca certs-device certs-admin certs-server fleet ping deploy ship release-check mcp
 
 .DEFAULT_GOAL := up
 
@@ -80,6 +80,9 @@ ping:  ## mTLS GET / with the device certificate. HOST=<endpoint> PORT=<port>.
 
 deploy:  ## Deploy the self-hosted staging box (scripts/deploy-staging.sh).
 	$(QS) deploy
+
+ship:  ## dev on master -> prod: plan, or GO=1 to run it (scripts/ship.sh). TAG=vX.Y.Z.
+	./scripts/ship.sh $(if $(GO),go,plan)
 
 release-check:  ## Release build of the endpoint for this host (a v* tag builds the static musl binaries in CI).
 	cargo build -p supervictor-endpoint --release --locked

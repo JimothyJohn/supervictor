@@ -3,10 +3,9 @@
 #
 #   TAG=v0.2.0 ./scripts/prod-box-create.sh      # native terminal; CloudFormation create is yours
 #
-# Needs, in this order, before it runs:
-#   - ./scripts/teardown-lambda-stacks.sh done: the
-#     supervictor-prod Lambda stack owned the supervictor.advin.io A record and
-#     CloudFormation refuses a name another stack holds (checked below)
+# Needs before it runs:
+#   - supervictor.advin.io free in Route53: CloudFormation refuses a record
+#     another stack holds (checked below)
 #   - the release tagged (TODO card cut-v0-2-0: `TAG=v0.2.0 ./scripts/release.sh`): the box's bootstrap
 #     installs TAG from the GitHub release at first boot
 # Idempotent: refuses if the stack exists (updates go through
@@ -26,9 +25,6 @@ need_admin
 log "as $(aws sts get-caller-identity --query Arn --output text)"
 
 # ── preconditions ──────────────────────────────────────────────────────────
-if aws cloudformation describe-stacks --stack-name supervictor-prod >/dev/null 2>&1; then
-    fail "the Lambda stack supervictor-prod still exists and owns the supervictor.advin.io record — run ./scripts/teardown-lambda-stacks.sh first"
-fi
 REC="$(aws route53 list-resource-record-sets --hosted-zone-id Z039212425BG1MHVPYWDN \
     --query "ResourceRecordSets[?Name=='supervictor.advin.io.' && Type=='A'] | length(@)" --output text)"
 [ "$REC" = 0 ] || fail "an A record for supervictor.advin.io still exists in Route53 — the stack would fail creating DnsRecord. Remove it (or find which stack owns it) first"

@@ -36,6 +36,7 @@ fn seed(store: &dyn DeviceStore, id: &str, status: &str) {
             min_on_s: None,
             style: Default::default(),
             desired_fw: None,
+            uplink_interval_s: None,
         })
         .unwrap();
 }
@@ -69,6 +70,7 @@ fn seed_with_threshold(store: &dyn DeviceStore, id: &str, threshold: Option<i64>
             min_on_s: None,
             style: Default::default(),
             desired_fw: None,
+            uplink_interval_s: None,
         })
         .unwrap();
 }

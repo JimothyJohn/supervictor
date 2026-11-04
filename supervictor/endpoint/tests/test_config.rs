@@ -7,7 +7,6 @@ fn env_var_parsing() {
     // Save and clear all relevant vars
     let keys = [
         "PORT",
-        "AWS_LWA_PORT",
         "ENVIRONMENT",
         "APP_NAME",
         "LOG_LEVEL",
@@ -126,16 +125,6 @@ fn env_var_parsing() {
     std::env::set_var("PORT", "3000");
     assert_eq!(Config::from_env().unwrap().port, 3000);
     std::env::remove_var("PORT");
-
-    // --- AWS_LWA_PORT fallback ---
-    std::env::set_var("AWS_LWA_PORT", "9000");
-    assert_eq!(Config::from_env().unwrap().port, 9000);
-
-    // --- PORT takes precedence ---
-    std::env::set_var("PORT", "3000");
-    assert_eq!(Config::from_env().unwrap().port, 3000);
-    std::env::remove_var("PORT");
-    std::env::remove_var("AWS_LWA_PORT");
 
     // --- invalid port ---
     std::env::set_var("PORT", "not_a_number");

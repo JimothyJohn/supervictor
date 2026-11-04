@@ -47,7 +47,7 @@ pub struct Config {
     /// for devices that *are* bound is enforced regardless of this flag.
     pub require_registration: bool,
     /// Terminate mTLS in-process when set (single-binary deployment);
-    /// plain HTTP behind API Gateway / a proxy when `None`.
+    /// plain HTTP behind a reverse proxy when `None`.
     pub tls: Option<TlsConfig>,
     /// Directory for OTA firmware images (`FIRMWARE_DIR`); `None` leaves
     /// the firmware routes answering 503.
@@ -100,9 +100,7 @@ fn parse_bool(name: &str, raw: &str) -> Result<bool, AppError> {
 impl Config {
     /// Load configuration from environment variables with sensible defaults.
     pub fn from_env() -> Result<Self, AppError> {
-        let port_str = env::var("PORT")
-            .or_else(|_| env::var("AWS_LWA_PORT"))
-            .unwrap_or_else(|_| "8000".into());
+        let port_str = env::var("PORT").unwrap_or_else(|_| "8000".into());
         let port: u16 = port_str
             .parse()
             .map_err(|e| AppError::Config(format!("invalid port '{port_str}': {e}")))?;

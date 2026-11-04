@@ -24,7 +24,7 @@ sim = []
 desktop = ["tokio", "rustls", "tokio-rustls", "rustls-pemfile", "sim"]
 # Chip selection — embedded builds need exactly one, matched to the cargo
 # --target (chip-esp32 ↔ xtensa-esp32-none-elf, chip-esp32c3 ↔
-# riscv32imc-unknown-none-elf). Fans the choice out to every esp-rs crate;
+# riscv32imc-unknown-none-elf, chip-esp32s3 ↔ xtensa-esp32s3-none-elf). Fans the choice out to every esp-rs crate;
 # the '?' forwards only when that optional dep is enabled, and esp-backtrace
 # forwards the chip on to esp-println. `ethernet` implies chip-esp32 — only
 # the classic ESP32 has an EMAC.
@@ -43,6 +43,17 @@ chip-esp32c3 = [
   "esp-radio?/esp32c3",
   "esp-bootloader-esp-idf?/esp32c3",
   "esp-storage?/esp32c3",
+]
+# ESP32-S3 (Xtensa LX7; e.g. the Seeed XIAO ESP32S3 Sense) ↔
+# xtensa-esp32s3-none-elf. WiFi only; the console is the native
+# USB-Serial-JTAG, which esp-println's default `auto` picks.
+chip-esp32s3 = [
+  "esp-hal?/esp32s3",
+  "esp-backtrace?/esp32s3",
+  "esp-rtos?/esp32s3",
+  "esp-radio?/esp32s3",
+  "esp-bootloader-esp-idf?/esp32s3",
+  "esp-storage?/esp32s3",
 ]
 # Base embedded runtime (no network interface). The supervictor-embedded bin
 # additionally needs exactly one interface feature: `ethernet` (primary — the
@@ -105,6 +116,8 @@ embassy-net = { version = "0.9.1", features = [
   "medium-ethernet",
   "tcp",
   "dns",
+  # The provisioning portal's DHCP + DNS answers on the board's own AP.
+  "udp",
 ], optional = true }
 
 tokio = { version = "1.0", optional = true, features = ["full"] }
@@ -157,7 +170,7 @@ embassy-net-driver = { version = "0.2", optional = true }
 # Raw PAC for the two ESP32 registers esp-hal doesn't expose (RTC ANA_CONF for
 # APLL power-up, IO_MUX GPIO17 for the RMII clock-out mux). Same version
 # esp-hal 1.0 already pulls — no new transitive weight.
-esp32 = { version = "0.40", optional = true }
+esp32 = { version = "0.42", optional = true }
 esp-bootloader-esp-idf = { version = "0.5", optional = true }
 # OTA (src/ota): the SPI-flash driver behind the embedded-storage traits
 # that esp-bootloader-esp-idf's FlashRegion/OtaUpdater need. 0.8.x is the

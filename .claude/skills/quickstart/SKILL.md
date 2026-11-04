@@ -18,8 +18,9 @@ Gather, in parallel, from the repo root:
 - `./Quickstart status` (an endpoint or simulator may already be up)
 - Serial ports: `ls /dev/cu.usbserial* /dev/cu.usbmodem* /dev/ttyUSB* /dev/ttyACM* 2>/dev/null`,
   and for each candidate `espflash board-info --port <p>` to learn the chip
-  and MAC. `TESTRIG.md` at the repo root (gitignored, machine-specific) maps
-  MACs to boards when it exists.
+  and MAC. `board-info` resets the board, so never probe one that must keep
+  uplinking (`HARDWARE.md` §9). `TESTRIG.md` at the repo root (gitignored,
+  machine-specific) maps MACs to boards when it exists.
 - If `.env.dev` exists, read it: `HOST`, `DEVICE_NAME`, `CA_PATH`, `ESPFLASH_PORT`,
   whether `SSID`/`PASSWORD` are filled. Never print `PASSWORD`.
 
@@ -59,7 +60,7 @@ Stop and tell the user after the second failure of the same step.
 | Symptom | Cause → fix |
 |---|---|
 | `cargo`/`openssl`/`curl` missing | install it; rustup.rs for Rust |
-| `CA_PATH ... does not exist` | `.env.dev` points at a root (e.g. `ca/AmazonRootCA1.pem`) that isn't in `certs/`. Local endpoint: `CA_PATH=ca/ca.pem`. Public endpoint: fetch its root into `certs/ca/` |
+| `CA_PATH ... does not exist` | `.env.dev` points at a root that isn't in `certs/`. Local endpoint: `CA_PATH=ca/ca.pem`. Public endpoint: fetch its root into `certs/ca/` (ISRG Root X1 for Let's Encrypt) |
 | build error mentioning `env!("HOST")` or a cert `include_bytes!` | a compile-time var is unset or its file is missing; `.env.dev` is loaded by the script, so check the names there |
 | duplicate lang item / libcore errors on a host build | someone ran a host-target cargo command from `supervictor/edge/` (its `.cargo/config.toml` build-std poisons `target/<host>/`). `cargo clean -p supervictor-edge --target <host>` from the root |
 | `port 8443 is taken by pid N` | an older endpoint or another service; `./Quickstart down`, or `QS_PORT=9443` |

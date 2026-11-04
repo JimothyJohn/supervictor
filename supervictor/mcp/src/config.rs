@@ -21,8 +21,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 /// Where one endpoint lives. Parsed from a URL; the path is kept as a
-/// prefix so a raw API Gateway URL (`https://x.execute-api.../prod`) works
-/// the same as a custom domain (`https://supervictor.example`).
+/// prefix so an endpoint mounted under a path (`https://proxy.example/sv`)
+/// works the same as one at the root (`https://supervictor.example`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
     /// Hostname or IP literal (no brackets), also the TLS server name.
@@ -206,10 +206,10 @@ mod tests {
             (t.host.as_str(), t.port, t.prefix.as_str()),
             ("localhost", 8443, "")
         );
-        let t = Target::parse("https://abc.execute-api.us-east-1.amazonaws.com/prod/").unwrap();
+        let t = Target::parse("https://proxy.example/prod/").unwrap();
         assert_eq!(t.prefix, "/prod");
         assert_eq!(t.path("/fleet/summary"), "/prod/fleet/summary");
-        assert_eq!(t.host_header(), "abc.execute-api.us-east-1.amazonaws.com");
+        assert_eq!(t.host_header(), "proxy.example");
     }
 
     #[test]
