@@ -115,8 +115,8 @@ fn ensure_csrf(headers: &HeaderMap) -> (String, Option<[(header::HeaderName, Str
         Some(token) => (token, None),
         None => {
             let token = csrf_token();
-            // No `Secure` attribute: TLS is terminated by Caddy/API GW, and
-            // SAM-local dev is plain http. SameSite=Strict is the backstop.
+            // No `Secure` attribute: TLS may be terminated by a proxy (Caddy)
+            // and local dev can run plain http. SameSite=Strict is the backstop.
             let cookie = format!("{CSRF_COOKIE}={token}; Path=/ui; SameSite=Strict; HttpOnly");
             (token, Some([(header::SET_COOKIE, cookie)]))
         }

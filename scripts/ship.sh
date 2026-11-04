@@ -12,15 +12,14 @@
 #   1 dev is in master     checked only — dev → master is Nick's manual merge
 #   2 tag                  annotated TAG on origin/master's head (local)
 #   3 release              scripts/release.sh: push the tag, wait for the binaries
-#   4 prod box             first time: scripts/teardown-lambda-stacks.sh (typed
-#                          confirm) then scripts/prod-box-create.sh, which installs
+#   4 prod box             first time: scripts/prod-box-create.sh, which installs
 #                          TAG at first boot; afterwards: STAGE=prod
 #                          scripts/install-staging.sh (restarts the prod service)
 #   5 Let's Encrypt        scripts/prod-letsencrypt.sh, until the issuer is LE
 #   6 boards               scripts/boards-to-prod.sh: a canary (CANARY, default
 #                          poe-iso-rack-03), then every wired board not yet fresh on prod
 #
-#   YES=1     skip the y/N gates (never the typed Lambda teardown confirm)
+#   YES=1     skip the y/N gates
 #   CANARY    first board to move (default poe-iso-rack-03)
 #   FW_VERSION, OWNER, INVENTORY   passed through to boards-to-prod.sh
 #
@@ -113,11 +112,7 @@ if stack_exists "$STAGING_STACK"; then
     BOX=1; row "prod box" next "install $TAG on $STAGING_STACK (restarts the service; the box reports no version, so this always offers)"
 else
     BOX=0
-    if stack_exists supervictor-prod; then
-        row "prod box" next "first time: tear down the Lambda stack supervictor-prod (DynamoDB exported first), then create $STAGING_STACK at $TAG"
-    else
-        row "prod box" next "first time: create $STAGING_STACK at $TAG"
-    fi
+    row "prod box" next "first time: create $STAGING_STACK at $TAG"
 fi
 
 # ── 5 + 6 only mean anything once the box answers ──────────────────────────
@@ -140,13 +135,6 @@ fi
 released "$TAG" || fail "release $TAG still has no aarch64 tarball — gh run list --workflow=release.yml"
 
 if [ "$BOX" = 0 ]; then
-    if stack_exists supervictor-prod; then
-        log "the Lambda stack supervictor-prod still owns $PROD_HOST; teardown deletes it AND supervictor-dev (tables exported to scratch/ first)"
-        read -r -p "[ship] type supervictor-prod to tear both down: " a </dev/tty
-        [ "$a" = supervictor-prod ] || fail "not confirmed — nothing deleted"
-        ./scripts/teardown-lambda-stacks.sh
-        ! stack_exists supervictor-prod || fail "supervictor-prod is still there — see the teardown output above"
-    fi
     confirm "create $STAGING_STACK at $TAG?" || fail "stopped before the create"
     TAG="$TAG" ./scripts/prod-box-create.sh
 else
