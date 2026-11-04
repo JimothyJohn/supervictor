@@ -41,6 +41,11 @@ pub const DRAM2_HEAP_SIZE: usize = 96 * 1024;
 /// at this size (hardware-verified pre-Xtensa-retarget at 144 KB).
 #[cfg(feature = "chip-esp32c3")]
 pub const HEAP_SIZE: usize = 144 * 1024;
+/// Total heap allocation in bytes for the ESP32-S3 allocator. The S3 has
+/// 512 KB of internal SRAM, so the C3's figure leaves the boot stack far
+/// more room than the classic ESP32's tight layout; PSRAM is not used.
+#[cfg(feature = "chip-esp32s3")]
+pub const HEAP_SIZE: usize = 144 * 1024;
 
 // --- Network Timing ---
 /// Interval between network stack readiness checks.

@@ -24,7 +24,7 @@ sim = []
 desktop = ["tokio", "rustls", "tokio-rustls", "rustls-pemfile", "sim"]
 # Chip selection — embedded builds need exactly one, matched to the cargo
 # --target (chip-esp32 ↔ xtensa-esp32-none-elf, chip-esp32c3 ↔
-# riscv32imc-unknown-none-elf). Fans the choice out to every esp-rs crate;
+# riscv32imc-unknown-none-elf, chip-esp32s3 ↔ xtensa-esp32s3-none-elf). Fans the choice out to every esp-rs crate;
 # the '?' forwards only when that optional dep is enabled, and esp-backtrace
 # forwards the chip on to esp-println. `ethernet` implies chip-esp32 — only
 # the classic ESP32 has an EMAC.
@@ -43,6 +43,17 @@ chip-esp32c3 = [
   "esp-radio?/esp32c3",
   "esp-bootloader-esp-idf?/esp32c3",
   "esp-storage?/esp32c3",
+]
+# ESP32-S3 (Xtensa LX7; e.g. the Seeed XIAO ESP32S3 Sense) ↔
+# xtensa-esp32s3-none-elf. WiFi only; the console is the native
+# USB-Serial-JTAG, which esp-println's default `auto` picks.
+chip-esp32s3 = [
+  "esp-hal?/esp32s3",
+  "esp-backtrace?/esp32s3",
+  "esp-rtos?/esp32s3",
+  "esp-radio?/esp32s3",
+  "esp-bootloader-esp-idf?/esp32s3",
+  "esp-storage?/esp32s3",
 ]
 # Base embedded runtime (no network interface). The supervictor-embedded bin
 # additionally needs exactly one interface feature: `ethernet` (primary — the

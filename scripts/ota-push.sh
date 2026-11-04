@@ -74,6 +74,7 @@ if [ "${SIM:-1}" != 0 ]; then
 fi
 case "$FEATURES" in
 *chip-esp32c3*) RTARGET=riscv32imc-unknown-none-elf; CHIP=esp32c3 ;;
+*chip-esp32s3*) RTARGET=xtensa-esp32s3-none-elf;     CHIP=esp32s3 ;;
 *)              RTARGET=xtensa-esp32-none-elf;       CHIP=esp32 ;;
 esac
 
@@ -98,7 +99,7 @@ admin_curl -fsS --cacert "$STAGING_BUNDLE" "$BASE/fleet" \
 log "building $DEVICE features=$FEATURES FW_VERSION=$FW_VERSION HOST=$HOST"
 cd "$FW_ROOT/supervictor/edge" || exit 1
 EXTRA=()
-[ "$RTARGET" = riscv32imc-unknown-none-elf ] && EXTRA=(--target "$RTARGET")
+[ "$RTARGET" != xtensa-esp32-none-elf ] && EXTRA=(--target "$RTARGET")
 cargo build --bin supervictor-embedded --features "$FEATURES" ${EXTRA[@]+"${EXTRA[@]}"}
 ELF="$FW_ROOT/target/$RTARGET/debug/supervictor-embedded"
 # Substring: HOST is packed beside SSID and DEVICE_NAME (edge src/settings).

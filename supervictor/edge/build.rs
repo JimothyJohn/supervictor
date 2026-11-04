@@ -9,7 +9,10 @@ fn main() {
     // xtensa-esp32-elf-gcc, which lacks lld's --error-handling-script, so
     // the old linker_be_nice() hint hook is gone; riscv (ESP32-C3) links
     // through rust-lld as usual.
-    if target == "xtensa-esp32-none-elf" || target == "riscv32imc-unknown-none-elf" {
+    if target == "xtensa-esp32-none-elf"
+        || target == "xtensa-esp32s3-none-elf"
+        || target == "riscv32imc-unknown-none-elf"
+    {
         println!("cargo:rustc-link-arg=-Tlinkall.x");
 
         // mbedtls-rs-sys's prebuilt libs need printf/snprintf/vsnprintf. WiFi

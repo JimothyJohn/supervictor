@@ -6,6 +6,7 @@
 cargo run --bin supervictor-embedded --features ethernet   # Build + flash via espflash (from this dir; implies chip-esp32)
 cargo run --bin supervictor-embedded --features wifi,chip-esp32   # WiFi fallback build (needs SSID/PASSWORD env)
 cargo run --bin supervictor-embedded --features wifi,chip-esp32c3 --target riscv32imc-unknown-none-elf   # ESP32-C3 (riscv)
+cargo run --bin supervictor-embedded --features wifi,chip-esp32s3 --target xtensa-esp32s3-none-elf      # ESP32-S3 (XIAO ESP32S3 Sense; USB-Serial-JTAG console; 144 KB heap, PSRAM unused)
 cargo run --bin supervictor-desktop --features desktop     # Desktop mTLS test client
 
 # Host-side test/lint run from the REPO ROOT, not this dir — this dir's

@@ -146,6 +146,25 @@ async fn upload_is_admin_only() {
     assert!(manifest["uploaded_at"].as_str().unwrap().contains('T'));
 }
 
+/// Every chip the fleet runs uploads, and its manifest names it — the
+/// device refuses a manifest for another chip, so this is what an OTA to
+/// a C3 or an S3 (the XIAO, 2026-11-03) depends on.
+#[tokio::test]
+async fn every_fleet_chip_uploads_and_its_manifest_names_it() {
+    let r = rig();
+    seed(r.store.as_ref(), "d1", Some(DEV1_DN));
+    for (i, chip) in ChipId::ALL.into_iter().enumerate() {
+        let version = format!("0.2.{i}");
+        let img = image(chip, 100, i as u8 + 1);
+        let resp = upload(&r.server, "d1", &version, &img).await;
+        assert_eq!(resp.status_code(), 201, "{chip:?}: {}", resp.text());
+        let manifest: serde_json::Value = resp.json();
+        assert_eq!(manifest["chip"], chip.label(), "{chip:?}");
+        let stored = r.firmware.manifest("d1", &version).unwrap().unwrap();
+        assert_eq!(stored.chip, chip.label(), "{chip:?}");
+    }
+}
+
 #[tokio::test]
 async fn upload_needs_a_registered_device() {
     let r = rig();
@@ -191,9 +210,10 @@ async fn upload_rejects_bad_images() {
     let resp = upload(&r.server, "d1", "0.2.0", b"").await;
     assert_eq!(resp.status_code(), 422);
 
-    // A chip the fleet does not run (ESP32-S3 = 9).
+    // A chip the fleet does not run (ESP32-S2 = 2; the S3, 9, joined the
+    // fleet 2026-11-03).
     let mut bad = good.clone();
-    bad[12..14].copy_from_slice(&9u16.to_le_bytes());
+    bad[12..14].copy_from_slice(&2u16.to_le_bytes());
     // Re-hash so only the chip is wrong.
     let n = bad.len() - 32;
     let d = Sha256::digest(&bad[..n]);
