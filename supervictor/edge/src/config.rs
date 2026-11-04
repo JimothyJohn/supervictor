@@ -85,8 +85,15 @@ pub const TCP_RX_BUFFER_SIZE: usize = 4096;
 pub const TLS_RX_BUFFER_SIZE: usize = 4096;
 /// TCP transmit buffer size in bytes.
 pub const TCP_TX_BUFFER_SIZE: usize = 4096;
-/// Timeout for TCP socket operations.
+/// Timeout for TCP socket operations. smoltcp aborts a connection that
+/// receives nothing for this long — including an idle keep-alive session
+/// between uplinks, unless [`SOCKET_KEEPALIVE`] probes keep it fed.
 pub const SOCKET_TIMEOUT: Duration = Duration::from_secs(10);
+/// TCP keep-alive probe interval on the uplink session. Must be well under
+/// [`SOCKET_TIMEOUT`]: the probe's ACK is what keeps an idle session (a 10 s
+/// uplink interval waits up to 12 s with jitter) from timing itself out.
+pub const SOCKET_KEEPALIVE: Duration = Duration::from_secs(4);
+const _: () = assert!(SOCKET_KEEPALIVE.as_millis() * 2 < SOCKET_TIMEOUT.as_millis());
 
 // --- TLS ---
 /// TLS port used for the remote API endpoint.
