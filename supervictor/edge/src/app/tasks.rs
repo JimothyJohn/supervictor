@@ -13,6 +13,7 @@ use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
 use crate::ota::device::Ota;
 use crate::ota::http::{parse_head, HeadError};
+use crate::settings::Settings;
 use embassy_net::tcp::TcpSocket;
 #[cfg(feature = "wifi")]
 use embassy_net::Runner;
@@ -153,13 +154,6 @@ pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }
 
-/// Device identity on the wire: `DEVICE_NAME` at build time (what the
-/// Quickstart flashes with), falling back to the historical bench id.
-pub const DEVICE_ID_ON_WIRE: &str = match option_env!("DEVICE_NAME") {
-    Some(name) => name,
-    None => "1234567890",
-};
-
 /// Machine the telemetry simulator impersonates: `SIM_PROFILE` at build time
 /// (see `models::profile::Profile::parse` for the names), default the bench
 /// trace. An unknown name is a compile error, not a silent fallback.
@@ -197,16 +191,18 @@ const fn parse_u32(s: &str) -> u32 {
 }
 
 /// Main application loop: resolves DNS, establishes mTLS, and sends uplink
-/// telemetry. `seed` (hardware RNG) salts the telemetry simulator so two
-/// boots of the same board don't replay the same trace. `ota` is `None`
-/// on a board still on the factory partition table. The TCP buffers are
-/// statics: the task future is built on the boot stack before it moves
-/// into its pool, and 8 KB of buffers (plus OTA's) overflowed it.
+/// telemetry. `settings` (endpoint host, device id) is the record read
+/// from flash at boot. `seed` (hardware RNG) salts the telemetry simulator
+/// so two boots of the same board don't replay the same trace. `ota` is
+/// `None` on a board still on the factory partition table. The TCP
+/// buffers are statics: the task future is built on the boot stack before
+/// it moves into its pool, and 8 KB of buffers (plus OTA's) overflowed it.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
 pub async fn app(
     stack: Stack<'static>,
     tls: Tls<'static>,
+    settings: &'static Settings,
     mut rwdt: Rwdt,
     seed: u64,
     mut ota: Option<&'static mut Ota>,
@@ -229,12 +225,11 @@ pub async fn app(
         println!("Waiting to get IP address...");
     }
 
-    // Device identity comes from DEVICE_NAME at compile time — set per board
-    // at flash time (the onboard flow does this); .cargo/config.toml provides
-    // the "factory-01" default. Length-checked at compile time against the
-    // UplinkMessage id capacity so a long name can't panic on boot.
-    const _: () = assert!(DEVICE_ID_ON_WIRE.len() <= 64);
-    let device_id: heapless::String<64> = DEVICE_ID_ON_WIRE.try_into().unwrap_or_default();
+    // Device identity on the wire is the settings record's (seeded from
+    // DEVICE_NAME at flash time, the same name the baked certificate was
+    // issued for); its capacity is the UplinkMessage id capacity.
+    let device_id: heapless::String<64> = settings.device_name.clone();
+    let host = settings.host.as_str();
 
     // Feature `sim`: simulated readings until real sensors land
     // (docs/TELEMETRY.md): a per-board personality from the device id,
@@ -272,20 +267,20 @@ pub async fn app(
     // Inner loop: reuse the session across uplinks — one handshake, many POSTs.
     loop {
         let address = match stack
-            .dns_query(HOST, embassy_net::dns::DnsQueryType::A)
+            .dns_query(host, embassy_net::dns::DnsQueryType::A)
             .await
         {
             Ok(addresses) => {
                 if let Some(first_addr) = addresses.first() {
                     *first_addr
                 } else {
-                    println!("No addresses returned from DNS query for host: {}", HOST);
+                    println!("No addresses returned from DNS query for host: {}", host);
                     backoff_delay(&mut backoff).await;
                     continue;
                 }
             }
             Err(e) => {
-                println!("DNS resolution failed for host {}: {:?}", HOST, e);
+                println!("DNS resolution failed for host {}: {:?}", host, e);
                 backoff_delay(&mut backoff).await;
                 continue;
             }
@@ -293,7 +288,7 @@ pub async fn app(
 
         let remote_endpoint = (address, AWS_IOT_PORT);
 
-        let client_conf = load_certificates();
+        let client_conf = load_certificates(settings.host.as_cstr());
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer[..], &mut tx_buffer[..]);
         socket.set_timeout(Some(SOCKET_TIMEOUT));
@@ -377,7 +372,7 @@ pub async fn app(
                 }
             }
 
-            let request = match post_request(HOST, &uplink, Some(API_PATH)) {
+            let request = match post_request(host, &uplink, Some(API_PATH)) {
                 Ok(r) => r,
                 Err(e) => {
                     println!("   Failed to build HTTP request: {}", e);

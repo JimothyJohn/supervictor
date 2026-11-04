@@ -22,10 +22,17 @@ needs the esp-rs fork toolchain: `espup install --targets esp32`, then
 feature matched to the `--target` (`ethernet` implies `chip-esp32`; only
 the classic ESP32 has an EMAC).
 
-Embedded builds read HOST/CERT_PATH/... (plus SSID/PASSWORD for wifi builds)
-from the environment at compile time — load them with
+Embedded builds read CERT_PATH/CA_PATH/DEVICE_NAME (the baked certificate)
+and API_PATH from the environment at compile time — load them with
 `set -a; source ../../.env.dev` first (Quickstart does this automatically).
-CERT_PATH is repo-root-relative.
+CERT_PATH is repo-root-relative. HOST, SSID, PASSWORD and DEVICE_NAME (as
+the id on the wire) are *runtime* settings since 2026-11: `src/settings/`
+reads a checksummed record from the `nvs` partition at boot, and the
+values the image was built with only seed an empty partition on first
+boot — so a board already in the field keeps them across an OTA, and an
+image built without SSID/HOST compiles and boots unprovisioned (halts
+with a console line until the provisioning portal lands). Nothing else
+reads that partition; the record is not the ESP-IDF NVS format.
 
 ## Hardware on the bench
 Physical rig (which board is on which port, cabling, flash/monitor
