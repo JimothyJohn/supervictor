@@ -125,10 +125,13 @@ fn post_roundtrip_through_mock_server() {
     let received = server_handle.join().unwrap();
     let received_str = String::from_utf8(received).unwrap();
     assert!(received_str.starts_with("POST / HTTP/1.1"));
+    // The uplink POST keeps its session (2026-11): asking the server to
+    // close made the device write the next uplink into a dead connection.
     assert!(
-        received_str.contains("Connection: close\r\n"),
-        "one-shot POST must ask the server to close the connection"
+        received_str.contains("Connection: keep-alive\r\n"),
+        "the uplink POST must ask the server to keep the session"
     );
+    assert!(!received_str.contains("Connection: close"));
     assert!(received_str.contains(r#"{"id":"device-001","current":42,"fw":""#));
 }
 

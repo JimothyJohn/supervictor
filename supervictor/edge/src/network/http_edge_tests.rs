@@ -114,9 +114,10 @@ fn post_content_type_json() {
 }
 
 #[test]
-fn post_connection_close() {
+fn post_keeps_the_connection_alive() {
     let req = post_request("h", &make_msg("x", 0), Some("/")).unwrap();
-    assert!(req.contains("Connection: close\r\n"));
+    assert!(req.contains("Connection: keep-alive\r\n"));
+    assert!(!req.contains("Connection: close"));
 }
 
 #[test]
@@ -446,8 +447,7 @@ fn parse_request_id_over_64_fails() {
 fn parse_apigw_id_at_32() {
     let val: HString<32> = core::iter::repeat_n('G', 32).collect();
     let mut raw = HString::<200>::new();
-    raw.push_str("HTTP/1.1 200 OK\r\nx-amz-apigw-id: ")
-        .unwrap();
+    raw.push_str("HTTP/1.1 200 OK\r\nx-amz-apigw-id: ").unwrap();
     raw.push_str(val.as_str()).unwrap();
     raw.push_str("\r\n\r\n").unwrap();
     let resp = parse_response(raw.as_str()).unwrap();
@@ -458,8 +458,7 @@ fn parse_apigw_id_at_32() {
 fn parse_apigw_id_over_32_fails() {
     let val: HString<33> = core::iter::repeat_n('G', 33).collect();
     let mut raw = HString::<200>::new();
-    raw.push_str("HTTP/1.1 200 OK\r\nx-amz-apigw-id: ")
-        .unwrap();
+    raw.push_str("HTTP/1.1 200 OK\r\nx-amz-apigw-id: ").unwrap();
     raw.push_str(val.as_str()).unwrap();
     raw.push_str("\r\n\r\n").unwrap();
     assert!(parse_response(raw.as_str()).is_err());
@@ -492,8 +491,7 @@ fn parse_trace_id_over_128_fails() {
 fn parse_content_type_at_32() {
     let val: HString<32> = core::iter::repeat_n('C', 32).collect();
     let mut raw = HString::<200>::new();
-    raw.push_str("HTTP/1.1 200 OK\r\nContent-Type: ")
-        .unwrap();
+    raw.push_str("HTTP/1.1 200 OK\r\nContent-Type: ").unwrap();
     raw.push_str(val.as_str()).unwrap();
     raw.push_str("\r\n\r\n").unwrap();
     let resp = parse_response(raw.as_str()).unwrap();
@@ -504,8 +502,7 @@ fn parse_content_type_at_32() {
 fn parse_content_type_over_32_fails() {
     let val: HString<33> = core::iter::repeat_n('C', 33).collect();
     let mut raw = HString::<200>::new();
-    raw.push_str("HTTP/1.1 200 OK\r\nContent-Type: ")
-        .unwrap();
+    raw.push_str("HTTP/1.1 200 OK\r\nContent-Type: ").unwrap();
     raw.push_str(val.as_str()).unwrap();
     raw.push_str("\r\n\r\n").unwrap();
     assert!(parse_response(raw.as_str()).is_err());
@@ -515,8 +512,7 @@ fn parse_content_type_over_32_fails() {
 fn parse_content_length_at_8() {
     let val: HString<8> = core::iter::repeat_n('9', 8).collect();
     let mut raw = HString::<200>::new();
-    raw.push_str("HTTP/1.1 200 OK\r\nContent-Length: ")
-        .unwrap();
+    raw.push_str("HTTP/1.1 200 OK\r\nContent-Length: ").unwrap();
     raw.push_str(val.as_str()).unwrap();
     raw.push_str("\r\n\r\n").unwrap();
     let resp = parse_response(raw.as_str()).unwrap();
@@ -527,8 +523,7 @@ fn parse_content_length_at_8() {
 fn parse_content_length_over_8_fails() {
     let val: HString<9> = core::iter::repeat_n('9', 9).collect();
     let mut raw = HString::<200>::new();
-    raw.push_str("HTTP/1.1 200 OK\r\nContent-Length: ")
-        .unwrap();
+    raw.push_str("HTTP/1.1 200 OK\r\nContent-Length: ").unwrap();
     raw.push_str(val.as_str()).unwrap();
     raw.push_str("\r\n\r\n").unwrap();
     assert!(parse_response(raw.as_str()).is_err());

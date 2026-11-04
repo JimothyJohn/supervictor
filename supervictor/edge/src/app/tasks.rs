@@ -40,10 +40,12 @@ const OTA_RETRY_DELAY: Duration = Duration::from_secs(120);
 
 /// How an uplink response read ended.
 enum Ack {
-    /// A framed response: status and the body bytes that arrived.
+    /// A framed response: status, the body bytes that arrived, and whether
+    /// the session can carry the next uplink (`ResponseHead::reusable_after`).
     Framed {
         status: u16,
         body: heapless::Vec<u8, 1024>,
+        reusable: bool,
     },
     /// Peer closed before any head.
     Closed,
@@ -105,6 +107,7 @@ where
     Ack::Framed {
         status: head.status,
         body,
+        reusable: head.reusable_after(filled - body_start),
     }
 }
 
@@ -309,6 +312,9 @@ pub async fn app(
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer[..], &mut tx_buffer[..]);
         socket.set_timeout(Some(SOCKET_TIMEOUT));
+        // The session is reused across uplinks: probe while idle so the
+        // timeout above does not abort it between them.
+        socket.set_keep_alive(Some(SOCKET_KEEPALIVE));
 
         if let Err(e) = socket.connect(remote_endpoint).await {
             println!("   TCP connect error: {:?}", e);
@@ -407,11 +413,22 @@ pub async fn app(
                 break;
             }
 
+            // Set when the server will not take another request on this
+            // session: reconnect after the interval instead of writing the
+            // next uplink into a connection the peer has closed (which read
+            // back as EOF and lost that uplink — every other one, while the
+            // POST asked for `Connection: close`).
+            let reconnect: bool;
             match read_ack(&mut session).await {
-                Ack::Framed { status, body } => {
+                Ack::Framed {
+                    status,
+                    body,
+                    reusable,
+                } => {
                     // A completed round-trip is the liveness proof the
                     // watchdog contract wants — feed nowhere else.
                     rwdt.feed();
+                    reconnect = !reusable;
                     #[cfg(debug_assertions)]
                     match core::str::from_utf8(&body) {
                         Ok(s) => println!("Received {} response:\n---\n{}\n---", status, s),
@@ -479,6 +496,10 @@ pub async fn app(
             #[cfg(not(feature = "sim"))]
             let delay_ms = jitter_ms(&mut rng, loop_ms);
             Timer::after(Duration::from_millis(u64::from(delay_ms))).await;
+            if reconnect {
+                println!("   Server closes after each response — reconnecting for the next uplink");
+                break;
+            }
         }
 
         let _ = session.close().await;
