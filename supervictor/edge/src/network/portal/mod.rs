@@ -82,6 +82,10 @@ mod embedded {
     /// With a network configured but unreachable, give it another try
     /// after this long with nobody on the portal.
     const IDLE_RETRY: Duration = Duration::from_secs(10 * 60);
+    /// How long the success page stays up after a save before the board
+    /// reboots as a station: long enough to rejoin the access point after
+    /// the probe's channel switch dropped the client.
+    const SAVED_GRACE: Duration = Duration::from_secs(60);
 
     /// The record that survives a watchdog reset (see `boot`).
     #[esp_hal::ram(unstable(rtc_fast, persistent))]
@@ -447,18 +451,34 @@ mod embedded {
         let mut current = settings.clone();
         let mut outcome = Outcome::Fresh;
         let mut last_request = Instant::now();
+        // Set once a probe passed and the record is written: the success
+        // page stays up for SAVED_GRACE, then the board reboots.
+        let mut saved: Option<(Settings, Instant)> = None;
         loop {
             rwdt.feed();
-            if reason == Reason::JoinFailed && last_request.elapsed() > IDLE_RETRY {
+            if let Some((_, at)) = saved.as_ref() {
+                if at.elapsed() >= SAVED_GRACE {
+                    println!("portal: rebooting as a station");
+                    rtc_store(Mark::Portal);
+                    esp_hal::system::software_reset();
+                }
+            } else if reason == Reason::JoinFailed && last_request.elapsed() > IDLE_RETRY {
                 println!(
                     "portal: nobody came in {} s — trying the configured network again",
                     IDLE_RETRY.as_secs()
                 );
                 esp_hal::system::software_reset();
             }
+            let slice = match saved.as_ref() {
+                Some((_, at)) => SAVED_GRACE
+                    .checked_sub(at.elapsed())
+                    .unwrap_or(Duration::from_millis(1))
+                    .max(Duration::from_millis(1)),
+                None => ACCEPT_SLICE,
+            };
             let mut socket = TcpSocket::new(ap_stack, &mut http_rx[..], &mut http_tx[..]);
             socket.set_timeout(Some(REQUEST_TIMEOUT));
-            if with_timeout(ACCEPT_SLICE, socket.accept(80)).await.is_err() {
+            if with_timeout(slice, socket.accept(80)).await.is_err() {
                 continue;
             }
             last_request = Instant::now();
@@ -469,23 +489,62 @@ mod embedded {
             };
             let text = core::str::from_utf8(&request[..len]).unwrap_or("");
             let (method, path) = parse_request_line(text);
-            match page::route(method, path) {
-                Route::Form => {
-                    let body = page::form_page(
-                        settings.device_name.as_str(),
-                        FIRMWARE_VERSION,
-                        &current,
-                        outcome,
-                    );
-                    send_all(&mut socket, page::html_response(body.as_str()).as_bytes()).await;
+            let route = page::route(method, path);
+            if let Some((done, _)) = saved.as_ref() {
+                // Settled: every page is the confirmation until the reboot.
+                let body = match route {
+                    Route::Redirect => None,
+                    _ => Some(page::saved_page(settings.device_name.as_str(), done)),
+                };
+                match body {
+                    Some(b) => {
+                        send_all(&mut socket, page::html_response(b.as_str()).as_bytes()).await
+                    }
+                    None => send_all(&mut socket, page::redirect_response().as_bytes()).await,
                 }
-                Route::Redirect => {
-                    send_all(&mut socket, page::redirect_response().as_bytes()).await;
-                }
-                Route::Configure => {
-                    match page::parse_form(extract_body(text)) {
-                        Err(page::FormError::Field(f)) => outcome = Outcome::BadForm(f),
+            } else {
+                match route {
+                    Route::Form => {
+                        let body = page::form_page(
+                            settings.device_name.as_str(),
+                            FIRMWARE_VERSION,
+                            &current,
+                            outcome,
+                        );
+                        send_all(&mut socket, page::html_response(body.as_str()).as_bytes()).await;
+                    }
+                    Route::Redirect => {
+                        send_all(&mut socket, page::redirect_response().as_bytes()).await;
+                    }
+                    Route::Configure => match page::parse_form(extract_body(text)) {
+                        Err(page::FormError::Field(f)) => {
+                            outcome = Outcome::BadForm(f);
+                            let body = page::form_page(
+                                settings.device_name.as_str(),
+                                FIRMWARE_VERSION,
+                                &current,
+                                outcome,
+                            );
+                            send_all(&mut socket, page::html_response(body.as_str()).as_bytes())
+                                .await;
+                        }
                         Ok(candidate) => {
+                            // Answer before trying the network: the probe moves
+                            // the radio to its channel and drops this client.
+                            let body =
+                                page::checking_page(settings.device_name.as_str(), &candidate);
+                            send_all(&mut socket, page::html_response(body.as_str()).as_bytes())
+                                .await;
+                            socket.close();
+                            let _ = socket.flush().await;
+                            Timer::after(Duration::from_millis(300)).await;
+                            socket.abort();
+                            let _ = socket.flush().await;
+                            drop(socket);
+                            current = Settings {
+                                password: heapless::String::new(),
+                                ..candidate.clone()
+                            };
                             rwdt.feed();
                             let result = probe(
                                 &mut controller,
@@ -500,16 +559,12 @@ mod embedded {
                             rwdt.feed();
                             match result {
                                 Err(e) => {
-                                    println!(
-                                        "portal: {} not saved: {:?}",
-                                        candidate.ssid.as_str(),
-                                        Outcome::from(e)
-                                    );
                                     outcome = e.into();
-                                    current = Settings {
-                                        password: heapless::String::new(),
-                                        ..candidate
-                                    };
+                                    println!(
+                                        "portal: {} not saved: {:?} — shown on the next page load",
+                                        candidate.ssid.as_str(),
+                                        outcome
+                                    );
                                 }
                                 Ok(()) => {
                                     let written = match ota.as_mut() {
@@ -524,25 +579,13 @@ mod embedded {
                                     match written {
                                         Ok(()) => {
                                             println!(
-                                                "portal: saved (ssid {}, host {}, device {}); rebooting as a station",
+                                                "portal: saved (ssid {}, host {}, device {}); confirmation up for {} s, then a station",
                                                 candidate.ssid.as_str(),
                                                 candidate.host.as_str(),
-                                                candidate.device_name.as_str()
+                                                candidate.device_name.as_str(),
+                                                SAVED_GRACE.as_secs()
                                             );
-                                            let body = page::saved_page(
-                                                settings.device_name.as_str(),
-                                                &candidate,
-                                            );
-                                            send_all(
-                                                &mut socket,
-                                                page::html_response(body.as_str()).as_bytes(),
-                                            )
-                                            .await;
-                                            socket.close();
-                                            let _ = socket.flush().await;
-                                            Timer::after(Duration::from_millis(1500)).await;
-                                            rtc_store(Mark::Portal);
-                                            esp_hal::system::software_reset();
+                                            saved = Some((candidate, Instant::now()));
                                         }
                                         Err(e) => {
                                             println!("portal: flash write failed: {:?}", e);
@@ -551,17 +594,9 @@ mod embedded {
                                     }
                                 }
                             }
+                            continue;
                         }
-                    }
-                    if outcome != Outcome::Fresh {
-                        let body = page::form_page(
-                            settings.device_name.as_str(),
-                            FIRMWARE_VERSION,
-                            &current,
-                            outcome,
-                        );
-                        send_all(&mut socket, page::html_response(body.as_str()).as_bytes()).await;
-                    }
+                    },
                 }
             }
             socket.close();

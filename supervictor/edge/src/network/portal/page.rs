@@ -310,9 +310,39 @@ pub fn saved_page(device_name: &str, saved: &Settings) -> HString<PAGE_MAX> {
     push_escaped(&mut out, saved.ssid.as_str());
     let _ = out.push_str("</b> and reached <b>");
     push_escaped(&mut out, saved.host.as_str());
-    let _ = out.push_str("</b> over TLS. Settings saved. The board is rebooting as <b>");
+    let _ =
+        out.push_str("</b> over TLS. Settings saved. In about a minute the board reboots as <b>");
     push_escaped(&mut out, saved.device_name.as_str());
-    let _ = out.push_str("</b>; this network goes away now.</div></main></body></html>");
+    let _ = out.push_str("</b> on ");
+    push_escaped(&mut out, saved.ssid.as_str());
+    let _ = out.push_str(" and this network goes away; switch back to your own network. It shows up on the dashboard within a few seconds of that.</div></main></body></html>");
+    out
+}
+
+/// Seconds the checking page waits before reloading itself.
+pub const CHECKING_REFRESH_S: u32 = 8;
+
+/// The page a submission gets at once, before the board tries the
+/// network. Trying it moves the board's one radio to that network's
+/// channel, which drops everyone on this access point — so the result
+/// cannot come back on this connection. The page says so, and reloads
+/// itself: once the device rejoins, the reload shows the result.
+pub fn checking_page(device_name: &str, candidate: &Settings) -> HString<PAGE_MAX> {
+    let mut out = HString::new();
+    let _ = out.push_str("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"refresh\" content=\"");
+    push_num(&mut out, CHECKING_REFRESH_S as usize);
+    let _ = out.push_str(";url=/\"><title>supervictor ");
+    push_escaped(&mut out, device_name);
+    let _ = out.push_str("</title>");
+    let _ = out.push_str(STYLE);
+    let _ = out
+        .push_str("</head><body><main><h1>supervictor</h1><div class=\"ok\">Checking: joining <b>");
+    push_escaped(&mut out, candidate.ssid.as_str());
+    let _ = out.push_str("</b>, then a TLS handshake with <b>");
+    push_escaped(&mut out, candidate.host.as_str());
+    let _ = out.push_str("</b>. Nothing is saved unless both work.</div><p>The board has one radio, so while it tries that network your device will probably drop off <b>");
+    push_escaped(&mut out, ap_ssid(device_name).as_str());
+    let _ = out.push_str("</b> for up to a minute. Rejoin it and this page shows the result: an error above the form, or a confirmation. If the network is gone for good after a minute, the board saved the settings and is online.</p></main></body></html>");
     out
 }
 
