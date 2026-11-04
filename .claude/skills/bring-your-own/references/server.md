@@ -1,8 +1,9 @@
 # The endpoint on your own server
 
 One binary, configured entirely by environment variables, storing to one
-SQLite file. It either terminates mTLS itself (paths A, B) or sits on plain
-HTTP behind something that does (C, D, E). Prefer A or B: fewer moving
+SQLite file. It either terminates mTLS itself (paths A, B, and E, which is
+A on an EC2 instance) or sits on plain HTTP behind something that does
+(C, D). Prefer A or B: fewer moving
 parts, and identity comes from the verified peer certificate rather than a
 header another process must be trusted to set.
 
@@ -37,7 +38,7 @@ On the box, as root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/JimothyJohn/supervictor/master/scripts/install-endpoint.sh \
-  | sudo bash -s -- v0.1.0        # pick the latest v* tag: gh release list -R JimothyJohn/supervictor
+  | sudo bash -s -- v0.2.0        # pick the latest v* tag: gh release list -R JimothyJohn/supervictor
 ```
 
 From the dev machine, copy the three PEMs (the unit loads them as systemd
@@ -113,9 +114,8 @@ the proxy must honour (`supervictor/endpoint/src/middleware.rs`):
   optional);
 - set `X-SSL-Client-Subject-DN` to the verified subject (RFC 2253 form
   works; the endpoint compares component-wise);
-- **strip** any `X-SSL-Client-Subject-DN` and `x-amzn-request-context` the
-  client sent — the endpoint cannot tell a forged header from a forwarded
-  one in this mode;
+- **strip** any `X-SSL-Client-Subject-DN` the client sent — the endpoint
+  cannot tell a forged header from a forwarded one in this mode;
 - speak HTTP/1.1 to the endpoint; expose `/health` without a certificate if
   a load balancer needs it, everything else only with one.
 
@@ -138,8 +138,9 @@ the reference: one t4g.micro whose bootstrap runs
 `scripts/install-endpoint.sh` from a release tag, an Elastic IP, a Route53
 record and a 443-only security group; `scripts/deploy-staging.sh` deploys
 it and `scripts/staging-letsencrypt.sh` swaps in a public server
-certificate. The serverless path (API Gateway + Lambda) was retired
-2026-10-27: it could not carry the client certificate's identity into the
+certificate. The project's own staging and prod boxes are this path
+(`STAGE=prod` points the same scripts at prod). Serverless does not fit:
+API Gateway cannot carry the client certificate's identity into the
 binary, and nothing here needs anything AWS-specific.
 
 ## Public server certificate (Let's Encrypt)
