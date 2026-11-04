@@ -115,7 +115,7 @@ for r in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); do
 done
 
 log "5/5 ignored leftovers"
-for p in supervictor/endpoint/.aws-sam .claude/handoff-pr85-live-levels.md; do
+for p in supervictor/endpoint/.aws-sam .pytest_cache .ruff_cache .python-version .claude/handoff-pr85-live-levels.md; do
     [ -e "$MAIN/$p" ] || continue
     log "  remove $MAIN/$p"
     run rm -rf "${MAIN:?}/$p"
