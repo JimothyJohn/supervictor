@@ -1,7 +1,7 @@
 # Telemetry wire schema
 
 The uplink packet (`POST /`) is the one message a device sends. Canonical
-types: `supervictor/common/src/models.rs::UplinkMessage` (endpoint/CLI) and
+types: `supervictor/common/src/models.rs::UplinkMessage` (the std side) and
 its `no_std` twin `supervictor/edge/src/models/uplink.rs` — change both, plus
 the field-name constants in `supervictor/common/src/fields.rs`.
 
