@@ -324,6 +324,7 @@ fn checking_and_saved_pages_escape_and_fit_at_maximum_lengths() {
         device_name: "&".repeat(NAME_MAX).as_str().try_into().unwrap(),
         uplink_interval_s: 0,
         threshold_ma: 0,
+        config_version: 0,
     };
     let name = "\"".repeat(NAME_MAX);
     for page in [checking_page(&name, &max), saved_page(&name, &max)] {
