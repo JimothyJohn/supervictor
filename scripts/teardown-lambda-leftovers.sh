@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# teardown-lambda-leftovers.sh — what teardown-lambda-stacks.sh left behind
+# teardown-lambda-leftovers.sh — what the 2026-10-28 Lambda stack teardown left behind
 # (found 2026-10-28, after the prod box took supervictor.advin.io):
 #
 #   1. SAM's ECR companion stacks supervictor-{dev,prod}-<hash>-CompanionStack
