@@ -1,11 +1,10 @@
 # ROADMAP — Scaling the Fleet
 
 Where supervictor goes after the fleet-operations MVP, and what triggers each
-step. Rethought July 2026 from the original orchestration pitch
-(`todo/orchestration.md`, now retired) against the codebase; re-cut
-2026-10-27 when the serverless path was retired and the TODO board was
-emptied. This file is the only backlog: every gated piece of work is a
-bullet here with its trigger. Decisions live where they apply (`HARDWARE.md`
+step. Rethought July 2026 from the original orchestration pitch against
+the codebase; re-cut 2026-10-27 when the serverless path was retired and
+the TODO board was emptied. This file is the only backlog: every gated
+piece of work is a bullet here with its trigger. Decisions live where they apply (`HARDWARE.md`
 §11, `docs/MESH.md`, `docs/OTA.md`, `supervictor/endpoint/CLAUDE.md`);
 hands-on steps that are Nick's are cards in `TODO.md` backed by tracked
 `scripts/`; enterprise/monetization scope in `todo/ENTERPRISE.md`.
@@ -22,14 +21,17 @@ ESP32 ───mTLS──► one static binary on a Linux box ──► SQLite
                             └── watchdog   dark-device alerting in the journal
 ```
 
-One axum binary, three PEMs, a SQLite file. The reference box is one EC2
-t4g.micro (`supervictor/endpoint/template-staging.yaml`,
-`staging.supervictor.advin.io`) whose bootstrap installs a GitHub release;
-nothing in the service depends on AWS, and the same binary runs on a Pi, a
-VPS or in a container (`docker-compose.yml` + Caddy). The API Gateway +
-Lambda path is gone (2026-10-27): it could not carry the client
-certificate's identity into the binary, and "why are we still using Lambda
-when we can run this on our own naked infra anywhere" was the answer.
+One axum binary, three PEMs, a SQLite file. Two boxes run it, both an EC2
+t4g.micro from `supervictor/endpoint/template-staging.yaml` whose bootstrap
+installs a GitHub release: staging (`staging.supervictor.advin.io`, the
+simulated fleet) and prod (`supervictor.advin.io`, stack
+`supervictor-endpoint-prod`, Let's Encrypt server certificate, v0.2.0).
+One fleet CA signs every identity on both, so a board moves between them
+by OTA. Routine deploys are `./scripts/ship.sh` (plan) then
+`./scripts/ship.sh go`, or `make ship [GO=1]`. Nothing in the service
+depends on AWS, and the same binary runs on a Pi, a VPS or in a container
+(`docker-compose.yml` + Caddy). Serverless is out: API Gateway could not
+carry the client certificate's identity into the binary.
 
 Deployment is `Quickstart onboard` / `scripts/rack-flash.sh` (cert →
 register → flash → verify); monitoring is `/fleet`, `Quickstart fleet` and
@@ -37,9 +39,10 @@ the dashboard; sustainment is firmware-version reporting per uplink, the
 staleness watchdog, and OTA (A/B slots, sha256 + read-back verify, rollback
 after three unconfirmed boots; `docs/OTA.md`). The rack — four
 ESP32-POE-ISO and two ESP32-POE2, all WROOM — has been on the A/B table
-since 2026-10-27; USB is the recovery path only. Power state is "producing":
-a per-device threshold plus an optional minimum on-time, so a heater zone
-pulsing never reads as a machine running.
+since 2026-10-27 and is moving from staging to prod by OTA
+(`scripts/boards-to-prod.sh`); USB is the recovery path only. Power state
+is "producing": a per-device threshold plus an optional minimum on-time,
+so a heater zone pulsing never reads as a machine running.
 
 The delivery loop runs itself: PRs auto-merge into `dev` on green required
 checks; weekly Dependabot bumps flow through the same gate (grouped minors
@@ -117,19 +120,9 @@ fires, building it is toil.
   (2026-03-03, sha256 `CD:AC:FD:B1…`) signed everything in use; an older
   2026-03-08 CA (`E7:3F:86:F4…`) whose key is not on the Studio sat in a
   retired truststore. Retire that key when the CA moves.
-- **A production box** (decided 2026-10-27: Path A, "make prod a
-  staging-shaped box"; in progress). `PROD_HOST` (`supervictor.advin.io`)
-  is wired through every script as a second box on the single-binary path,
-  and `STAGE=prod` points the box scripts (`deploy-staging.sh`,
-  `install-staging.sh`, `staging-letsencrypt.sh`, `staging-stack-update.sh`,
-  `deploy-staging-build.sh`, `teardown-staging.sh`) at it: stack
-  `supervictor-endpoint-prod`, PEMs under `s3://supervictor/prod/`, AMI pin
-  `/supervictor/prod/ami-id`. Order: tear down the Lambda stacks (frees the
-  name), cut v0.2.0, `STAGE=prod TAG=v0.2.0 deploy-staging.sh`,
-  `STAGE=prod staging-letsencrypt.sh`, then move boards with
-  `VIA=staging ota-push.sh <device> prod` after registering them on prod.
-  One fleet CA across both boxes, so a board moves by OTA; a bigger
-  instance class when the fleet grows (`staging-stack-update.sh InstanceType=`).
+- **A bigger prod box** (trigger: the fleet outgrows a t4g.micro).
+  `STAGE=prod scripts/staging-stack-update.sh InstanceType=…`; the AMI pin
+  keeps the instance from being replaced.
 - **Long-running services** (trigger: persistent connections — MQTT
   ingest, sub-second commands). The binary already is one; a sibling
   service on the same box or a second box, not a platform change.
@@ -144,8 +137,8 @@ fires, building it is toil.
 ## Explicitly deferred
 
 - **Monetization / billing** (Stripe sync, usage metering): waits on
-  enterprise demand — `todo/ENTERPRISE.md` (its infrastructure sections
-  predate the serverless retirement and are redone when the track opens).
+  enterprise demand — `todo/ENTERPRISE.md` (product scope; the
+  infrastructure is designed on the single-binary path when the track opens).
 - **MQTT broker**: don't run one speculatively; HTTP uplinks are fine at
   current message rates.
 - **Kubernetes anywhere**: no trigger on the horizon.

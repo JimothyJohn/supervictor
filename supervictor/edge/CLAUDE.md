@@ -4,6 +4,7 @@
 ```
 ../../Quickstart                                 # Full pipeline from repo root (lint, build, test)
 cargo run --bin supervictor-embedded --features ethernet   # Build + flash via espflash (from this dir; implies chip-esp32)
+cargo run --bin supervictor-embedded --features board-poe2 # ESP32-POE2 over Ethernet (RMII clock out GPIO0)
 cargo run --bin supervictor-embedded --features wifi,chip-esp32   # WiFi fallback build (needs SSID/PASSWORD env)
 cargo run --bin supervictor-embedded --features wifi,chip-esp32c3 --target riscv32imc-unknown-none-elf   # ESP32-C3 (riscv)
 cargo run --bin supervictor-embedded --features wifi,chip-esp32s3 --target xtensa-esp32s3-none-elf      # ESP32-S3 (XIAO ESP32S3 Sense; USB-Serial-JTAG console; 144 KB heap, PSRAM unused)
@@ -30,19 +31,21 @@ CERT_PATH is repo-root-relative. HOST, SSID, PASSWORD and DEVICE_NAME (as
 the id on the wire) are *runtime* settings since 2026-11: `src/settings/`
 reads a checksummed record from the `nvs` partition at boot, and the
 values the image was built with only seed an empty partition on first
-boot — so a board already in the field keeps them across an OTA, and an
-image built without SSID/HOST compiles and boots unprovisioned (halts
-with a console line until the provisioning portal lands). Nothing else
-reads that partition; the record is not the ESP-IDF NVS format.
+boot — so a board already in the field keeps them across an OTA. An
+empty partition and an image built without HOST or DEVICE_NAME halts with
+a console line asking for a reflash; a WiFi image without SSID boots into
+the provisioning portal (below). Nothing else reads that partition; the
+record is not the ESP-IDF NVS format.
 
 ## Hardware on the bench
 Physical rig (which board is on which port, cabling, flash/monitor
 recipes) is documented in `TESTRIG.md` at the repo root — gitignored
 because it's machine-specific; if it's missing, there's no hardware
-attached to this machine. One portable fact: the `ethernet` feature is
-POE-ISO-specific — on the ESP32-POE2 the PHY doesn't respond (MDIO reads
-`0xffffffff`; different power/clock wiring than the pin map in
-`src/board/poe_iso.rs`), so the POE2 runs the `wifi` build.
+attached to this machine. One portable fact: plain `ethernet` is the
+POE-ISO pin map (`src/board/poe_iso.rs`, RMII clock out GPIO17). On the
+ESP32-POE2 that build's PHY never sees a clock (MDIO reads `0xffffffff`):
+its WROVER-E keeps GPIO16/17 for PSRAM, so it needs `board-poe2`
+(`src/board/poe2.rs`, clock out GPIO0).
 
 Watching a board from a non-TTY context (agent shells): `espflash monitor`
 needs `--non-interactive`; add `--chip esp32 --after no-reset --before
@@ -79,7 +82,8 @@ block until reboot and still echoes it.
 `embedded` is the interface-less base; the bin needs exactly one of:
 - `ethernet` (primary) — wired EMAC + LAN8710A over RMII, PoE-powered.
   Board bring-up (APLL 50 MHz + GPIO17 clock-out, pin map) lives in
-  `src/board/poe_iso.rs`; the driver/stack wiring in `src/network/ethernet.rs`.
+  `src/board/poe_iso.rs`, the POE2's GPIO0 variant (`board-poe2`) in
+  `src/board/poe2.rs`; the driver/stack wiring in `src/network/ethernet.rs`.
   The EMAC driver is `ph-esp32-mac` pinned to the upstream merge commit of
   the MDIO-read fix (photon-circus/ph-esp32-mac#4); no release carries it yet.
 - `wifi` (fallback) — esp-radio station mode.

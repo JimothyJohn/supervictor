@@ -474,6 +474,12 @@
       <span class="desc">Recent uplink history for a device</span>
     </div>
   </div>
+  <p style="color:var(--muted); margin-top:16px; font-size:0.9rem;">
+    Device routes take the device's certificate. The admin routes (fleet health and history,
+    thresholds, pushed config, styles, firmware, the <code>/ui</code> dashboard) need a certificate
+    with <code>OU=admin</code>; the full table is in the
+    <a href="https://github.com/JimothyJohn/supervictor#build-on-it">README</a>.
+  </p>
 </section>
 
 <!-- CLI Pipeline -->
@@ -613,7 +619,7 @@
     <div class="step">
       <div class="step-content">
         <p>Clone the repository</p>
-        <pre>git clone git@github.com:JimothyJohn/supervictor.git
+        <pre>git clone https://github.com/JimothyJohn/supervictor.git
 cd supervictor</pre>
       </div>
     </div>
@@ -631,8 +637,8 @@ cd supervictor</pre>
     </div>
     <div class="step">
       <div class="step-content">
-        <p>Install the endpoint on a Linux box as one static binary (when ready)</p>
-        <pre>make deploy    # or scripts/install-endpoint.sh on the target</pre>
+        <p>Install the endpoint on a Linux box as one static binary (when ready); the README's Deploy section has the PEMs and the unit</p>
+        <pre>sudo ./scripts/install-endpoint.sh v0.2.0    # on the target, as root</pre>
       </div>
     </div>
   </div>
@@ -643,8 +649,8 @@ cd supervictor</pre>
   <h2>Infrastructure</h2>
   <p style="color:var(--muted); margin-bottom:16px; font-size:0.9rem;">
     One static binary, a systemd unit, three PEMs and a SQLite file on any Linux box
-    (<code>scripts/install-endpoint.sh</code>, <code>endpoint/deploy/</code>). The reference
-    box is one EC2 instance from <code>endpoint/template-staging.yaml</code>; nothing in the
+    (<code>scripts/install-endpoint.sh</code>, <code>endpoint/deploy/</code>). Staging and prod
+    are each one EC2 instance from <code>endpoint/template-staging.yaml</code>; nothing in the
     service depends on AWS.
   </p>
   <div style="overflow-x:auto">
@@ -653,10 +659,10 @@ cd supervictor</pre>
         <tr><th>Resource</th><th>Description</th><th>Scope</th></tr>
       </thead>
       <tbody>
-        <tr><td>EC2 instance</td><td>t4g.micro, Amazon Linux 2023, bootstraps the release install</td><td>Staging</td></tr>
-        <tr><td>Elastic IP + Route53</td><td>A record for the box's hostname</td><td>Staging</td></tr>
-        <tr><td>Security group</td><td>443 only; SSM for a shell, no SSH</td><td>Staging</td></tr>
-        <tr><td>Let's Encrypt</td><td>Public server certificate via DNS-01 (certbot-dns-route53); devices pin the fleet CA + ISRG Root X1</td><td>Staging</td></tr>
+        <tr><td>EC2 instance</td><td>t4g.micro, Amazon Linux 2023, bootstraps the release install</td><td>Staging, prod</td></tr>
+        <tr><td>Elastic IP + Route53</td><td>A record for the box's hostname</td><td>Staging, prod</td></tr>
+        <tr><td>Security group</td><td>443 only; SSM for a shell, no SSH</td><td>Staging, prod</td></tr>
+        <tr><td>Let's Encrypt</td><td>Public server certificate via DNS-01 (certbot-dns-route53); devices pin the fleet CA + ISRG Root X1</td><td>Staging, prod</td></tr>
         <tr><td>GitHub release</td><td>Static musl tarballs (aarch64, x86_64) the installer verifies by sha256</td><td>All</td></tr>
       </tbody>
     </table>
@@ -672,9 +678,9 @@ cd supervictor</pre>
         <tr><th>Component</th><th>Crate</th><th>Purpose</th></tr>
       </thead>
       <tbody>
-        <tr><td>device</td><td>esp-hal, embassy, esp-mbedtls</td><td>no_std firmware with async WiFi + TLS</td></tr>
-        <tr><td>endpoint</td><td>axum, tokio, rusqlite</td><td>Cloud API with feature-gated store backends</td></tr>
-        <tr><td>cli</td><td>clap, ureq, toml</td><td>Build/test/deploy orchestration</td></tr>
+        <tr><td>edge</td><td>esp-hal, embassy, mbedtls-rs</td><td>no_std firmware with async Ethernet or WiFi + TLS</td></tr>
+        <tr><td>endpoint</td><td>axum, tokio, rusqlite, rustls</td><td>Cloud API with feature-gated store backends, mTLS in-binary</td></tr>
+        <tr><td>mcp</td><td>tokio, rustls, serde_json</td><td>MCP server over the admin API</td></tr>
       </tbody>
     </table>
   </div>

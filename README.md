@@ -13,7 +13,7 @@ git clone https://github.com/JimothyJohn/supervictor.git && cd supervictor
 
 One command, start to finish: it checks the toolchain, writes `.env.dev`, issues the fleet CA and your admin, server and device certificates, builds, runs the test suite, starts the endpoint with mTLS on `https://localhost:8443`, then asks what should post telemetry — a simulated machine on your computer, an ESP32 over USB, or nothing yet. It is idempotent: rerun it after any fix and it skips what already exists. It only prompts on a terminal and only where a choice is ambiguous; `QS_HARDWARE=sim ./Quickstart` answers ahead of time for scripts and CI. `./Quickstart status` and `./Quickstart down` manage what it started.
 
-- `make` is the same path with the usual names (`make help`, `lint`, `test-unit`, `flash`, `deploy`).
+- `make` is the same path with the usual names (`make help`, `lint`, `test-unit`, `flash`, `deploy`, `ship`).
 - In Claude Code, `/quickstart` runs it with an agent that reads your serial ports and environment first and fixes what fails. `/bring-your-own` is the next step: the endpoint on a server you own (Linux box, VPS, Pi, container, macOS or WSL) and telemetry from a board that is not the bench Olimex — another ESP32, a Linux SBC, or anything that can do mTLS — with a checker that proves the server from a device's point of view before you flash.
 - Rust is the only requirement. Flashing adds `espflash` and the esp toolchain, which `./Quickstart install` sets up.
 
@@ -83,12 +83,12 @@ The endpoint is one static musl binary. On any Linux box, as root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JimothyJohn/supervictor/master/scripts/install-endpoint.sh \
-  | sudo bash -s -- v0.1.0                                # verifies the sha256, installs binary + unit
+  | sudo bash -s -- v0.2.0                                # verifies the sha256, installs binary + unit
 sudo cp server.pem server.key ca.pem /etc/supervictor/   # from ./Quickstart certs
 sudo systemctl start supervictor-endpoint
 ```
 
-It listens on `:443`, requires a client certificate chaining to `ca.pem`, and takes each device's identity from the certificate it presented. The unit runs as a dynamic user with `ProtectSystem=strict`, a syscall filter, `MemoryDenyWriteExecute` and only `CAP_NET_BIND_SERVICE`; the PEMs are passed as systemd credentials and the database lives in `/var/lib/supervictor`. Re-run the installer with a newer tag to upgrade. `make deploy` stands up the staging box this way on a t4g.micro. The same binary runs on any Linux box, a Pi, a VPS or in a container (`endpoint/docker-compose.yml`, Caddy terminating mTLS in front), wherever you are; nothing in it depends on AWS.
+It listens on `:443`, requires a client certificate chaining to `ca.pem`, and takes each device's identity from the certificate it presented. The unit runs as a dynamic user with `ProtectSystem=strict`, a syscall filter, `MemoryDenyWriteExecute` and only `CAP_NET_BIND_SERVICE`; the PEMs are passed as systemd credentials and the database lives in `/var/lib/supervictor`. Re-run the installer with a newer tag to upgrade. The project's own two boxes are EC2 t4g.micro instances built this way from `supervictor/endpoint/template-staging.yaml`: staging (`make deploy` creates it) and prod at supervictor.advin.io with a Let's Encrypt server certificate. Once `dev` is merged into `master`, getting it running on prod is one resumable command: `./scripts/ship.sh` prints the plan, `./scripts/ship.sh go` runs it (tag, release, install on the prod box, Let's Encrypt, boards moved by OTA — [docs/OTA.md](docs/OTA.md)); `make ship [GO=1]` is the same. The same binary runs on any Linux box, a Pi, a VPS or in a container (`supervictor/endpoint/docker-compose.yml`, Caddy terminating mTLS in front), wherever you are; nothing in it depends on AWS.
 
 ## Security
 
