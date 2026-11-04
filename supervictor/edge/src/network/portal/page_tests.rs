@@ -299,3 +299,37 @@ proptest! {
         prop_assert!(page.ends_with("</html>"));
     }
 }
+
+#[test]
+fn checking_page_reloads_itself_and_explains_the_drop() {
+    let page = checking_page("c3-wifi-01", &current());
+    let page = page.as_str();
+    assert!(page.contains(&std::format!(
+        "http-equiv=\"refresh\" content=\"{CHECKING_REFRESH_S};url=/\""
+    )));
+    assert!(page.contains("joining <b>old-net</b>"), "{page}");
+    assert!(page.contains("<b>supervictor.advin.io</b>"), "{page}");
+    assert!(page.contains("<b>supervictor-c3-wifi-01</b>"), "{page}");
+    assert!(page.contains("Nothing is saved unless both work"));
+    assert!(!page.contains("secret-secret"), "password never echoed");
+    assert!(page.ends_with("</html>"));
+}
+
+#[test]
+fn checking_and_saved_pages_escape_and_fit_at_maximum_lengths() {
+    let max = Settings {
+        ssid: "<".repeat(SSID_MAX).as_str().try_into().unwrap(),
+        password: "p".repeat(PASSWORD_MAX).as_str().try_into().unwrap(),
+        host: HostName::new(&"h".repeat(HOST_MAX)).unwrap(),
+        device_name: "&".repeat(NAME_MAX).as_str().try_into().unwrap(),
+        uplink_interval_s: 0,
+        threshold_ma: 0,
+    };
+    let name = "\"".repeat(NAME_MAX);
+    for page in [checking_page(&name, &max), saved_page(&name, &max)] {
+        assert!(page.ends_with("</html>"), "truncated at {}", page.len());
+        assert!(page.len() < PAGE_MAX - 64, "{} of {}", page.len(), PAGE_MAX);
+        assert!(!page.contains("<<"), "ssid escaped");
+    }
+    assert!(saved_page("d", &current()).contains("about a minute"));
+}
