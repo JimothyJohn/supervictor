@@ -90,6 +90,7 @@ pub fn parse_form(body: &str) -> Result<Settings, FormError> {
         device_name,
         uplink_interval_s: 0,
         threshold_ma: 0,
+        config_version: 0,
     })
 }
 

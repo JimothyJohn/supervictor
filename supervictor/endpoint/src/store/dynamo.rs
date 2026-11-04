@@ -76,6 +76,9 @@ impl DynamoDeviceStore {
         if let Some(ref fw) = record.desired_fw {
             item.insert("desired_fw".into(), AttributeValue::S(fw.clone()));
         }
+        if let Some(i) = record.uplink_interval_s {
+            item.insert("uplink_interval_s".into(), AttributeValue::N(i.to_string()));
+        }
         item
     }
 
@@ -175,6 +178,13 @@ impl DynamoDeviceStore {
                 .get("desired_fw")
                 .and_then(|v| v.as_s().ok())
                 .map(|s| s.to_string()),
+            // A value this binary cannot hold reads as the default rather
+            // than failing the listing, like min_on_s.
+            uplink_interval_s: item
+                .get("uplink_interval_s")
+                .and_then(|v| v.as_n().ok())
+                .and_then(|n| n.parse::<u32>().ok())
+                .filter(|v| *v > 0),
         })
     }
 }
@@ -363,6 +373,51 @@ impl DeviceStore for DynamoDeviceStore {
                 } else {
                     Err(AppError::Store(StoreError::io(
                         "set_device_threshold",
+                        service_err,
+                    )))
+                }
+            }
+        }
+    }
+
+    fn set_uplink_interval(
+        &self,
+        device_id: &str,
+        uplink_interval_s: Option<u32>,
+    ) -> Result<DeviceRecord, AppError> {
+        let request = self
+            .client
+            .update_item()
+            .table_name(&self.devices_table)
+            .key("device_id", AttributeValue::S(device_id.to_string()))
+            .expression_attribute_names("#i", "uplink_interval_s")
+            .condition_expression("attribute_exists(device_id)")
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew);
+        let request = match uplink_interval_s {
+            Some(i) => request
+                .update_expression("SET #i = :i")
+                .expression_attribute_values(":i", AttributeValue::N(i.to_string())),
+            None => request.update_expression("REMOVE #i"),
+        };
+        match block_on(request.send()) {
+            Ok(out) => {
+                let item = out.attributes().ok_or_else(|| {
+                    AppError::Store(StoreError::io(
+                        "set_uplink_interval",
+                        "no attributes returned",
+                    ))
+                })?;
+                Self::item_to_device(item)
+            }
+            Err(e) => {
+                let service_err = e.into_service_error();
+                if service_err.is_conditional_check_failed_exception() {
+                    Err(AppError::DeviceNotFound {
+                        device_id: device_id.to_string(),
+                    })
+                } else {
+                    Err(AppError::Store(StoreError::io(
+                        "set_uplink_interval",
                         service_err,
                     )))
                 }
@@ -609,6 +664,7 @@ mod tests {
             min_on_s: None,
             style: Default::default(),
             desired_fw: None,
+            uplink_interval_s: None,
         }
     }
 

@@ -136,8 +136,8 @@ const fn parse_env_u32(v: Option<&str>, default: u32) -> u32 {
 pub const UPLINK_INTERVAL_S: u32 = parse_env_u32(option_env!("UPLINK_INTERVAL_S"), 5);
 const _: () = assert!(UPLINK_INTERVAL_S > 0, "UPLINK_INTERVAL_S must be >= 1");
 
-/// Delay between iterations of the main uplink loop on success.
-pub const MAIN_LOOP_DELAY: Duration = Duration::from_secs(UPLINK_INTERVAL_S as u64);
+// The loop delay itself is a runtime value: `UPLINK_INTERVAL_S` unless the
+// endpoint pushed another interval (`settings::Settings::effective_interval_s`).
 /// Samples per uplink interval, shipped as an 8-bit `levels` burst (one
 /// byte per register per sample; `models::uplink::LEVELS_SAMPLES_MAX`
 /// caps it). 50 over the default 5 s interval = a sample every 100 ms

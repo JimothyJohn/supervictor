@@ -120,6 +120,23 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   stores them as `N` attributes in one `SET … REMOVE …` update.
   `scripts/sim-fleet.sh` sets per-profile values for the simulated
   machines (`threshold_for`, `min_on_for`: 120 s for extruder and molder).
+- Pushed settings (decided 2026-11-02): every registered device's uplink
+  response carries `config` (`supervictor_common::models::DeviceConfig`:
+  `version`, `uplink_interval_s`, `threshold_ma`) built by
+  `DeviceRecord::config(fleet_threshold)` in the uplink route (the handler
+  stays pure; `Ingested.device` hands the record up). `version` is
+  `supervictor_common::config::version(interval, threshold)` — a pure
+  function of the values, never 0 — so no counter column exists and a
+  change through either route, or to the fleet default, makes a new
+  block. `PUT /devices/{id}/config` (admin, `DeviceConfigRequest`,
+  `deny_unknown_fields`) sets `uplink_interval_s` 1–600 or clears it
+  (firmware default); the interval lives in `devices.uplink_interval_s`
+  (SQLite additive column, DynamoDB `N` attribute; `set_uplink_interval`).
+  The device echoes `config_version` in uplinks; `fleet::snapshot` reads
+  the latest payload's echo and sets `config_pending` (also `/fleet`'s
+  `config_version` and `uplink_interval_s`). The device page's threshold
+  form carries the interval box (one POST sets all three) and shows
+  `applied` / `pending` with the version. `tests/test_config_push.rs`.
 - Live view: `/ui/live` (+ `/ui/live.json` for the polling fallback) shows
   the last 120 s at *sample* resolution as 8-bit register levels
   (`supervictor_common::levels`: 1..=255 spans a fixed range per register,

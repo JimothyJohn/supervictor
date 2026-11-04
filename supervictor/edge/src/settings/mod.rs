@@ -25,6 +25,8 @@ pub mod device;
 pub mod record;
 
 #[cfg(test)]
+mod pushed_tests;
+#[cfg(test)]
 mod record_tests;
 
 /// Longest SSID (802.11 limit).
@@ -125,10 +127,10 @@ impl Default for HostName {
 
 /// What the board needs to know that is not in the image.
 ///
-/// `uplink_interval_s` and `threshold_ma` are carried from the first
-/// record version so the dashboard-pushed settings that follow do not
-/// need a format change; `0` means "the compiled default" and is all this
-/// firmware ever writes.
+/// `uplink_interval_s`, `threshold_ma` and `config_version` are what the
+/// endpoint pushes in the uplink response's `config` block
+/// ([`Settings::apply_pushed`]); `0` means "the compiled default" / "no
+/// block applied yet".
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Settings {
     /// Network to join (WiFi builds); empty on wired boards.
@@ -145,6 +147,10 @@ pub struct Settings {
     pub uplink_interval_s: u32,
     /// Power-on threshold in mA; `0` = compiled default.
     pub threshold_ma: u32,
+    /// Version of the pushed settings block these values came from
+    /// (`supervictor_common::config::version`); `0` = none yet. Echoed in
+    /// every uplink so the dashboard can tell pending from applied.
+    pub config_version: u32,
 }
 
 impl Settings {
@@ -157,6 +163,35 @@ impl Settings {
             device_name: HString::try_from(BAKED_DEVICE_NAME).unwrap_or_default(),
             uplink_interval_s: 0,
             threshold_ma: 0,
+            config_version: 0,
+        }
+    }
+
+    /// Take a pushed settings block. `true` when it was new and the record
+    /// changed (the caller persists); a block with version `0` or the
+    /// version already held is nothing. The interval is clamped into
+    /// what the firmware will run; a negative threshold reads as `0`.
+    pub fn apply_pushed(
+        &mut self,
+        version: u32,
+        uplink_interval_s: u32,
+        threshold_ma: i64,
+    ) -> bool {
+        if version == 0 || version == self.config_version {
+            return false;
+        }
+        self.config_version = version;
+        self.uplink_interval_s = supervictor_common::config::clamp_interval_s(uplink_interval_s);
+        self.threshold_ma = u32::try_from(threshold_ma.max(0)).unwrap_or(u32::MAX);
+        true
+    }
+
+    /// Seconds between uplinks: the pushed value, else `compiled`.
+    pub fn effective_interval_s(&self, compiled: u32) -> u32 {
+        if self.uplink_interval_s == 0 {
+            compiled
+        } else {
+            self.uplink_interval_s
         }
     }
 
@@ -178,5 +213,6 @@ impl Settings {
             && self.device_name.is_empty()
             && self.uplink_interval_s == 0
             && self.threshold_ma == 0
+            && self.config_version == 0
     }
 }

@@ -26,6 +26,12 @@ pub const DEVICE_STYLE_PATTERN: &str = "/devices/{device_id}/style";
 /// /devices/{device_id}/desired_fw
 pub const DEVICE_DESIRED_FW_PATTERN: &str = "/devices/{device_id}/desired_fw";
 
+/// Per-device pushed settings — PUT (admin mTLS), body
+/// `{"uplink_interval_s": 10}` or `null` to go back to the firmware
+/// default. Reaches the device as the `config` block of its next uplink
+/// response. Axum pattern: /devices/{device_id}/config
+pub const DEVICE_CONFIG_PATTERN: &str = "/devices/{device_id}/config";
+
 /// One device's firmware image for one version — PUT (admin mTLS: upload
 /// the raw image), GET (that device's own certificate or admin: download,
 /// `Range` honoured), DELETE (admin). Axum pattern:

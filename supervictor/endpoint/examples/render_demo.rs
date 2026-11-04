@@ -110,6 +110,7 @@ fn device(id: &str, status: &str, subject: Option<&str>, created: &str) -> Devic
         min_on_s: None,
         style: Default::default(),
         desired_fw: None,
+        uplink_interval_s: None,
     }
 }
 
@@ -463,6 +464,8 @@ fn main() {
             current: demo_current(slot),
             threshold_ma: record.effective_threshold_ma(DEFAULT_POWER_THRESHOLD_MA),
             fleet_threshold_ma: DEFAULT_POWER_THRESHOLD_MA,
+            config_version: record.config(DEFAULT_POWER_THRESHOLD_MA).version,
+            config_pending: slot == 1,
         };
         let page = views::device_page(
             record,

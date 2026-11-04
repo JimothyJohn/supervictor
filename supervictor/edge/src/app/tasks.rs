@@ -13,6 +13,7 @@ use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
 use crate::ota::device::Ota;
 use crate::ota::http::{parse_head, HeadError};
+use crate::settings::device::{Store, StoreError};
 use crate::settings::Settings;
 use embassy_net::tcp::TcpSocket;
 #[cfg(feature = "wifi")]
@@ -235,6 +236,17 @@ pub async fn app(
     // issued for); its capacity is the UplinkMessage id capacity.
     let device_id: heapless::String<64> = settings.device_name.clone();
     let host = settings.host.as_str();
+    // The pushed settings (interval, threshold) change at runtime: this
+    // copy takes each new `config` block from the ack and is what gets
+    // written back to flash; the uplink cadence follows it.
+    let mut live = settings.clone();
+    let mut interval_s = live.effective_interval_s(UPLINK_INTERVAL_S);
+    if live.config_version != 0 {
+        println!(
+            "config: v{} from flash — interval {} s, threshold {} mA",
+            live.config_version, interval_s, live.threshold_ma
+        );
+    }
 
     // Feature `sim`: simulated readings until real sensors land
     // (docs/TELEMETRY.md): a per-board personality from the device id,
@@ -343,7 +355,7 @@ pub async fn app(
             let mut uplink = sim.uplink(
                 device_id.clone(),
                 uptime_s,
-                UPLINK_INTERVAL_S,
+                interval_s,
                 UPLINK_BURST,
                 Hardware {
                     heap_free: Some(heap_free),
@@ -357,10 +369,15 @@ pub async fn app(
                 let mut msg = UplinkMessage::new(device_id.clone(), 0);
                 msg.seq = Some(seq);
                 msg.uptime_s = Some(uptime_s);
-                msg.interval_s = Some(UPLINK_INTERVAL_S);
+                msg.interval_s = Some(interval_s);
                 msg.heap_free = Some(heap_free);
                 msg
             };
+            // Which pushed settings this board runs, so the dashboard can
+            // tell pending from applied.
+            if live.config_version != 0 {
+                uplink.config_version = Some(live.config_version);
+            }
             // RSSI is a WiFi notion; wired boards leave it off the wire —
             // the scalar and the burst's register alike.
             #[cfg(not(feature = "wifi"))]
@@ -411,6 +428,33 @@ pub async fn app(
                         let ack = core::str::from_utf8(&body)
                             .map(UplinkAck::parse)
                             .unwrap_or_default();
+                        // Pushed settings: a block with a version other than
+                        // the one on flash is applied, written through the
+                        // OTA module's flash handle, and echoed from the next
+                        // uplink on. A board without a usable partition runs
+                        // them until reboot and keeps echoing the version.
+                        if let Some(c) = ack.config {
+                            if live.apply_pushed(c.version, c.uplink_interval_s, c.threshold_ma) {
+                                interval_s = live.effective_interval_s(UPLINK_INTERVAL_S);
+                                let saved = match ota.as_mut() {
+                                    Some(o) => o.with_flash(|flash, pt| {
+                                        Store::open(flash, pt)
+                                            .and_then(|mut s| s.write(flash, pt, &live))
+                                    }),
+                                    None => Err(StoreError::NoPartition),
+                                };
+                                match saved {
+                                    Ok(()) => println!(
+                                        "config: v{} applied and saved — interval {} s, threshold {} mA",
+                                        live.config_version, interval_s, live.threshold_ma
+                                    ),
+                                    Err(e) => println!(
+                                        "config: v{} applied until reboot (flash write failed: {:?}) — interval {} s, threshold {} mA",
+                                        live.config_version, e, interval_s, live.threshold_ma
+                                    ),
+                                }
+                            }
+                        }
                         if let Some(desired) = ack.desired_fw {
                             let due = ota_retry_after.is_none_or(|t| Instant::now() >= t);
                             if ota.is_some() && Ota::wants(desired.as_str()) && due {
@@ -429,10 +473,11 @@ pub async fn app(
             }
 
             // ±20 % jitter so boards flashed together don't phase-lock.
+            let loop_ms = interval_s.saturating_mul(1000);
             #[cfg(feature = "sim")]
-            let delay_ms = sim.next_delay_ms(MAIN_LOOP_DELAY.as_millis() as u32);
+            let delay_ms = sim.next_delay_ms(loop_ms);
             #[cfg(not(feature = "sim"))]
-            let delay_ms = jitter_ms(&mut rng, MAIN_LOOP_DELAY.as_millis() as u32);
+            let delay_ms = jitter_ms(&mut rng, loop_ms);
             Timer::after(Duration::from_millis(u64::from(delay_ms))).await;
         }
 

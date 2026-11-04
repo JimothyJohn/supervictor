@@ -13,6 +13,7 @@ fn make_device(id: &str) -> DeviceRecord {
         min_on_s: None,
         style: Default::default(),
         desired_fw: None,
+        uplink_interval_s: None,
     }
 }
 

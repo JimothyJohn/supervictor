@@ -62,6 +62,18 @@ policy), `page.rs`, `dhcp.rs` and `psk.rs` are pure and host-tested;
 `mod.rs` holds the tasks. The watchdog is fed from the portal's accept
 loop. Not the IDF NVS format; the record is `src/settings/record.rs`.
 
+## Pushed settings (`config` in the uplink ack)
+`UplinkAck.config` (`models/uplink.rs::AckConfig`) is the endpoint's
+settings block: `version`, `uplink_interval_s`, `threshold_ma`. The uplink
+loop keeps a live copy of the settings record; `Settings::apply_pushed`
+takes a block whose version differs from the one on flash (interval
+clamped to 1–600 s via `supervictor_common::config`, 0 = compiled
+`UPLINK_INTERVAL_S`), the loop re-times itself, writes the record through
+`Ota::with_flash` and reports `config_version` in every uplink after. The
+version is a pure function of the values on the endpoint side, so there
+is nothing to reconcile; a board without a usable partition applies the
+block until reboot and still echoes it.
+
 ## Network interfaces
 `embedded` is the interface-less base; the bin needs exactly one of:
 - `ethernet` (primary) — wired EMAC + LAN8710A over RMII, PoE-powered.
