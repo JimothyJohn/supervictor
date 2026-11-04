@@ -116,6 +116,16 @@ done
 
 FLASHED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"   # ISO-8601 UTC sorts lexically against the fleet's last_uplink
 echo "FLASHED_AT=$FLASHED_AT"                  # rack-flash.sh reads this line
+# WiFi boards that cannot join open a provisioning access point (edge
+# network/portal); its WPA2 passphrase is the last eight hex digits of the
+# device certificate's SHA-256 fingerprint, so it is printable here.
+case "$FEATURES" in *wifi*)
+    PORTAL_AP="supervictor-$DEVICE"; PORTAL_AP="${PORTAL_AP:0:32}"
+    PORTAL_PSK="$(openssl x509 -in "$REPO_ROOT/${CERT_PATH}devices/$DEVICE/client.pem" -noout -fingerprint -sha256 \
+        | tr -d ':\n' | tr 'A-F' 'a-f' | tail -c 8)"
+    log "provisioning portal, if it opens: WiFi \"$PORTAL_AP\"  passphrase $PORTAL_PSK  then http://192.168.4.1/"
+    ;;
+esac
 if [ "${VERIFY:-1}" = 0 ]; then log "VERIFY=0 — skipping the arrival poll"; exit 0; fi
 
 cd "$REPO_ROOT"

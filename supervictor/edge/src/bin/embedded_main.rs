@@ -48,6 +48,8 @@ use embassy_net::StackResources;
 use esp_radio::wifi::{self, ClientConfig, ModeConfig};
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
 use supervictor::app::tasks::{connection, net_task};
+#[cfg(all(feature = "wifi", not(feature = "ethernet")))]
+use supervictor::network::portal;
 
 // Application descriptor: the version is FIRMWARE_VERSION (FW_VERSION at
 // build time, else the crate version) so `espflash board-info` and the
@@ -191,13 +193,28 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
             }
         );
 
-        // WiFi station config from the settings record. No SSID anywhere
-        // means an image built without one on a blank partition: the
-        // provisioning portal is what lands here next.
-        if !settings.has_wifi() {
-            println!("FATAL: no SSID on flash or in the image — unprovisioned; reflash with SSID and PASSWORD set");
-            halt().await;
+        // Provisioning portal (network/portal): no SSID anywhere, or the
+        // previous boot never joined the one it has, and the board becomes
+        // an access point serving the settings form instead of a station.
+        // `run` reboots the board when it is done; nothing below runs.
+        if let Some(reason) = portal::should_open(settings) {
+            portal::run(
+                spawner,
+                esp_radio_ctrl,
+                peripherals.WIFI,
+                settings,
+                ota,
+                rwdt,
+                net_seed,
+                reason,
+            )
+            .await
         }
+        // Station boot: on the record. `connection()` upgrades it to
+        // "joined" on association; a watchdog reset before that opens
+        // the portal next boot.
+        portal::mark_booted();
+
         let client_config = ModeConfig::Client(
             ClientConfig::default()
                 .with_ssid(settings.ssid.as_str().into())

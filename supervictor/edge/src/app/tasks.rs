@@ -138,7 +138,12 @@ pub async fn connection(mut controller: WifiController<'static>) {
         }
 
         match controller.connect_async().await {
-            Ok(_) => println!("Connected to WiFi!"),
+            Ok(_) => {
+                println!("Connected to WiFi!");
+                // This boot joined: a watchdog reset from here on is not
+                // a reason to open the provisioning portal.
+                crate::network::portal::mark_joined();
+            }
             Err(e) => {
                 println!("Failed to connect to WiFi: {e:?}");
                 Timer::after(Duration::from_millis(5000)).await;

@@ -47,6 +47,21 @@ Watching a board from a non-TTY context (agent shells): `espflash monitor`
 needs `--non-interactive`; add `--chip esp32 --after no-reset --before
 no-reset-no-sync` to attach without rebooting the running firmware.
 
+## Provisioning portal (`src/network/portal/`, WiFi builds)
+A WiFi board with no SSID in its settings record, or whose previous boot
+never associated before the 300 s watchdog reset it, boots as an access
+point `supervictor-<device name>` (WPA2; passphrase = last eight hex of
+the device certificate's SHA-256 fingerprint — `flash.sh` prints it, so
+does the boot console) at `http://192.168.4.1/` with its own DHCP and a
+catch-all DNS, so a phone's captive-portal detector opens the form. The
+form takes SSID, password, host and device name; the board joins and
+completes an mTLS handshake with the host *before* writing the record,
+then reboots as a station. A configured-but-unreachable network gets
+retried after 10 min with nobody on the portal. `boot.rs` (RTC record
+policy), `page.rs`, `dhcp.rs` and `psk.rs` are pure and host-tested;
+`mod.rs` holds the tasks. The watchdog is fed from the portal's accept
+loop. Not the IDF NVS format; the record is `src/settings/record.rs`.
+
 ## Network interfaces
 `embedded` is the interface-less base; the bin needs exactly one of:
 - `ethernet` (primary) — wired EMAC + LAN8710A over RMII, PoE-powered.
