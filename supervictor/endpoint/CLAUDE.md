@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge device. axum, one static binary that terminates mTLS itself, deployed as a systemd unit on any Linux box (`deploy/`, `scripts/install-endpoint.sh`). The SAM/Lambda path was retired 2026-10-27.
+Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge device. axum, one static binary that terminates mTLS itself, deployed as a systemd unit on any Linux box (`deploy/`, `scripts/install-endpoint.sh`). The staging and prod boxes are EC2 instances from `template-staging.yaml` running it that way; `scripts/ship.sh` takes a release to prod.
 
 ## Commands
 
