@@ -8,14 +8,15 @@
 #                           a flashed board posting to it. Idempotent — rerun it
 #                           any time; every step skips what already exists.
 #
-# Everything else (lint, build, unit, integration, dev, staging, prod, certs,
-# ping, fleet, onboard, ...) is a stage of that lifecycle you can run alone.
+# Everything else (install, lint, build, unit, integration, edge, deploy, certs,
+# ping, fleet, onboard, status, down) is a stage of that lifecycle you can run alone.
 # `make help` lists the same stages as make targets.
 #
 # Prompts appear only on a terminal and only where a choice is ambiguous; set
 # the QS_* variables below to answer them ahead of time (CI, agents, scripts).
 #
 #   QS_HARDWARE   none | sim | flash      what posts telemetry after setup
+#   QS_BOARD      poe-iso | poe2 | c3     board up --flash / edge / onboard build for
 #   QS_PORT       local endpoint port     (default 8443)
 #   QS_ADMIN      admin certificate name  (default $USER)
 #   QS_OWNER      owner_id for the device (default $USER)
@@ -126,7 +127,7 @@ Stages (each runs alone):
   -t, --test               lint -> build -> unit -> integration
 
 Local dev & deploy:
-  edge                     Build + flash the ESP32-POE-ISO (espflash via cargo run)
+  edge                     Build + flash the board in QS_BOARD (default poe-iso)
   deploy                   Self-hosted staging box (scripts/deploy-staging.sh);
                            a release goes on it with scripts/install-staging.sh
 
@@ -419,20 +420,11 @@ flash_from_up() {
         esac
         export ESPFLASH_PORT
     fi
-    choose QS_BOARD "which board?" "poe-iso" \
-        poe-iso "Olimex ESP32-POE-ISO, wired Ethernet" \
-        poe2 "Olimex ESP32-POE2, wired Ethernet" \
-        c3 "ESP32-C3, WiFi (needs SSID/PASSWORD in .env.$ENV)"
-    local features="ethernet" target_flag=()
-    case "$QS_BOARD" in
-    poe2) features="board-poe2" ;;
-    c3) features="wifi,chip-esp32c3"; target_flag=(--target riscv32imc-unknown-none-elf)
-        [[ -n "${SSID:-}" && -n "${PASSWORD:-}" ]] || fail "SSID and PASSWORD are blank in .env.$ENV — fill them in for a WiFi board" ;;
-    esac
-    note "firmware: HOST=$HOST DEVICE_NAME=$DEVICE_NAME features=$features port=$ESPFLASH_PORT"
+    pick_board
+    note "firmware: HOST=$HOST DEVICE_NAME=$DEVICE_NAME features=$BOARD_FEATURES port=$ESPFLASH_PORT"
     local go; ask go "flash now? (y/N)" "N"
     [[ "$go" == "y" || "$go" == "Y" ]] || { note "skipped — later: ./Quickstart onboard $DEVICE_NAME $QS_OWNER $HOST"; return 0; }
-    (cd "$EDGE_DIR" && DEVICE_NAME="$DEVICE_NAME" cargo run --bin supervictor-embedded --features "$features" ${target_flag[@]+"${target_flag[@]}"})
+    (cd "$EDGE_DIR" && DEVICE_NAME="$DEVICE_NAME" cargo run --bin supervictor-embedded --features "$BOARD_FEATURES" ${BOARD_TARGET[@]+"${BOARD_TARGET[@]}"})
 }
 
 cmd_up() {
@@ -499,10 +491,28 @@ cmd_down() {
     log "down (database kept at $LOCAL_DB; delete it to start clean)"
 }
 
+# QS_BOARD (asked on a terminal, else poe-iso) -> BOARD_FEATURES + BOARD_TARGET
+# for `cargo run` in the edge crate. Shared by up --flash, edge and onboard.
+pick_board() {
+    choose QS_BOARD "which board?" "poe-iso" \
+        poe-iso "Olimex ESP32-POE-ISO, wired Ethernet" \
+        poe2 "Olimex ESP32-POE2, wired Ethernet" \
+        c3 "ESP32-C3, WiFi (needs SSID/PASSWORD in .env.$ENV)"
+    BOARD_FEATURES="ethernet"; BOARD_TARGET=()
+    case "$QS_BOARD" in
+    poe-iso) ;;
+    poe2) BOARD_FEATURES="board-poe2" ;;
+    c3) BOARD_FEATURES="wifi,chip-esp32c3"; BOARD_TARGET=(--target riscv32imc-unknown-none-elf)
+        [[ -n "${SSID:-}" && -n "${PASSWORD:-}" ]] || fail "SSID and PASSWORD are blank in .env.$ENV — fill them in for a WiFi board" ;;
+    *) fail "unknown QS_BOARD: $QS_BOARD (poe-iso, poe2, c3)" ;;
+    esac
+}
+
 cmd_edge() {
     log "building and flashing embedded firmware"
     [[ -n "${ESPFLASH_PORT:-}" ]] && log "using serial port $ESPFLASH_PORT"
-    (cd "$EDGE_DIR" && cargo run --bin supervictor-embedded --features ethernet)
+    pick_board
+    (cd "$EDGE_DIR" && cargo run --bin supervictor-embedded --features "$BOARD_FEATURES" ${BOARD_TARGET[@]+"${BOARD_TARGET[@]}"})
 }
 
 # ── Fleet operations ─────────────────────────────────────────────────
@@ -575,8 +585,9 @@ cmd_onboard() { # <device-name> <owner-id> [host] [port]
     *) fail "registration failed with HTTP $status" ;;
     esac
 
-    log "[3/4] flashing firmware (DEVICE_NAME=$device)"
-    (cd "$EDGE_DIR" && DEVICE_NAME="$device" cargo run --bin supervictor-embedded --features ethernet)
+    pick_board
+    log "[3/4] flashing firmware (DEVICE_NAME=$device, $QS_BOARD: $BOARD_FEATURES)"
+    (cd "$EDGE_DIR" && DEVICE_NAME="$device" cargo run --bin supervictor-embedded --features "$BOARD_FEATURES" ${BOARD_TARGET[@]+"${BOARD_TARGET[@]}"})
 
     log "[4/4] verifying with mTLS ping"
     PING_CERTS="$REPO_ROOT/certs/devices/$device" cmd_ping "$host" "$port"
