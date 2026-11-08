@@ -23,7 +23,6 @@ use embassy_time::Timer;
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-#[cfg(feature = "chip-esp32c3")]
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::rng::{Rng, Trng, TrngSource};
 use esp_hal::rtc_cntl::{Rtc, RwdtStage};
@@ -151,11 +150,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let net_seed = (rng.random() as u64) << 32 | rng.random() as u64;
     let sim_seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
-    // On Xtensa esp-rtos starts without a software interrupt; on riscv it
-    // needs SoftwareInterrupt<0> for its scheduler.
-    #[cfg(any(feature = "chip-esp32", feature = "chip-esp32s3"))]
-    esp_rtos::start(timg0.timer0);
-    #[cfg(feature = "chip-esp32c3")]
+    // esp-rtos 0.3 drives its scheduler from SoftwareInterrupt<0> on every
+    // chip (0.2 only needed it on riscv).
     esp_rtos::start(
         timg0.timer0,
         SoftwareInterruptControl::new(peripherals.SW_INTERRUPT).software_interrupt0,
@@ -172,9 +168,9 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
                 halt().await;
             }
         };
-        spawner.spawn(ethernet::eth_net_task(runner)).ok();
-        spawner.spawn(ethernet::eth_link_task(emac_ptr)).ok();
-        spawner.spawn(ethernet::eth_dhcp_task(stack, emac_ptr)).ok();
+        spawner.spawn(ethernet::eth_net_task(runner).unwrap());
+        spawner.spawn(ethernet::eth_link_task(emac_ptr).unwrap());
+        spawner.spawn(ethernet::eth_dhcp_task(stack, emac_ptr).unwrap());
         stack
     };
 
@@ -243,8 +239,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
             net_seed,
         );
 
-        spawner.spawn(connection(controller)).ok();
-        spawner.spawn(net_task(runner)).ok();
+        spawner.spawn(connection(controller).unwrap());
+        spawner.spawn(net_task(runner).unwrap());
         stack
     };
 
@@ -268,13 +264,10 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
                 // Dropping the controller deinits the radio: park it for good.
                 let _ = make_static!(esp_radio::wifi::WifiController<'static>, controller);
                 let (_manager, sender, receiver) = esp_now.split();
-                spawner
-                    .spawn(espnow::espnow_beacon_task(
-                        sender,
-                        settings.device_name.as_str(),
-                    ))
-                    .ok();
-                spawner.spawn(espnow::espnow_listen_task(receiver)).ok();
+                spawner.spawn(
+                    espnow::espnow_beacon_task(sender, settings.device_name.as_str()).unwrap(),
+                );
+                spawner.spawn(espnow::espnow_listen_task(receiver).unwrap());
                 println!(
                     "ESP-NOW up on channel {} as {} (heap used {} free {})",
                     ESPNOW_CHANNEL,
@@ -305,8 +298,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     };
     tls.set_debug(TLS_DEBUG_LEVEL);
 
-    spawner
-        .spawn(app(
+    spawner.spawn(
+        app(
             stack,
             tls,
             settings,
@@ -315,8 +308,9 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
             ota,
             make_static!([u8; TCP_RX_BUFFER_SIZE], [0; TCP_RX_BUFFER_SIZE]),
             make_static!([u8; TCP_TX_BUFFER_SIZE], [0; TCP_TX_BUFFER_SIZE]),
-        ))
-        .ok();
+        )
+        .unwrap(),
+    );
 
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;

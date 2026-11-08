@@ -421,10 +421,10 @@ mod embedded {
             make_static!(StackResources<3>, StackResources::<3>::new()),
             seed ^ 0x5bd1_e995,
         );
-        spawner.spawn(ap_net_task(ap_runner)).ok();
-        spawner.spawn(sta_net_task(sta_runner)).ok();
-        spawner.spawn(dhcp_task(ap_stack)).ok();
-        spawner.spawn(dns_task(ap_stack)).ok();
+        spawner.spawn(ap_net_task(ap_runner).unwrap());
+        spawner.spawn(sta_net_task(sta_runner).unwrap());
+        spawner.spawn(dhcp_task(ap_stack).unwrap());
+        spawner.spawn(dns_task(ap_stack).unwrap());
 
         let trng = match Trng::try_new() {
             Ok(t) => t,
