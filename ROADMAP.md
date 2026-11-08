@@ -69,14 +69,17 @@ fires, building it is toil.
   RMII bring-up chosen by `board-*` features — and the wish is an
   application-specific HAL that keeps the uplink task ignorant of which
   board it runs on. Grow it from a second board, not speculatively.
-- **esp ecosystem migration** (trigger: an on-device soak window). Bump
-  `esp-rtos` 0.2 → 0.3 and `esp-radio` 0.17 → 0.18, then unpin
-  `esp-hal =1.0.0` and drop the three Dependabot ignores (esp-hal,
-  embassy-executor, esp-alloc). CI only compile-checks firmware; a
-  scheduler/radio migration needs hours on the rack before it reaches
-  `dev`, so it waits for a day when the fleet can be dark.
+- **esp ecosystem: the 1.2 line** (trigger: `esp-radio` 1.0 ships stable).
+  The edge build is on esp-hal 1.1 / esp-rtos 0.3 / esp-radio 0.18 /
+  mbedtls-rs 0.2 (2026-11). esp-hal 1.2, esp-rtos 0.4, esp-storage 0.10,
+  esp-bootloader-esp-idf 0.6, esp-alloc 0.11 and mbedtls-rs 0.3 are out,
+  but the only esp-radio that pairs with them is a 1.0.0 beta. When it
+  lands: bump the set, drop the `esp-*` minor ignores in
+  `.github/dependabot.yml`, and soak on the rack before it reaches `dev` —
+  CI only compile-checks firmware.
 - **`ph-esp32-mac` back to crates.io** (trigger: upstream cuts a release
-  after #4). Pinned today to the upstream merge commit; Dependabot cannot
+  after #4 and #5). Pinned today to the #5 merge commit on upstream's
+  `v0.1.2-candidate` branch (MDIO fix + esp-hal 1.1 port); Dependabot cannot
   watch a git dependency, so check when touching `supervictor/edge/Cargo.toml`.
 - **OTA next steps** (`docs/OTA.md`): signed manifests (O.2), generic
   images with the identity in NVS so one image serves the fleet, staged

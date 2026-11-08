@@ -51,7 +51,8 @@ mod embedded {
     use esp_hal::rtc_cntl::Rwdt;
     use esp_println::println;
     use esp_radio::wifi::{
-        self, AccessPointConfig, AuthMethod, ClientConfig, ModeConfig, WifiController, WifiDevice,
+        self, ap::AccessPointConfig, sta::StationConfig, AuthenticationMethod, ControllerConfig,
+        Interface, WifiController,
     };
     use mbedtls_rs::{Session, SessionConfig, Tls};
     use static_cell::StaticCell;
@@ -129,12 +130,12 @@ mod embedded {
     }
 
     #[embassy_executor::task]
-    async fn ap_net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
+    async fn ap_net_task(mut runner: Runner<'static, Interface<'static>>) {
         runner.run().await
     }
 
     #[embassy_executor::task]
-    async fn sta_net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
+    async fn sta_net_task(mut runner: Runner<'static, Interface<'static>>) {
         runner.run().await
     }
 
@@ -240,11 +241,11 @@ mod embedded {
         rx: &mut [u8],
         tx: &mut [u8],
     ) -> Result<(), ProbeError> {
-        let client = ClientConfig::default()
-            .with_ssid(candidate.ssid.as_str().into())
+        let station = StationConfig::default()
+            .with_ssid(candidate.ssid.as_str())
             .with_password(candidate.password.as_str().into());
         controller
-            .set_config(&ModeConfig::ApSta(client, ap.clone()))
+            .set_config(&wifi::Config::AccessPointStation(station, ap.clone()))
             .map_err(|_| ProbeError::Join)?;
         let result = probe_inner(controller, sta, tls, candidate, rx, tx).await;
         let _ = controller.disconnect_async().await;
@@ -261,7 +262,7 @@ mod embedded {
     ) -> Result<(), ProbeError> {
         println!("portal: joining {} …", candidate.ssid.as_str());
         match with_timeout(JOIN_TIMEOUT, controller.connect_async()).await {
-            Ok(Ok(())) => {}
+            Ok(Ok(_)) => {}
             _ => return Err(ProbeError::Join),
         }
         println!("portal: associated; waiting for a lease …");
@@ -348,7 +349,6 @@ mod embedded {
     #[allow(clippy::too_many_arguments)]
     pub async fn run(
         spawner: Spawner,
-        radio: &'static esp_radio::Controller<'static>,
         wifi_periph: esp_hal::peripherals::WIFI<'static>,
         settings: &'static Settings,
         mut ota: Option<&'static mut Ota>,
@@ -362,15 +362,15 @@ mod embedded {
         let ap_ssid = page::ap_ssid(settings.device_name.as_str());
         let passphrase = psk::psk_from_pem(CLIENT_CERT_PEM);
         let mut ap = AccessPointConfig::default()
-            .with_ssid(ap_ssid.as_str().into())
+            .with_ssid(ap_ssid.as_str())
             .with_max_connections(AP_MAX_CLIENTS);
         ap = match passphrase.as_ref() {
             Some(p) => ap
-                .with_auth_method(AuthMethod::Wpa2Personal)
+                .with_auth_method(AuthenticationMethod::Wpa2Personal)
                 .with_password(p.as_str().into()),
             None => {
                 println!("portal: could not derive a passphrase from the device certificate — OPEN access point");
-                ap.with_auth_method(AuthMethod::None)
+                ap.with_auth_method(AuthenticationMethod::None)
             }
         };
         println!(
@@ -383,30 +383,27 @@ mod embedded {
             }
         );
 
-        let (mut controller, interfaces) =
-            match wifi::new(radio, wifi_periph, wifi::Config::default()) {
-                Ok(r) => r,
-                Err(e) => {
-                    println!("portal: FATAL WiFi init failed: {:?}", e);
-                    halt().await
-                }
-            };
-        if let Err(e) =
-            controller.set_config(&ModeConfig::ApSta(ClientConfig::default(), ap.clone()))
-        {
-            println!("portal: FATAL set_config failed: {:?}", e);
-            halt().await
-        }
-        if let Err(e) = controller.start_async().await {
-            println!("portal: FATAL WiFi start failed: {:?}", e);
-            halt().await
-        }
+        // esp-radio 0.18 starts the radio with its initial config inside
+        // `new`: the access point plus an idle station the probe reconfigures.
+        let (mut controller, interfaces) = match wifi::new(
+            wifi_periph,
+            ControllerConfig::default().with_initial_config(wifi::Config::AccessPointStation(
+                StationConfig::default(),
+                ap.clone(),
+            )),
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                println!("portal: FATAL WiFi init failed: {:?}", e);
+                halt().await
+            }
+        };
 
         let ap_ip = Ipv4Address::new(192, 168, 4, 1);
         let mut dns_servers = heapless::Vec::new();
         let _ = dns_servers.push(ap_ip);
         let (ap_stack, ap_runner) = embassy_net::new(
-            interfaces.ap,
+            interfaces.access_point,
             Config::ipv4_static(StaticConfigV4 {
                 address: Ipv4Cidr::new(ap_ip, 24),
                 gateway: Some(ap_ip),
@@ -416,7 +413,7 @@ mod embedded {
             seed,
         );
         let (sta_stack, sta_runner) = embassy_net::new(
-            interfaces.sta,
+            interfaces.station,
             Config::dhcpv4(Default::default()),
             make_static!(StackResources<3>, StackResources::<3>::new()),
             seed ^ 0x5bd1_e995,

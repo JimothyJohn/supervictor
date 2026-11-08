@@ -14,19 +14,22 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
     ignore:
-      # Pinned to =1.0.0 in supervictor/edge/Cargo.toml: esp-hal 1.1.x removed
-      # unstable APIs still used by esp-rtos 0.2 / esp-radio 0.17. Unpin there
-      # first, then drop this ignore.
+      # The esp-rs crates move as a set (supervictor/edge/Cargo.toml). The
+      # edge build sits on the esp-hal 1.1 line because the newest stable
+      # esp-radio (0.18) requires ~1.1; esp-hal 1.2 and the matching esp-rtos
+      # 0.4 / esp-alloc 0.11 / esp-storage 0.10 / esp-bootloader-esp-idf 0.6 /
+      # esp-backtrace 0.20 / esp-println 0.18 / mbedtls-rs 0.3 do not resolve
+      # against it, and a lone bump would break the weekly group. They all
+      # move together once esp-radio 1.0 ships stable (ROADMAP.md, firmware
+      # track). Patch releases still flow.
       - dependency-name: "esp-hal"
-      # esp-rtos 0.2's embassy feature links embassy-executor 0.9; a direct
-      # bump splits Spawner into two incompatible versions. Both ignores lift
-      # together with the esp-rtos 0.3 migration (ROADMAP.md, firmware track).
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "esp-*"
+        update-types: ["version-update:semver-minor"]
       - dependency-name: "embassy-executor"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      # esp-alloc 0.10 belongs to the esp-hal 1.1 line: bumping it alone
-      # yields two allocator versions and an unconfigurable esp-sync 0.2.
-      - dependency-name: "esp-alloc"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "mbedtls-rs"
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

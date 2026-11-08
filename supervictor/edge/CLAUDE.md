@@ -85,7 +85,8 @@ block until reboot and still echoes it.
   `src/board/poe_iso.rs`, the POE2's GPIO0 variant (`board-poe2`) in
   `src/board/poe2.rs`; the driver/stack wiring in `src/network/ethernet.rs`.
   The EMAC driver is `ph-esp32-mac` pinned to the upstream merge commit of
-  the MDIO-read fix (photon-circus/ph-esp32-mac#4); no release carries it yet.
+  its esp-hal 1.1 port (photon-circus/ph-esp32-mac#5, stacked on the
+  MDIO-read fix #4); no release carries either yet.
 - `wifi` (fallback) — esp-radio station mode.
 
 ## no_std Constraints

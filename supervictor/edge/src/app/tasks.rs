@@ -24,7 +24,7 @@ use embassy_time::{Duration, Instant, Timer};
 use esp_hal::rtc_cntl::Rwdt;
 use esp_println::println;
 #[cfg(feature = "wifi")]
-use esp_radio::wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState};
+use esp_radio::wifi::{Interface, WifiController};
 use mbedtls_rs::{Session, SessionConfig, Tls};
 
 /// Uplink path from API_PATH at compile time: "/" for the endpoint itself,
@@ -127,18 +127,14 @@ async fn backoff_delay(backoff: &mut Duration) {
 #[embassy_executor::task]
 pub async fn connection(mut controller: WifiController<'static>) {
     loop {
-        if esp_radio::wifi::sta_state() == WifiStaState::Connected {
-            controller.wait_for_event(WifiEvent::StaDisconnected).await;
-            println!("WiFi disconnected, reconnecting...");
-            Timer::after(Duration::from_millis(5000)).await;
-        }
-
-        if !matches!(controller.is_started(), Ok(true)) {
-            if let Err(e) = controller.start_async().await {
-                println!("WiFi start_async failed: {e:?}");
-                Timer::after(Duration::from_millis(5000)).await;
-                continue;
+        if controller.is_connected() {
+            // esp-radio 0.18: the controller is started by its config and
+            // stopped on drop, so there is no start/stop to manage here.
+            match controller.wait_for_disconnect_async().await {
+                Ok(info) => println!("WiFi disconnected ({:?}), reconnecting...", info.reason),
+                Err(e) => println!("WiFi disconnected ({e:?}), reconnecting..."),
             }
+            Timer::after(Duration::from_millis(5000)).await;
         }
 
         match controller.connect_async().await {
@@ -159,7 +155,7 @@ pub async fn connection(mut controller: WifiController<'static>) {
 /// Drives the Embassy network stack (packet rx/tx) for the WiFi interface.
 #[cfg(feature = "wifi")]
 #[embassy_executor::task]
-pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
+pub async fn net_task(mut runner: Runner<'static, Interface<'static>>) {
     runner.run().await
 }
 

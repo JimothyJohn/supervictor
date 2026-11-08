@@ -44,7 +44,7 @@ use supervictor::network::ethernet;
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
 use embassy_net::StackResources;
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
-use esp_radio::wifi::{self, ClientConfig, ModeConfig};
+use esp_radio::wifi::{self, sta::StationConfig, ControllerConfig};
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
 use supervictor::app::tasks::{connection, net_task};
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
@@ -177,18 +177,6 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     // --- WiFi (fallback interface) ---
     #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
     let stack = {
-        // Initialize esp-radio controller (requires esp-rtos started)
-        let esp_radio_ctrl = &*make_static!(
-            esp_radio::Controller<'static>,
-            match esp_radio::init() {
-                Ok(ctrl) => ctrl,
-                Err(e) => {
-                    println!("FATAL: Failed to initialize esp-radio: {:?}", e);
-                    halt().await;
-                }
-            }
-        );
-
         // Provisioning portal (network/portal): no SSID anywhere, or the
         // previous boot never joined the one it has, and the board becomes
         // an access point serving the settings form instead of a station.
@@ -196,7 +184,6 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         if let Some(reason) = portal::should_open(settings) {
             portal::run(
                 spawner,
-                esp_radio_ctrl,
                 peripherals.WIFI,
                 settings,
                 ota,
@@ -211,29 +198,28 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         // the portal next boot.
         portal::mark_booted();
 
-        let client_config = ModeConfig::Client(
-            ClientConfig::default()
-                .with_ssid(settings.ssid.as_str().into())
+        // esp-radio 0.18: the radio comes up with its station config in
+        // one step (no separate init/start); the controller is running
+        // when `new` returns and `connection()` only has to associate.
+        let station_config = wifi::Config::Station(
+            StationConfig::default()
+                .with_ssid(settings.ssid.as_str())
                 .with_password(settings.password.as_str().into()),
         );
-        let (mut controller, interfaces) =
-            match wifi::new(esp_radio_ctrl, peripherals.WIFI, wifi::Config::default()) {
-                Ok(r) => r,
-                Err(e) => {
-                    println!("FATAL: Failed to initialize WiFi: {:?}", e);
-                    halt().await;
-                }
-            };
-
-        // Apply WiFi config before spawning tasks
-        if let Err(e) = controller.set_config(&client_config) {
-            println!("FATAL: WiFi set_config failed: {:?}", e);
-            halt().await;
-        }
+        let (controller, interfaces) = match wifi::new(
+            peripherals.WIFI,
+            ControllerConfig::default().with_initial_config(station_config),
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                println!("FATAL: Failed to initialize WiFi: {:?}", e);
+                halt().await;
+            }
+        };
 
         // Initialize the network stack
         let (stack, runner) = embassy_net::new(
-            interfaces.sta,
+            interfaces.station,
             embassy_net::Config::dhcpv4(Default::default()),
             make_static!(StackResources<3>, StackResources::<3>::new()),
             net_seed,
@@ -249,17 +235,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     // take the uplink down with it; the uplink keeps feeding the watchdog.
     #[cfg(feature = "espnow")]
     {
-        let radio = &*make_static!(
-            esp_radio::Controller<'static>,
-            match esp_radio::init() {
-                Ok(ctrl) => ctrl,
-                Err(e) => {
-                    println!("FATAL: Failed to initialize esp-radio: {:?}", e);
-                    halt().await;
-                }
-            }
-        );
-        match espnow::init(radio, peripherals.WIFI) {
+        match espnow::init(peripherals.WIFI) {
             Ok((controller, esp_now)) => {
                 // Dropping the controller deinits the radio: park it for good.
                 let _ = make_static!(esp_radio::wifi::WifiController<'static>, controller);
