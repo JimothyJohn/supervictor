@@ -266,7 +266,7 @@ re-exported through `board::active` like the Ethernet pins already are:
 | `I2C_SDA_GPIO` | 13 | 13 |
 | `I2C_SCL_GPIO` | 16 | 33 |
 
-**Drivers.** esp-hal 1.0.0 (pinned, `unstable` already on in
+**Drivers.** esp-hal 1.1 (`unstable` already on in
 `supervictor/edge/Cargo.toml`):
 
 - ADC: `esp_hal::analog::adc::{Adc, AdcConfig, Attenuation}`; `enable_pin(pin, Attenuation::_11dB)` → `Adc::new(peripherals.ADC1, cfg)` → `read_oneshot` (returns a `u16` count). Behind the `unstable` feature. Whether esp-hal ships an ADC calibration scheme for the classic ESP32 is **not verified**; plan on the one-point bench calibration in 6.2 and treat eFuse calibration as a bonus if the `AdcCal*` types compile for `esp32`.
@@ -418,6 +418,6 @@ dark fleet row maps to a cable.
 - Olimex ESP32-PoE-ISO Rev L KiCad schematic (`~/github/uplink/Hardware`): net labels.
 - DFRobot wiki SEN0211: probe and module specifications; conversion formula from `~/github/uplink/lib/uplink/src/uplink.h`.
 - ESP-IDF v4.4 ADC guide (ESP32): attenuation ranges, ADC2/WiFi exclusion, multisampling and bypass-cap advice.
-- esp-hal 1.0.0 docs (`esp32` target): `analog::adc` (unstable), `i2c::master` (stable).
+- esp-hal 1.1 docs (`esp32` target): `analog::adc` (unstable), `i2c::master` (stable).
 - crates.io `sht4x` 0.2.0 dependency list; Adafruit product 4885 (SHT40, STEMMA QT, 0x44).
 - This repo: `docs/TELEMETRY.md`, `supervictor/common/src/levels.rs`, `supervictor/edge/src/board/*.rs`, `supervictor/edge/src/config.rs`, `certs/rack-inventory.tsv`, `TODO.md`.

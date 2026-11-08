@@ -82,7 +82,9 @@ pub fn init(
 
     // 3. EMAC init. Locally-administered fallback never happens: the efuse
     //    base MAC is factory-programmed on every ESP32.
-    let mac = board::ethernet_mac(esp_hal::efuse::Efuse::mac_address());
+    let mut base_mac = [0u8; 6];
+    base_mac.copy_from_slice(esp_hal::efuse::base_mac_address().as_bytes());
+    let mac = board::ethernet_mac(base_mac);
     let config = EmacConfig::rmii_esp32_default()
         .with_phy_interface(PhyInterface::Rmii)
         .with_rmii_clock(RmiiClockMode::InternalOutput {

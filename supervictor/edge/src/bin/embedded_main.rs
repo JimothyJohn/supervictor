@@ -23,7 +23,6 @@ use embassy_time::Timer;
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-#[cfg(feature = "chip-esp32c3")]
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::rng::{Rng, Trng, TrngSource};
 use esp_hal::rtc_cntl::{Rtc, RwdtStage};
@@ -45,7 +44,7 @@ use supervictor::network::ethernet;
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
 use embassy_net::StackResources;
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
-use esp_radio::wifi::{self, ClientConfig, ModeConfig};
+use esp_radio::wifi::{self, sta::StationConfig, ControllerConfig};
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
 use supervictor::app::tasks::{connection, net_task};
 #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
@@ -151,11 +150,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let net_seed = (rng.random() as u64) << 32 | rng.random() as u64;
     let sim_seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
-    // On Xtensa esp-rtos starts without a software interrupt; on riscv it
-    // needs SoftwareInterrupt<0> for its scheduler.
-    #[cfg(any(feature = "chip-esp32", feature = "chip-esp32s3"))]
-    esp_rtos::start(timg0.timer0);
-    #[cfg(feature = "chip-esp32c3")]
+    // esp-rtos 0.3 drives its scheduler from SoftwareInterrupt<0> on every
+    // chip (0.2 only needed it on riscv).
     esp_rtos::start(
         timg0.timer0,
         SoftwareInterruptControl::new(peripherals.SW_INTERRUPT).software_interrupt0,
@@ -172,27 +168,15 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
                 halt().await;
             }
         };
-        spawner.spawn(ethernet::eth_net_task(runner)).ok();
-        spawner.spawn(ethernet::eth_link_task(emac_ptr)).ok();
-        spawner.spawn(ethernet::eth_dhcp_task(stack, emac_ptr)).ok();
+        spawner.spawn(ethernet::eth_net_task(runner).unwrap());
+        spawner.spawn(ethernet::eth_link_task(emac_ptr).unwrap());
+        spawner.spawn(ethernet::eth_dhcp_task(stack, emac_ptr).unwrap());
         stack
     };
 
     // --- WiFi (fallback interface) ---
     #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
     let stack = {
-        // Initialize esp-radio controller (requires esp-rtos started)
-        let esp_radio_ctrl = &*make_static!(
-            esp_radio::Controller<'static>,
-            match esp_radio::init() {
-                Ok(ctrl) => ctrl,
-                Err(e) => {
-                    println!("FATAL: Failed to initialize esp-radio: {:?}", e);
-                    halt().await;
-                }
-            }
-        );
-
         // Provisioning portal (network/portal): no SSID anywhere, or the
         // previous boot never joined the one it has, and the board becomes
         // an access point serving the settings form instead of a station.
@@ -200,7 +184,6 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         if let Some(reason) = portal::should_open(settings) {
             portal::run(
                 spawner,
-                esp_radio_ctrl,
                 peripherals.WIFI,
                 settings,
                 ota,
@@ -215,36 +198,35 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         // the portal next boot.
         portal::mark_booted();
 
-        let client_config = ModeConfig::Client(
-            ClientConfig::default()
-                .with_ssid(settings.ssid.as_str().into())
+        // esp-radio 0.18: the radio comes up with its station config in
+        // one step (no separate init/start); the controller is running
+        // when `new` returns and `connection()` only has to associate.
+        let station_config = wifi::Config::Station(
+            StationConfig::default()
+                .with_ssid(settings.ssid.as_str())
                 .with_password(settings.password.as_str().into()),
         );
-        let (mut controller, interfaces) =
-            match wifi::new(esp_radio_ctrl, peripherals.WIFI, wifi::Config::default()) {
-                Ok(r) => r,
-                Err(e) => {
-                    println!("FATAL: Failed to initialize WiFi: {:?}", e);
-                    halt().await;
-                }
-            };
-
-        // Apply WiFi config before spawning tasks
-        if let Err(e) = controller.set_config(&client_config) {
-            println!("FATAL: WiFi set_config failed: {:?}", e);
-            halt().await;
-        }
+        let (controller, interfaces) = match wifi::new(
+            peripherals.WIFI,
+            ControllerConfig::default().with_initial_config(station_config),
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                println!("FATAL: Failed to initialize WiFi: {:?}", e);
+                halt().await;
+            }
+        };
 
         // Initialize the network stack
         let (stack, runner) = embassy_net::new(
-            interfaces.sta,
+            interfaces.station,
             embassy_net::Config::dhcpv4(Default::default()),
             make_static!(StackResources<3>, StackResources::<3>::new()),
             net_seed,
         );
 
-        spawner.spawn(connection(controller)).ok();
-        spawner.spawn(net_task(runner)).ok();
+        spawner.spawn(connection(controller).unwrap());
+        spawner.spawn(net_task(runner).unwrap());
         stack
     };
 
@@ -253,28 +235,15 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     // take the uplink down with it; the uplink keeps feeding the watchdog.
     #[cfg(feature = "espnow")]
     {
-        let radio = &*make_static!(
-            esp_radio::Controller<'static>,
-            match esp_radio::init() {
-                Ok(ctrl) => ctrl,
-                Err(e) => {
-                    println!("FATAL: Failed to initialize esp-radio: {:?}", e);
-                    halt().await;
-                }
-            }
-        );
-        match espnow::init(radio, peripherals.WIFI) {
+        match espnow::init(peripherals.WIFI) {
             Ok((controller, esp_now)) => {
                 // Dropping the controller deinits the radio: park it for good.
                 let _ = make_static!(esp_radio::wifi::WifiController<'static>, controller);
                 let (_manager, sender, receiver) = esp_now.split();
-                spawner
-                    .spawn(espnow::espnow_beacon_task(
-                        sender,
-                        settings.device_name.as_str(),
-                    ))
-                    .ok();
-                spawner.spawn(espnow::espnow_listen_task(receiver)).ok();
+                spawner.spawn(
+                    espnow::espnow_beacon_task(sender, settings.device_name.as_str()).unwrap(),
+                );
+                spawner.spawn(espnow::espnow_listen_task(receiver).unwrap());
                 println!(
                     "ESP-NOW up on channel {} as {} (heap used {} free {})",
                     ESPNOW_CHANNEL,
@@ -305,8 +274,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     };
     tls.set_debug(TLS_DEBUG_LEVEL);
 
-    spawner
-        .spawn(app(
+    spawner.spawn(
+        app(
             stack,
             tls,
             settings,
@@ -315,8 +284,9 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
             ota,
             make_static!([u8; TCP_RX_BUFFER_SIZE], [0; TCP_RX_BUFFER_SIZE]),
             make_static!([u8; TCP_TX_BUFFER_SIZE], [0; TCP_TX_BUFFER_SIZE]),
-        ))
-        .ok();
+        )
+        .unwrap(),
+    );
 
     loop {
         Timer::after(NETWORK_STATUS_POLL_INTERVAL).await;
