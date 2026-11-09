@@ -385,7 +385,7 @@
             infrastructure for every identity — the same standards that secure banking
             and the modern web, applied device-to-cloud.</td></tr>
         <tr><th>Best practices</th><td>No passwords or shared keys anywhere. Least-privilege access,
-            per-device revocation, request throttling, and audit logging of every
+            per-device revocation, and audit logging of every
             operator action, following OWASP-aligned web practices.</td></tr>
         <tr><th>The short version</th><td>Each device and each operator carries its own revocable
             cryptographic identity, and nothing talks to anything without proving who
@@ -410,10 +410,9 @@ MACHINE  (ESP32-POE over PoE Ethernet, ESP32-C3 over WiFi, or a simulated machin
                         ├── /fleet         health, summary, history as JSON
                         └── watchdog       dark-device alerting</pre>
       <p class="arch-note rv">
-        The same product runs both ways: self-host on your own hardware for
-        full control, or push to the cloud for enterprise scale — your
-        budget and your needs decide, and you can change your mind later
-        without changing your devices.
+        The same binary runs on your own hardware or on a cloud instance —
+        your budget and your needs decide, and you can change your mind
+        later without changing your devices.
       </p>
     </section>
 

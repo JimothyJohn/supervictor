@@ -101,6 +101,24 @@ pub struct ResponseHead {
     pub content_length: Option<u32>,
     /// `Content-Range: bytes <start>-<end>/<total>` as `(start, total)`.
     pub content_range: Option<(u32, u32)>,
+    /// The server will close the connection after this response: a
+    /// `Connection: close` token, or an HTTP/1.0 status line (1.0 closes
+    /// unless it says keep-alive, which this client never asks of it).
+    pub close: bool,
+}
+
+impl ResponseHead {
+    /// Whether the connection can carry the next request after this
+    /// response, given how many body bytes were read past the head: only
+    /// when the server keeps it open, the body was length-framed, and
+    /// exactly that many bytes arrived — short means the rest is still in
+    /// flight, more means the next response would start mid-stream.
+    pub fn reusable_after(&self, body_bytes: usize) -> bool {
+        !self.close
+            && self
+                .content_length
+                .is_some_and(|n| usize::try_from(n).is_ok_and(|n| n == body_bytes))
+    }
 }
 
 /// Why a head could not be used.
@@ -127,6 +145,7 @@ pub fn parse_head(buf: &[u8]) -> Result<(ResponseHead, usize), HeadError> {
     let mut lines = head.split("\r\n");
     let status_line = lines.next().ok_or(HeadError::Malformed)?;
     let status = parse_status_line(status_line)?;
+    let mut close = status_line.starts_with("HTTP/1.0");
 
     let mut content_length: Option<u32> = None;
     let mut content_range = None;
@@ -149,6 +168,12 @@ pub fn parse_head(buf: &[u8]) -> Result<(ResponseHead, usize), HeadError> {
             return Err(HeadError::Unsupported);
         } else if name.eq_ignore_ascii_case("content-range") {
             content_range = Some(parse_content_range(value)?);
+        } else if name.eq_ignore_ascii_case("connection")
+            && value
+                .split(',')
+                .any(|t| t.trim().eq_ignore_ascii_case("close"))
+        {
+            close = true;
         }
     }
     Ok((
@@ -156,6 +181,7 @@ pub fn parse_head(buf: &[u8]) -> Result<(ResponseHead, usize), HeadError> {
             status,
             content_length,
             content_range,
+            close,
         },
         end + 4,
     ))

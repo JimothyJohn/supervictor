@@ -8,6 +8,9 @@ pub mod espnow;
 pub mod ethernet;
 /// HTTP request building and response parsing (no_std, zero-alloc).
 pub mod http;
+/// Provisioning portal: the board as an access point serving one form
+/// (page, DHCP, passphrase derivation host-tested; the tasks on `wifi`).
+pub mod portal;
 /// HTTP request parsing / response building for a device-side server.
 pub mod server;
 /// mTLS certificate loading for esp-mbedtls.

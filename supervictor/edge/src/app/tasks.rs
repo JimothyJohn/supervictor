@@ -13,6 +13,8 @@ use crate::network::http::post_request;
 use crate::network::tls::load_certificates;
 use crate::ota::device::Ota;
 use crate::ota::http::{parse_head, HeadError};
+use crate::settings::device::{Store, StoreError};
+use crate::settings::Settings;
 use embassy_net::tcp::TcpSocket;
 #[cfg(feature = "wifi")]
 use embassy_net::Runner;
@@ -22,7 +24,7 @@ use embassy_time::{Duration, Instant, Timer};
 use esp_hal::rtc_cntl::Rwdt;
 use esp_println::println;
 #[cfg(feature = "wifi")]
-use esp_radio::wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState};
+use esp_radio::wifi::{Interface, WifiController};
 use mbedtls_rs::{Session, SessionConfig, Tls};
 
 /// Uplink path from API_PATH at compile time: "/" for the endpoint itself,
@@ -38,10 +40,12 @@ const OTA_RETRY_DELAY: Duration = Duration::from_secs(120);
 
 /// How an uplink response read ended.
 enum Ack {
-    /// A framed response: status and the body bytes that arrived.
+    /// A framed response: status, the body bytes that arrived, and whether
+    /// the session can carry the next uplink (`ResponseHead::reusable_after`).
     Framed {
         status: u16,
         body: heapless::Vec<u8, 1024>,
+        reusable: bool,
     },
     /// Peer closed before any head.
     Closed,
@@ -103,6 +107,7 @@ where
     Ack::Framed {
         status: head.status,
         body,
+        reusable: head.reusable_after(filled - body_start),
     }
 }
 
@@ -122,22 +127,23 @@ async fn backoff_delay(backoff: &mut Duration) {
 #[embassy_executor::task]
 pub async fn connection(mut controller: WifiController<'static>) {
     loop {
-        if esp_radio::wifi::sta_state() == WifiStaState::Connected {
-            controller.wait_for_event(WifiEvent::StaDisconnected).await;
-            println!("WiFi disconnected, reconnecting...");
+        if controller.is_connected() {
+            // esp-radio 0.18: the controller is started by its config and
+            // stopped on drop, so there is no start/stop to manage here.
+            match controller.wait_for_disconnect_async().await {
+                Ok(info) => println!("WiFi disconnected ({:?}), reconnecting...", info.reason),
+                Err(e) => println!("WiFi disconnected ({e:?}), reconnecting..."),
+            }
             Timer::after(Duration::from_millis(5000)).await;
         }
 
-        if !matches!(controller.is_started(), Ok(true)) {
-            if let Err(e) = controller.start_async().await {
-                println!("WiFi start_async failed: {e:?}");
-                Timer::after(Duration::from_millis(5000)).await;
-                continue;
-            }
-        }
-
         match controller.connect_async().await {
-            Ok(_) => println!("Connected to WiFi!"),
+            Ok(_) => {
+                println!("Connected to WiFi!");
+                // This boot joined: a watchdog reset from here on is not
+                // a reason to open the provisioning portal.
+                crate::network::portal::mark_joined();
+            }
             Err(e) => {
                 println!("Failed to connect to WiFi: {e:?}");
                 Timer::after(Duration::from_millis(5000)).await;
@@ -149,16 +155,9 @@ pub async fn connection(mut controller: WifiController<'static>) {
 /// Drives the Embassy network stack (packet rx/tx) for the WiFi interface.
 #[cfg(feature = "wifi")]
 #[embassy_executor::task]
-pub async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
+pub async fn net_task(mut runner: Runner<'static, Interface<'static>>) {
     runner.run().await
 }
-
-/// Device identity on the wire: `DEVICE_NAME` at build time (what the
-/// Quickstart flashes with), falling back to the historical bench id.
-pub const DEVICE_ID_ON_WIRE: &str = match option_env!("DEVICE_NAME") {
-    Some(name) => name,
-    None => "1234567890",
-};
 
 /// Machine the telemetry simulator impersonates: `SIM_PROFILE` at build time
 /// (see `models::profile::Profile::parse` for the names), default the bench
@@ -197,16 +196,18 @@ const fn parse_u32(s: &str) -> u32 {
 }
 
 /// Main application loop: resolves DNS, establishes mTLS, and sends uplink
-/// telemetry. `seed` (hardware RNG) salts the telemetry simulator so two
-/// boots of the same board don't replay the same trace. `ota` is `None`
-/// on a board still on the factory partition table. The TCP buffers are
-/// statics: the task future is built on the boot stack before it moves
-/// into its pool, and 8 KB of buffers (plus OTA's) overflowed it.
+/// telemetry. `settings` (endpoint host, device id) is the record read
+/// from flash at boot. `seed` (hardware RNG) salts the telemetry simulator
+/// so two boots of the same board don't replay the same trace. `ota` is
+/// `None` on a board still on the factory partition table. The TCP
+/// buffers are statics: the task future is built on the boot stack before
+/// it moves into its pool, and 8 KB of buffers (plus OTA's) overflowed it.
 #[cfg(feature = "embedded")]
 #[embassy_executor::task]
 pub async fn app(
     stack: Stack<'static>,
     tls: Tls<'static>,
+    settings: &'static Settings,
     mut rwdt: Rwdt,
     seed: u64,
     mut ota: Option<&'static mut Ota>,
@@ -229,12 +230,22 @@ pub async fn app(
         println!("Waiting to get IP address...");
     }
 
-    // Device identity comes from DEVICE_NAME at compile time — set per board
-    // at flash time (the onboard flow does this); .cargo/config.toml provides
-    // the "factory-01" default. Length-checked at compile time against the
-    // UplinkMessage id capacity so a long name can't panic on boot.
-    const _: () = assert!(DEVICE_ID_ON_WIRE.len() <= 64);
-    let device_id: heapless::String<64> = DEVICE_ID_ON_WIRE.try_into().unwrap_or_default();
+    // Device identity on the wire is the settings record's (seeded from
+    // DEVICE_NAME at flash time, the same name the baked certificate was
+    // issued for); its capacity is the UplinkMessage id capacity.
+    let device_id: heapless::String<64> = settings.device_name.clone();
+    let host = settings.host.as_str();
+    // The pushed settings (interval, threshold) change at runtime: this
+    // copy takes each new `config` block from the ack and is what gets
+    // written back to flash; the uplink cadence follows it.
+    let mut live = settings.clone();
+    let mut interval_s = live.effective_interval_s(UPLINK_INTERVAL_S);
+    if live.config_version != 0 {
+        println!(
+            "config: v{} from flash — interval {} s, threshold {} mA",
+            live.config_version, interval_s, live.threshold_ma
+        );
+    }
 
     // Feature `sim`: simulated readings until real sensors land
     // (docs/TELEMETRY.md): a per-board personality from the device id,
@@ -272,20 +283,20 @@ pub async fn app(
     // Inner loop: reuse the session across uplinks — one handshake, many POSTs.
     loop {
         let address = match stack
-            .dns_query(HOST, embassy_net::dns::DnsQueryType::A)
+            .dns_query(host, embassy_net::dns::DnsQueryType::A)
             .await
         {
             Ok(addresses) => {
                 if let Some(first_addr) = addresses.first() {
                     *first_addr
                 } else {
-                    println!("No addresses returned from DNS query for host: {}", HOST);
+                    println!("No addresses returned from DNS query for host: {}", host);
                     backoff_delay(&mut backoff).await;
                     continue;
                 }
             }
             Err(e) => {
-                println!("DNS resolution failed for host {}: {:?}", HOST, e);
+                println!("DNS resolution failed for host {}: {:?}", host, e);
                 backoff_delay(&mut backoff).await;
                 continue;
             }
@@ -293,10 +304,13 @@ pub async fn app(
 
         let remote_endpoint = (address, AWS_IOT_PORT);
 
-        let client_conf = load_certificates();
+        let client_conf = load_certificates(settings.host.as_cstr());
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer[..], &mut tx_buffer[..]);
         socket.set_timeout(Some(SOCKET_TIMEOUT));
+        // The session is reused across uplinks: probe while idle so the
+        // timeout above does not abort it between them.
+        socket.set_keep_alive(Some(SOCKET_KEEPALIVE));
 
         if let Err(e) = socket.connect(remote_endpoint).await {
             println!("   TCP connect error: {:?}", e);
@@ -339,11 +353,10 @@ pub async fn app(
                 .min(u64::from(u32::MAX)) as u32;
             let heap_free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
             #[cfg(feature = "sim")]
-            #[allow(unused_mut)]
             let mut uplink = sim.uplink(
                 device_id.clone(),
                 uptime_s,
-                UPLINK_INTERVAL_S,
+                interval_s,
                 UPLINK_BURST,
                 Hardware {
                     heap_free: Some(heap_free),
@@ -351,16 +364,20 @@ pub async fn app(
                 },
             );
             #[cfg(not(feature = "sim"))]
-            #[allow(unused_mut)]
             let mut uplink = {
                 seq = seq.wrapping_add(1);
                 let mut msg = UplinkMessage::new(device_id.clone(), 0);
                 msg.seq = Some(seq);
                 msg.uptime_s = Some(uptime_s);
-                msg.interval_s = Some(UPLINK_INTERVAL_S);
+                msg.interval_s = Some(interval_s);
                 msg.heap_free = Some(heap_free);
                 msg
             };
+            // Which pushed settings this board runs, so the dashboard can
+            // tell pending from applied.
+            if live.config_version != 0 {
+                uplink.config_version = Some(live.config_version);
+            }
             // RSSI is a WiFi notion; wired boards leave it off the wire —
             // the scalar and the burst's register alike.
             #[cfg(not(feature = "wifi"))]
@@ -377,7 +394,7 @@ pub async fn app(
                 }
             }
 
-            let request = match post_request(HOST, &uplink, Some(API_PATH)) {
+            let request = match post_request(host, &uplink, Some(API_PATH)) {
                 Ok(r) => r,
                 Err(e) => {
                     println!("   Failed to build HTTP request: {}", e);
@@ -390,11 +407,22 @@ pub async fn app(
                 break;
             }
 
+            // Set when the server will not take another request on this
+            // session: reconnect after the interval instead of writing the
+            // next uplink into a connection the peer has closed (which read
+            // back as EOF and lost that uplink — every other one, while the
+            // POST asked for `Connection: close`).
+            let reconnect: bool;
             match read_ack(&mut session).await {
-                Ack::Framed { status, body } => {
+                Ack::Framed {
+                    status,
+                    body,
+                    reusable,
+                } => {
                     // A completed round-trip is the liveness proof the
                     // watchdog contract wants — feed nowhere else.
                     rwdt.feed();
+                    reconnect = !reusable;
                     #[cfg(debug_assertions)]
                     match core::str::from_utf8(&body) {
                         Ok(s) => println!("Received {} response:\n---\n{}\n---", status, s),
@@ -411,6 +439,33 @@ pub async fn app(
                         let ack = core::str::from_utf8(&body)
                             .map(UplinkAck::parse)
                             .unwrap_or_default();
+                        // Pushed settings: a block with a version other than
+                        // the one on flash is applied, written through the
+                        // OTA module's flash handle, and echoed from the next
+                        // uplink on. A board without a usable partition runs
+                        // them until reboot and keeps echoing the version.
+                        if let Some(c) = ack.config {
+                            if live.apply_pushed(c.version, c.uplink_interval_s, c.threshold_ma) {
+                                interval_s = live.effective_interval_s(UPLINK_INTERVAL_S);
+                                let saved = match ota.as_mut() {
+                                    Some(o) => o.with_flash(|flash, pt| {
+                                        Store::open(flash, pt)
+                                            .and_then(|mut s| s.write(flash, pt, &live))
+                                    }),
+                                    None => Err(StoreError::NoPartition),
+                                };
+                                match saved {
+                                    Ok(()) => println!(
+                                        "config: v{} applied and saved — interval {} s, threshold {} mA",
+                                        live.config_version, interval_s, live.threshold_ma
+                                    ),
+                                    Err(e) => println!(
+                                        "config: v{} applied until reboot (flash write failed: {:?}) — interval {} s, threshold {} mA",
+                                        live.config_version, e, interval_s, live.threshold_ma
+                                    ),
+                                }
+                            }
+                        }
                         if let Some(desired) = ack.desired_fw {
                             let due = ota_retry_after.is_none_or(|t| Instant::now() >= t);
                             if ota.is_some() && Ota::wants(desired.as_str()) && due {
@@ -429,11 +484,16 @@ pub async fn app(
             }
 
             // ±20 % jitter so boards flashed together don't phase-lock.
+            let loop_ms = interval_s.saturating_mul(1000);
             #[cfg(feature = "sim")]
-            let delay_ms = sim.next_delay_ms(MAIN_LOOP_DELAY.as_millis() as u32);
+            let delay_ms = sim.next_delay_ms(loop_ms);
             #[cfg(not(feature = "sim"))]
-            let delay_ms = jitter_ms(&mut rng, MAIN_LOOP_DELAY.as_millis() as u32);
+            let delay_ms = jitter_ms(&mut rng, loop_ms);
             Timer::after(Duration::from_millis(u64::from(delay_ms))).await;
+            if reconnect {
+                println!("   Server closes after each response — reconnecting for the next uplink");
+                break;
+            }
         }
 
         let _ = session.close().await;

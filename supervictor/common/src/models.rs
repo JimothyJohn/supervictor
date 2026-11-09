@@ -34,6 +34,10 @@ pub struct UplinkMessage {
     /// canonically. Lets the cloud compute expected-next-ping staleness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_s: Option<u32>,
+    /// Version of the pushed settings block the device has applied
+    /// (`crate::config::version`); absent before the first push.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_version: Option<u32>,
     /// Free heap in bytes — leak canary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heap_free: Option<u32>,
@@ -230,6 +234,35 @@ pub struct DeviceThresholdRequest {
     pub min_on_s: Option<u32>,
 }
 
+/// Per-device pushed settings update (`PUT /devices/{id}/config`, admin):
+/// the uplink interval. `null` or an absent field goes back to the
+/// firmware's compiled default. Unknown fields are rejected so a misspelt
+/// key cannot silently reset a device's cadence. The power threshold is
+/// pushed too, but set through `PUT /devices/{id}/threshold`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceConfigRequest {
+    /// Seconds between uplinks, `UPLINK_INTERVAL_MIN_S..=UPLINK_INTERVAL_MAX_S`
+    /// (`crate::config`); absent = the firmware default.
+    #[serde(default)]
+    pub uplink_interval_s: Option<u32>,
+}
+
+/// What the endpoint pushes to a device in every uplink response once it
+/// is registered: the settings block, versioned by its values
+/// (`crate::config::version`). The device applies a block whose version
+/// differs from the one it holds and echoes `config_version` afterwards.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeviceConfig {
+    /// `crate::config::version(uplink_interval_s, threshold_ma)`; never 0.
+    pub version: u32,
+    /// Seconds between uplinks; `0` = the device's compiled default.
+    pub uplink_interval_s: u32,
+    /// Current (mA) at or above which the device counts as on: its own
+    /// override, else the fleet default.
+    pub threshold_ma: i64,
+}
+
 /// Per-device target firmware update (`PUT /devices/{id}/desired_fw`,
 /// admin). `null` or an absent field clears it. Unknown fields are
 /// rejected so a misspelt key cannot silently clear a rollout target.
@@ -306,4 +339,8 @@ pub struct DeviceResponse {
     /// Firmware version the device should run next (OTA target), if set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desired_fw: Option<String>,
+    /// Uplink interval pushed to the device (s), if one overrides the
+    /// firmware default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uplink_interval_s: Option<u32>,
 }

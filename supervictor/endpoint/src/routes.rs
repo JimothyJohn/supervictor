@@ -97,6 +97,8 @@ pub fn router_with_firmware(
         // OTA: which version a device should run, and the images it may
         // pull. Uploads are whole images, so the body limit is one slot.
         .route(wire::DEVICE_DESIRED_FW_PATTERN, put(set_desired_fw))
+        // Pushed settings: the uplink interval the device should run.
+        .route(wire::DEVICE_CONFIG_PATTERN, put(set_device_config))
         .route(
             wire::DEVICE_FIRMWARE_PATTERN,
             put(put_firmware)
@@ -219,6 +221,25 @@ async fn set_device_style(
         line_style = ?resp.line_style,
         marker = ?resp.marker,
         "device style set"
+    );
+    Ok(Json(resp))
+}
+
+async fn set_device_config(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    body: String,
+) -> Result<Json<DeviceResponse>, crate::error::AppError> {
+    let body_opt = if body.is_empty() {
+        None
+    } else {
+        Some(body.as_str())
+    };
+    let resp = handlers::handle_set_device_config(&device_id, body_opt, state.store.as_ref())?;
+    tracing::info!(
+        device_id = %crate::middleware::sanitize_for_log(&device_id),
+        uplink_interval_s = ?resp.uplink_interval_s,
+        "device config set"
     );
     Ok(Json(resp))
 }
@@ -513,12 +534,18 @@ async fn uplink(
     } else {
         Some(body.as_str())
     };
-    let ingested = handlers::ingest_uplink(
+    let mut ingested = handlers::ingest_uplink(
         body_opt,
         subject,
         Some(state.store.as_ref()),
         state.require_registration,
     )?;
+    // The pushed settings block: every registered device gets one, with
+    // its effective threshold judged against the fleet default here.
+    ingested.response.config = ingested
+        .device
+        .as_ref()
+        .map(|d| d.config(state.power_threshold_ma));
 
     // Push to dashboard SSE subscribers; never blocks, no-op with no listeners.
     #[cfg(feature = "ui")]

@@ -75,6 +75,7 @@ prop_compose! {
         UplinkMessage {
             id, current, fw, seq, uptime_s, interval_s, heap_free, rssi_dbm,
             temp_c, humidity_pct, accel_g, gyro_dps, mag_ut, levels, levels_ms,
+            config_version: None,
         }
     }
 }

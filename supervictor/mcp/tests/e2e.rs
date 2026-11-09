@@ -108,6 +108,7 @@ fn seed(store: &dyn DeviceStore) {
                 min_on_s: None,
                 style: DeviceStyle::default(),
                 desired_fw: None,
+                uplink_interval_s: None,
             })
             .unwrap();
     }

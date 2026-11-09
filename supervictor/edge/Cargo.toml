@@ -24,7 +24,7 @@ sim = []
 desktop = ["tokio", "rustls", "tokio-rustls", "rustls-pemfile", "sim"]
 # Chip selection — embedded builds need exactly one, matched to the cargo
 # --target (chip-esp32 ↔ xtensa-esp32-none-elf, chip-esp32c3 ↔
-# riscv32imc-unknown-none-elf). Fans the choice out to every esp-rs crate;
+# riscv32imc-unknown-none-elf, chip-esp32s3 ↔ xtensa-esp32s3-none-elf). Fans the choice out to every esp-rs crate;
 # the '?' forwards only when that optional dep is enabled, and esp-backtrace
 # forwards the chip on to esp-println. `ethernet` implies chip-esp32 — only
 # the classic ESP32 has an EMAC.
@@ -35,6 +35,7 @@ chip-esp32 = [
   "esp-radio?/esp32",
   "esp-bootloader-esp-idf?/esp32",
   "esp-storage?/esp32",
+  "mbedtls-rs?/esp32",
 ]
 chip-esp32c3 = [
   "esp-hal?/esp32c3",
@@ -43,6 +44,19 @@ chip-esp32c3 = [
   "esp-radio?/esp32c3",
   "esp-bootloader-esp-idf?/esp32c3",
   "esp-storage?/esp32c3",
+  "mbedtls-rs?/esp32c3",
+]
+# ESP32-S3 (Xtensa LX7; e.g. the Seeed XIAO ESP32S3 Sense) ↔
+# xtensa-esp32s3-none-elf. WiFi only; the console is the native
+# USB-Serial-JTAG, which esp-println's default `auto` picks.
+chip-esp32s3 = [
+  "esp-hal?/esp32s3",
+  "esp-backtrace?/esp32s3",
+  "esp-rtos?/esp32s3",
+  "esp-radio?/esp32s3",
+  "esp-bootloader-esp-idf?/esp32s3",
+  "esp-storage?/esp32s3",
+  "mbedtls-rs?/esp32s3",
 ]
 # Base embedded runtime (no network interface). The supervictor-embedded bin
 # additionally needs exactly one interface feature: `ethernet` (primary — the
@@ -105,30 +119,34 @@ embassy-net = { version = "0.9.1", features = [
   "medium-ethernet",
   "tcp",
   "dns",
+  # The provisioning portal's DHCP + DNS answers on the board's own AP.
+  "udp",
 ], optional = true }
 
 tokio = { version = "1.0", optional = true, features = ["full"] }
 
 embedded-io-async = { version = "0.7.0", optional = true }
-esp-alloc = { version = "0.9.0", optional = true }
-esp-backtrace = { version = "0.18.1", features = [
+esp-alloc = { version = "0.10", optional = true }
+esp-backtrace = { version = "0.19", features = [
   "panic-handler",
   "println",
 ], optional = true }
-# =1.0.0: esp-hal 1.1.x removed unstable APIs (InterruptHandler::new_not_nested)
-# still used by esp-rtos 0.2 / esp-radio 0.17; unpin when bumping those to 0.3/0.18
-esp-hal = { version = "=1.0.0", default-features = false, features = [
+# The esp-rs crates move as a set: esp-rtos 0.3, esp-radio 0.18, esp-storage
+# 0.9, esp-alloc 0.10 and mbedtls-rs 0.2 all require esp-hal ~1.1. The 1.2 line
+# (esp-rtos 0.4, esp-storage 0.10, mbedtls-rs 0.3) is blocked on esp-radio,
+# whose 1.2-compatible release is still a 1.0.0 beta.
+esp-hal = { version = "1.1", default-features = false, features = [
   "log-04",
   "unstable",
   "exception-handler",
 ], optional = true }
-esp-println = { version = "0.16", features = [
+esp-println = { version = "0.17", features = [
   "log-04",
 ], optional = true }
-embassy-executor = { version = "0.9.0", optional = true }
+embassy-executor = { version = "0.10", optional = true }
 embassy-time = { version = "0.5.0", features = ["generic-queue-8"], optional = true }
-esp-rtos = { version = "0.2", features = ["embassy"], optional = true }
-esp-radio = { version = "0.17", features = [
+esp-rtos = { version = "0.3", features = ["embassy"], optional = true }
+esp-radio = { version = "0.18", features = [
   "wifi",
   "log-04",
   "unstable",
@@ -139,14 +157,20 @@ heapless = { version = "0.9.3", default-features = false, features = ["serde"] }
 static_cell = { version = "2.1.0", optional = true, features = ["nightly"] }
 serde = { version = "1.0.219", default-features = false, features = ["alloc"] }
 serde-json-core = "0.7.0"
-mbedtls-rs = { git = "https://github.com/esp-rs/mbedtls-rs.git", rev = "4329f17", optional = true, features = ["log"] }
+# crates.io since 2026-06 (was a git pin on the pre-release tree); 0.2 is the
+# release for esp-hal 1.1, 0.3 needs 1.2. The chip-* features forward the chip
+# so the hardware SHA / bignum hooks stay on.
+mbedtls-rs = { version = "0.2", optional = true, features = ["log"] }
 # ESP32 EMAC (wired Ethernet) driver. crates.io 0.1.1 cannot detect any PHY —
-# MDIO reads are broken; upstream merged the fix as photon-circus/ph-esp32-mac#4
-# (2026-07-25) but has not cut a release. Pinned to that merge commit on the
-# upstream repo (its tree is byte-identical to the hardware-verified fork rev
-# 4cdad7f the rack ran on, so no re-soak was needed). Move to crates.io when a
-# release > 0.1.1 appears; Dependabot cannot watch a git dependency.
-ph-esp32-mac = { git = "https://github.com/photon-circus/ph-esp32-mac", rev = "b05d53ade4224361175283ac1b65c7504a029301", features = [
+# MDIO reads are broken (fixed upstream in photon-circus/ph-esp32-mac#4) and it
+# calls the esp-hal 1.0 interrupt API (ported in #5). Both merged 2026-07-25
+# into upstream's `v0.1.2-candidate` branch, never released and no longer on
+# `main`; this is the #5 merge commit. Beyond the API port, #5 also changes
+# driver behaviour (RUE re-arms a suspended RX DMA, MACADDR0 write order) that
+# the rack has not soaked — the previous pin b05d53a (#4 only) was the
+# hardware-verified tree. Move to crates.io when a release > 0.1.1 appears;
+# Dependabot cannot watch a git dependency.
+ph-esp32-mac = { git = "https://github.com/photon-circus/ph-esp32-mac", rev = "426e77f009f0cfc1545e0ca279c24edf12de6214", features = [
   "esp-hal",
   "embassy-net",
   "log",
@@ -155,14 +179,14 @@ ph-esp32-mac = { git = "https://github.com/photon-circus/ph-esp32-mac", rev = "b
 # names embassy_net_driver::LinkState in our namespace).
 embassy-net-driver = { version = "0.2", optional = true }
 # Raw PAC for the two ESP32 registers esp-hal doesn't expose (RTC ANA_CONF for
-# APLL power-up, IO_MUX GPIO17 for the RMII clock-out mux). Same version
-# esp-hal 1.0 already pulls — no new transitive weight.
-esp32 = { version = "0.40", optional = true }
+# APLL power-up, IO_MUX GPIO17 for the RMII clock-out mux). esp-hal 1.1 pulls
+# esp32 0.40, so this is a second copy of the PAC (TODO.md: esp32-pac-dedupe).
+esp32 = { version = "0.42", optional = true }
 esp-bootloader-esp-idf = { version = "0.5", optional = true }
 # OTA (src/ota): the SPI-flash driver behind the embedded-storage traits
-# that esp-bootloader-esp-idf's FlashRegion/OtaUpdater need. 0.8.x is the
-# line that pairs with esp-hal 1.0 (0.9 wants 1.1, 0.10 wants 1.2).
-esp-storage = { version = "0.8.1", optional = true }
+# that esp-bootloader-esp-idf's FlashRegion/OtaUpdater need. 0.9 is the
+# line that pairs with esp-hal 1.1 (0.10 wants 1.2).
+esp-storage = { version = "0.9", optional = true }
 # The Storage/ReadStorage traits FlashRegion speaks (in the lock via both
 # crates above).
 embedded-storage = { version = "0.3.1", optional = true }

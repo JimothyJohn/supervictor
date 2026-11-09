@@ -70,6 +70,15 @@ pub const MARKER: &str = "marker";
 /// on the device record, in `PUT /devices/{id}/desired_fw`, and echoed in
 /// the uplink response when set.
 pub const DESIRED_FW: &str = "desired_fw";
+/// Per-device uplink interval setting (seconds) field name: on the device
+/// record and in `PUT /devices/{id}/config`; absent = the firmware default.
+pub const UPLINK_INTERVAL_SETTING_S: &str = "uplink_interval_s";
+/// Pushed settings block in the uplink response (`config`), carrying
+/// `version`, `uplink_interval_s` and `threshold_ma`.
+pub const CONFIG: &str = "config";
+/// Version of the pushed settings a device has applied, echoed in every
+/// uplink; absent before the first push.
+pub const UPLINK_CONFIG_VERSION: &str = "config_version";
 
 // --- FirmwareManifest ---
 
