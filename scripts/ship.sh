@@ -48,10 +48,20 @@ confirm() { # <question> — y/N on the terminal; YES=1 answers yes
 }
 row() { printf '  %-16s %-5s %s\n' "$1" "$2" "$3"; }
 stack_exists() { aws cloudformation describe-stacks --stack-name "$1" >/dev/null 2>&1; }
-released() { # <tag> — the aarch64 tarball the box installs is attached
-    gh release view "$1" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null \
-        | grep -q 'aarch64-unknown-linux-musl.tar.gz$'
+# True when <tag>'s release carries the aarch64 musl tarball. gh's output is
+# captured whole, then matched: piping gh into `grep -q` under pipefail
+# failed in a real terminal on 2026-11-15 with the asset attached (grep
+# exits on the first match, and gh there also talks to the terminal).
+# Escape sequences and CRs are stripped so a coloured line still matches,
+# gh is kept off the terminal, and the verdict is the names alone.
+has_aarch64_tarball() { # <tag> <repo>
+    local names
+    names="$(NO_COLOR=1 GH_NO_UPDATE_NOTIFIER=1 gh release view "$1" --repo "$2" \
+        --json assets --jq '.assets[].name' </dev/null 2>/dev/null)" || true
+    printf '%s\n' "$names" | tr -d '\r' | sed $'s/\x1b\\[[0-9;?]*[A-Za-z]//g' \
+        | grep -x 'supervictor-endpoint-aarch64-unknown-linux-musl.tar.gz' >/dev/null
 }
+released() { has_aarch64_tarball "$1" "$REPO"; } # <tag> — what the box installs is attached
 le_issued() {
     echo | openssl s_client -connect "$PROD_HOST:443" -servername "$PROD_HOST" 2>/dev/null \
         | openssl x509 -noout -issuer 2>/dev/null | grep -q "Let's Encrypt"

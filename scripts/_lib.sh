@@ -24,6 +24,8 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse --show-toplevel)}"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 export AWS_DEFAULT_REGION="$REGION"
+# No pagers: a script must not sit at less's ":" waiting for a q.
+export AWS_PAGER="" GH_PAGER=cat
 ADMIN="${ADMIN:-${QS_ADMIN:-${USER:-admin}}}"
 ADMIN_PEM="$REPO_ROOT/certs/admins/$ADMIN/admin.pem"
 ADMIN_KEY="$REPO_ROOT/certs/admins/$ADMIN/admin.key"

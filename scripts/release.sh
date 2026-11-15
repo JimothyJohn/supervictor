@@ -12,6 +12,7 @@
 set -euo pipefail
 TAG="${TAG:?set TAG, e.g. TAG=v0.2.0}"
 REPO="${REPO:-JimothyJohn/supervictor}"
+export GH_PAGER=cat # never wait at a pager prompt
 for t in git gh; do command -v "$t" >/dev/null || { echo "[release] missing tool: $t" >&2; exit 1; }; done
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
@@ -28,9 +29,22 @@ RUN_ID="$(gh run list --repo "$REPO" --workflow=release.yml --limit 5 \
 [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ] || { echo "[release] no run found yet for $TAG; check: gh run list --workflow=release.yml" >&2; exit 1; }
 gh run watch --repo "$REPO" "$RUN_ID" --exit-status
 
+# True when <tag>'s release carries the aarch64 musl tarball. gh's output is
+# captured whole, then matched: piping gh into `grep -q` under pipefail
+# failed in a real terminal on 2026-11-15 with the asset attached (grep
+# exits on the first match, and gh there also talks to the terminal).
+# Escape sequences and CRs are stripped so a coloured line still matches,
+# gh is kept off the terminal, and the verdict is the names alone.
+has_aarch64_tarball() { # <tag> <repo>
+    local names
+    names="$(NO_COLOR=1 GH_NO_UPDATE_NOTIFIER=1 gh release view "$1" --repo "$2" \
+        --json assets --jq '.assets[].name' </dev/null 2>/dev/null)" || true
+    printf '%s\n' "$names" | tr -d '\r' | sed $'s/\x1b\\[[0-9;?]*[A-Za-z]//g' \
+        | grep -x 'supervictor-endpoint-aarch64-unknown-linux-musl.tar.gz' >/dev/null
+}
+
 echo "[release] assets on $TAG:"
 gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'
-gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' \
-    | grep -q 'supervictor-endpoint-aarch64-unknown-linux-musl.tar.gz$' \
+has_aarch64_tarball "$TAG" "$REPO" \
     || { echo "[release] aarch64 tarball missing from the release" >&2; exit 1; }
 echo "[release] done — next: TAG=$TAG ./scripts/install-staging.sh"
