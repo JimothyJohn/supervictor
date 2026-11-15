@@ -4,10 +4,14 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use supervictor_endpoint::routes;
 
+/// The device API is admin-only (`test_device_api_auth.rs` covers who is
+/// refused), so every request here carries the admin subject.
 fn test_server() -> TestServer {
     let store = common::test_store();
     let app = routes::router(store);
-    TestServer::new(app)
+    let mut server = TestServer::new(app);
+    server.add_header("x-ssl-client-subject-dn", "CN=ops,OU=admin,O=supervictor");
+    server
 }
 
 #[tokio::test]

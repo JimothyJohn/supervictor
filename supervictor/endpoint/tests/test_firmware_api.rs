@@ -710,7 +710,8 @@ async fn desired_fw_is_admin_only_and_needs_a_stored_image() {
     assert_eq!(body["desired_fw"], "0.2.0");
 
     // Visible on the device record.
-    let resp = r.server.get("/devices/d1").await;
+    let (n, v) = dn(ADMIN_DN);
+    let resp = r.server.get("/devices/d1").add_header(n, v).await;
     let body: serde_json::Value = resp.json();
     assert_eq!(body["desired_fw"], "0.2.0");
 

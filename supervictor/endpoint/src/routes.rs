@@ -85,7 +85,14 @@ pub fn router_with_firmware(
     };
 
     // Fleet health API: admin mTLS only — it enumerates the device inventory.
+    // The device API sits behind the same gate: every board carries a
+    // fleet-CA certificate, so a valid client certificate alone must not
+    // register a device (it could bind an untaken id to its own DN), list
+    // the inventory or read another device's uplinks.
     let fleet_api = Router::new()
+        .route(wire::DEVICES, get(list_devices).post(register_device))
+        .route(wire::DEVICE_PATTERN, get(get_device))
+        .route(wire::DEVICE_UPLINKS_PATTERN, get(get_device_uplinks))
         .route(wire::FLEET, get(fleet_status))
         .route(wire::FLEET_SUMMARY, get(fleet_summary))
         .route(wire::FLEET_HISTORY, get(fleet_history))
@@ -124,12 +131,10 @@ pub fn router_with_firmware(
         )
         .with_state(state.clone());
 
+    // What a device certificate (or, for health, anyone) may reach.
     let router = Router::new()
         .route(wire::HEALTH, get(health))
         .route(wire::ROOT, get(hello).post(uplink))
-        .route(wire::DEVICES, get(list_devices).post(register_device))
-        .route(wire::DEVICE_PATTERN, get(get_device))
-        .route(wire::DEVICE_UPLINKS_PATTERN, get(get_device_uplinks))
         .with_state(state.clone())
         .merge(fleet_api)
         .merge(firmware_api);
