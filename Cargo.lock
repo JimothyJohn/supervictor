@@ -2265,15 +2265,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "esp32"
-version = "0.42.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e31e10b4c4f5fc2445896b46a7dabd689572d1e52dada21703659d97a373aa4"
-dependencies = [
- "vcell",
-]
-
-[[package]]
 name = "esp32c2"
 version = "0.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4596,7 +4587,7 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "esp-storage",
- "esp32 0.42.0",
+ "esp32 0.40.2",
  "heapless 0.9.3",
  "mbedtls-rs",
  "ph-esp32-mac",

@@ -30,6 +30,11 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "mbedtls-rs"
         update-types: ["version-update:semver-minor"]
+      # The raw PAC is held at the version esp-hal itself pulls, so the edge
+      # build does not carry a second copy of our own
+      # (supervictor/edge/Cargo.toml). It moves with the esp-hal line.
+      - dependency-name: "esp32"
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
