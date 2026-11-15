@@ -182,13 +182,3 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
 
 ## Open questions for Nick
 
-- [ ] **esp32 PAC: three copies in the edge build** — `supervictor/edge/Cargo.toml` pins `esp32 = 0.42`; on the esp-hal 1.1 line (2026-11) esp-hal pulls 0.40 and esp-rom-sys 0.41, so the lock still carries three PACs (Dependabot moved ours 0.40 → 0.42 in 86a689d). `sha2` 0.11 is likewise a second copy next to the 0.10 esp-hal and mbedtls-rs-sys use. It builds and passes; the cost is compile time and two PACs for the same silicon.
-      needs: a pick
-      result: one PAC version in the edge build, or comments that tell the truth
-      options: pin esp32 to esp-hal's version + Dependabot ignore (recommended) | keep 0.42, fix the comments
-      est: 30m
-      difficulty: low
-      id: esp32-pac-dedupe
-      asked: 2026-11-03
-      by: deep-clean session (PR 144)
-      answer: pin esp32 to esp-hal's version + Dependabot ignore
