@@ -55,33 +55,6 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-27
       by: decisions session
       notes: EMAIL=you@… ./scripts/billing-alarm.sh
-- [ ] **Put v0.2.0 on staging** — v0.2.0 is released (2026-10-28) and runs on prod; staging runs a hand-installed build (nothing outside the box reports the version; it does accept `min_on_s`, so it is at least the 2026-10-27 tree, and the sim thresholds including the 120 s min-on were applied 2026-11-15). `install-staging.sh` needs a TAG.
-      needs: a native terminal (the restart is yours)
-      result: staging runs a reproducible release
-      est: 10m
-      difficulty: low
-      id: cut-v0-2-0
-      asked: 2026-10-26
-      by: decisions session
-      notes: TAG=v0.2.0 ./scripts/install-staging.sh
-- [ ] **Promote dev → master** — your manual merge (master is 10 commits behind dev on 2026-10-28: PRs 131–133 and the cutover fixes); also activates `.github/workflows/mutants.yml` (scheduled workflows run from the default branch only) and publishes the docs site from the new tree.
-      needs: whatever you want on dev
-      result: master carries the single-binary reality; mutants run monthly
-      est: 5m
-      difficulty: low
-      id: promote-dev-master
-      asked: 2026-10-27
-      by: decisions session
-- [ ] **Release the admin-gated endpoint to staging and prod** — the device API (`POST /devices`, `GET /devices`, `GET /devices/{id}`, `GET /devices/{id}/uplinks`) is admin-only on dev since 2026-11-15; both boxes still run a build where any fleet-CA certificate passes. The scripts already register with the admin certificate, which the old build accepts too, so nothing breaks in between. Boards are untouched: firmware never calls these routes.
-      needs: dev promoted to master; a native terminal (the restarts are yours)
-      result: on both boxes a device certificate gets 403 from the device API (`.claude/skills/bring-your-own/scripts/check-server.sh <host>` shows the isolation line)
-      depends: promote-dev-master
-      est: 20m
-      difficulty: low
-      id: release-admin-gate
-      asked: 2026-11-15
-      by: board session (feat/admin-gate-device-api)
-      notes: ./scripts/ship.sh go (tags, releases, installs prod), then TAG=<the tag ship.sh made> ./scripts/install-staging.sh (staging; TAG is required)
 - [ ] **Pi as a live device** — `pi-edge-01` is dark since 2026-10-24.
       needs: your password on nick@10.0.0.56 (no agent-reachable key is authorized); Docker if `target-pi/` needs a rebuild (`BUILD=1`)
       result: a Linux reference device fresh on staging
