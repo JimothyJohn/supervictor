@@ -55,15 +55,6 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-27
       by: decisions session
       notes: EMAIL=you@… ./scripts/billing-alarm.sh
-- [ ] **Make the DynamoDB job a required check on `dev`** — the `DynamoDB store (DynamoDB Local)` job runs on every PR but is not required, so a dynamo-only failure cannot block auto-merge. The session's `gh api PATCH` was denied (CI-bypass class).
-      needs: your gh login (repo admin)
-      result: three required contexts on dev
-      est: 2m
-      difficulty: low
-      id: dev-branch-protection
-      asked: 2026-10-27
-      by: decisions session
-      notes: ./scripts/dev-branch-protection.sh
 - [ ] **Put v0.2.0 on staging** — v0.2.0 is released (2026-10-28) and runs on prod; staging runs a hand-installed build (nothing outside the box reports the version; it does accept `min_on_s`, so it is at least the 2026-10-27 tree, and the sim thresholds including the 120 s min-on were applied 2026-11-15). `install-staging.sh` without a TAG installs the newest release.
       needs: a native terminal (the restart is yours)
       result: staging runs a reproducible release
