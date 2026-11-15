@@ -184,6 +184,7 @@ fn device(id: &str, subject_dn: Option<&str>) -> DeviceRecord {
         min_on_s: None,
         style: Default::default(),
         desired_fw: None,
+        uplink_interval_s: None,
     }
 }
 
@@ -910,6 +911,69 @@ async fn device_uplinks_since_is_a_sort_key_range() {
     }
 
     fx.teardown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_uplink_interval_sets_clears_and_rejects_unknown() {
+    let fx = Fixture::new("uplink-interval", TTL_DAYS).await;
+    fx.store
+        .put_device(device("dev-1", Some("CN=dev-1")))
+        .unwrap();
+    assert_eq!(
+        fx.store
+            .get_device("dev-1")
+            .unwrap()
+            .unwrap()
+            .uplink_interval_s,
+        None,
+        "no attribute = firmware default"
+    );
+
+    let updated = fx.store.set_uplink_interval("dev-1", Some(45)).unwrap();
+    assert_eq!(updated.uplink_interval_s, Some(45));
+    assert_eq!(
+        updated.subject_dn.as_deref(),
+        Some("CN=dev-1"),
+        "ReturnValues ALL_NEW must carry the untouched fields"
+    );
+    assert_eq!(
+        fx.store
+            .get_device("dev-1")
+            .unwrap()
+            .unwrap()
+            .uplink_interval_s,
+        Some(45)
+    );
+    assert_eq!(
+        fx.store.list_devices().unwrap()[0].uplink_interval_s,
+        Some(45),
+        "the listing reads the attribute too"
+    );
+
+    // Clearing REMOVEs the attribute rather than storing 0.
+    let cleared = fx.store.set_uplink_interval("dev-1", None).unwrap();
+    assert_eq!(cleared.uplink_interval_s, None);
+    assert_eq!(fx.store.list_devices().unwrap()[0].uplink_interval_s, None);
+
+    // Unknown device: the conditional write fails closed, no upsert.
+    assert!(matches!(
+        fx.store.set_uplink_interval("ghost", Some(5)),
+        Err(AppError::DeviceNotFound { .. })
+    ));
+    assert!(fx.store.get_device("ghost").unwrap().is_none());
+
+    // Set at registration, it is stored with the item.
+    let mut with = device("dev-2", None);
+    with.uplink_interval_s = Some(600);
+    fx.store.put_device(with).unwrap();
+    assert_eq!(
+        fx.store
+            .get_device("dev-2")
+            .unwrap()
+            .unwrap()
+            .uplink_interval_s,
+        Some(600)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -194,3 +194,77 @@ proptest! {
         }
     }
 }
+
+// ── Connection reuse (uplink keep-alive) ────────────────────────────
+
+fn head_of(raw: &str) -> ResponseHead {
+    parse_head(raw.as_bytes()).unwrap().0
+}
+
+#[test]
+fn http_1_1_keeps_the_connection_unless_told_otherwise() {
+    assert!(!head_of("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").close);
+    assert!(
+        !head_of("HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nContent-Length: 2\r\n\r\n").close
+    );
+}
+
+#[test]
+fn connection_close_is_recognised_in_any_case_and_token_list() {
+    for v in [
+        "close",
+        "Close",
+        "CLOSE",
+        " close ",
+        "keep-alive, close",
+        "Upgrade,close",
+    ] {
+        let raw = format!("HTTP/1.1 200 OK\r\nConnection: {v}\r\nContent-Length: 0\r\n\r\n");
+        assert!(head_of(&raw).close, "{v:?}");
+    }
+    let raw = "HTTP/1.1 200 OK\r\nconnection: close\r\nContent-Length: 0\r\n\r\n";
+    assert!(head_of(raw).close, "header name is case-insensitive");
+    // A token that merely contains the word is not it.
+    let raw = "HTTP/1.1 200 OK\r\nConnection: closed\r\nContent-Length: 0\r\n\r\n";
+    assert!(!head_of(raw).close);
+}
+
+#[test]
+fn http_1_0_closes() {
+    assert!(head_of("HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n").close);
+}
+
+proptest! {
+    #[test]
+    fn close_flag_never_panics_on_any_connection_value(v in "[ -~]{0,40}") {
+        let raw = format!("HTTP/1.1 200 OK\r\nConnection: {v}\r\nContent-Length: 0\r\n\r\n");
+        let _ = parse_head(raw.as_bytes());
+    }
+}
+
+#[test]
+fn a_response_is_reusable_only_when_exactly_framed_and_kept_open() {
+    let ok = head_of("HTTP/1.1 200 OK\r\nContent-Length: 49\r\n\r\n");
+    assert!(ok.reusable_after(49));
+    assert!(!ok.reusable_after(48), "body still in flight");
+    assert!(!ok.reusable_after(50), "bytes past the body");
+    assert!(!ok.reusable_after(0));
+    let unframed = head_of("HTTP/1.1 200 OK\r\n\r\n");
+    assert!(!unframed.reusable_after(0), "no length: only EOF ends it");
+    let closing = head_of("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n");
+    assert!(!closing.reusable_after(2));
+    let old = head_of("HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\n");
+    assert!(!old.reusable_after(2));
+    let empty = head_of("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+    assert!(empty.reusable_after(0));
+}
+
+proptest! {
+    #[test]
+    fn reusable_iff_open_and_exact(len in 0u32..2000, got in 0usize..2100, close in any::<bool>()) {
+        let c = if close { "Connection: close\r\n" } else { "" };
+        let raw = format!("HTTP/1.1 200 OK\r\n{c}Content-Length: {len}\r\n\r\n");
+        let h = head_of(&raw);
+        prop_assert_eq!(h.reusable_after(got), !close && got == len as usize);
+    }
+}

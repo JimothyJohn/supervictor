@@ -1,12 +1,10 @@
 target/
 *.lock
-cloud/.aws-sam/
 certs/
 *.pem
 *.key
 *.crt
 .env*
-docs/_build/
+.aws-sam/
 __pycache__/
-*.pyc
 .pytest_cache/

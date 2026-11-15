@@ -9,13 +9,21 @@
 
 #[cfg(all(
     feature = "embedded",
-    not(any(feature = "chip-esp32", feature = "chip-esp32c3"))
+    not(any(
+        feature = "chip-esp32",
+        feature = "chip-esp32c3",
+        feature = "chip-esp32s3"
+    ))
 ))]
 compile_error!(
-    "embedded builds need a chip: --features chip-esp32 (target xtensa-esp32-none-elf) or chip-esp32c3 (target riscv32imc-unknown-none-elf); `ethernet` implies chip-esp32"
+    "embedded builds need a chip: --features chip-esp32 (target xtensa-esp32-none-elf), chip-esp32c3 (target riscv32imc-unknown-none-elf) or chip-esp32s3 (target xtensa-esp32s3-none-elf); `ethernet` implies chip-esp32"
 );
-#[cfg(all(feature = "chip-esp32", feature = "chip-esp32c3"))]
-compile_error!("chip-esp32 and chip-esp32c3 are mutually exclusive — pick one");
+#[cfg(any(
+    all(feature = "chip-esp32", feature = "chip-esp32c3"),
+    all(feature = "chip-esp32", feature = "chip-esp32s3"),
+    all(feature = "chip-esp32c3", feature = "chip-esp32s3")
+))]
+compile_error!("chip-esp32, chip-esp32c3 and chip-esp32s3 are mutually exclusive — pick one");
 
 /// Board support (Olimex ESP32-POE-ISO / POE2 pin maps, APLL math, RMII bring-up).
 pub mod board;
@@ -28,6 +36,9 @@ pub mod network;
 /// Over-the-air update: manifest, download framing, slot installer, boot
 /// policy (host-testable core) and the flash/bootloader glue (embedded).
 pub mod ota;
+/// Runtime settings (network, endpoint, device id) in the `nvs` partition:
+/// the record format (host-testable) and the flash glue (embedded).
+pub mod settings;
 
 /// Embassy async application tasks (WiFi, networking, main loop).
 #[cfg(feature = "embedded")]

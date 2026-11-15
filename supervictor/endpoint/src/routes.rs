@@ -85,7 +85,14 @@ pub fn router_with_firmware(
     };
 
     // Fleet health API: admin mTLS only — it enumerates the device inventory.
+    // The device API sits behind the same gate: every board carries a
+    // fleet-CA certificate, so a valid client certificate alone must not
+    // register a device (it could bind an untaken id to its own DN), list
+    // the inventory or read another device's uplinks.
     let fleet_api = Router::new()
+        .route(wire::DEVICES, get(list_devices).post(register_device))
+        .route(wire::DEVICE_PATTERN, get(get_device))
+        .route(wire::DEVICE_UPLINKS_PATTERN, get(get_device_uplinks))
         .route(wire::FLEET, get(fleet_status))
         .route(wire::FLEET_SUMMARY, get(fleet_summary))
         .route(wire::FLEET_HISTORY, get(fleet_history))
@@ -97,6 +104,8 @@ pub fn router_with_firmware(
         // OTA: which version a device should run, and the images it may
         // pull. Uploads are whole images, so the body limit is one slot.
         .route(wire::DEVICE_DESIRED_FW_PATTERN, put(set_desired_fw))
+        // Pushed settings: the uplink interval the device should run.
+        .route(wire::DEVICE_CONFIG_PATTERN, put(set_device_config))
         .route(
             wire::DEVICE_FIRMWARE_PATTERN,
             put(put_firmware)
@@ -122,12 +131,10 @@ pub fn router_with_firmware(
         )
         .with_state(state.clone());
 
+    // What a device certificate (or, for health, anyone) may reach.
     let router = Router::new()
         .route(wire::HEALTH, get(health))
         .route(wire::ROOT, get(hello).post(uplink))
-        .route(wire::DEVICES, get(list_devices).post(register_device))
-        .route(wire::DEVICE_PATTERN, get(get_device))
-        .route(wire::DEVICE_UPLINKS_PATTERN, get(get_device_uplinks))
         .with_state(state.clone())
         .merge(fleet_api)
         .merge(firmware_api);
@@ -219,6 +226,25 @@ async fn set_device_style(
         line_style = ?resp.line_style,
         marker = ?resp.marker,
         "device style set"
+    );
+    Ok(Json(resp))
+}
+
+async fn set_device_config(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    body: String,
+) -> Result<Json<DeviceResponse>, crate::error::AppError> {
+    let body_opt = if body.is_empty() {
+        None
+    } else {
+        Some(body.as_str())
+    };
+    let resp = handlers::handle_set_device_config(&device_id, body_opt, state.store.as_ref())?;
+    tracing::info!(
+        device_id = %crate::middleware::sanitize_for_log(&device_id),
+        uplink_interval_s = ?resp.uplink_interval_s,
+        "device config set"
     );
     Ok(Json(resp))
 }
@@ -513,12 +539,18 @@ async fn uplink(
     } else {
         Some(body.as_str())
     };
-    let ingested = handlers::ingest_uplink(
+    let mut ingested = handlers::ingest_uplink(
         body_opt,
         subject,
         Some(state.store.as_ref()),
         state.require_registration,
     )?;
+    // The pushed settings block: every registered device gets one, with
+    // its effective threshold judged against the fleet default here.
+    ingested.response.config = ingested
+        .device
+        .as_ref()
+        .map(|d| d.config(state.power_threshold_ma));
 
     // Push to dashboard SSE subscribers; never blocks, no-op with no listeners.
     #[cfg(feature = "ui")]

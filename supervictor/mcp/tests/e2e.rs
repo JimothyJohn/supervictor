@@ -108,6 +108,7 @@ fn seed(store: &dyn DeviceStore) {
                 min_on_s: None,
                 style: DeviceStyle::default(),
                 desired_fw: None,
+                uplink_interval_s: None,
             })
             .unwrap();
     }
@@ -478,11 +479,12 @@ async fn device_identity_is_not_an_admin() {
         assert_eq!(r["isError"], true, "{tool}: {r}");
         assert!(text(&r).contains("OU=admin"), "{tool}: {r}");
     }
-    // /devices/{id} is a device route, but the health row needs /fleet.
+    // The device API is admin-only too: the record itself is refused.
     let r = mcp
         .call("supervictor_device_status", json!({"device_id": "dev-1"}))
         .await;
     assert_eq!(r["isError"], true, "{r}");
+    assert!(text(&r).contains("OU=admin"), "{r}");
     mcp.finish().await;
 }
 

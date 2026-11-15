@@ -30,14 +30,20 @@ pub enum ChipId {
     Esp32,
     /// ESP32-C3 (riscv devkits).
     Esp32C3,
+    /// ESP32-S3 (Xtensa LX7; the XIAO ESP32S3 Sense).
+    Esp32S3,
 }
 
 impl ChipId {
+    /// Every chip the fleet runs.
+    pub const ALL: [ChipId; 3] = [ChipId::Esp32, ChipId::Esp32C3, ChipId::Esp32S3];
+
     /// Wire value in the image header (`esp_chip_id_t`).
     pub const fn raw(self) -> u16 {
         match self {
             ChipId::Esp32 => 0x0000,
             ChipId::Esp32C3 => 0x0005,
+            ChipId::Esp32S3 => 0x0009,
         }
     }
 
@@ -46,15 +52,17 @@ impl ChipId {
         match raw {
             0x0000 => Some(ChipId::Esp32),
             0x0005 => Some(ChipId::Esp32C3),
+            0x0009 => Some(ChipId::Esp32S3),
             _ => None,
         }
     }
 
-    /// Manifest / API token (`esp32`, `esp32c3`).
+    /// Manifest / API token (`esp32`, `esp32c3`, `esp32s3`).
     pub const fn label(self) -> &'static str {
         match self {
             ChipId::Esp32 => "esp32",
             ChipId::Esp32C3 => "esp32c3",
+            ChipId::Esp32S3 => "esp32s3",
         }
     }
 
@@ -63,6 +71,7 @@ impl ChipId {
         match token {
             "esp32" => Some(ChipId::Esp32),
             "esp32c3" => Some(ChipId::Esp32C3),
+            "esp32s3" => Some(ChipId::Esp32S3),
             _ => None,
         }
     }
@@ -274,10 +283,19 @@ mod tests {
 
     #[test]
     fn rejects_chips_the_fleet_does_not_run() {
-        // ESP32-S3 is 0x0009: a real chip, not ours.
+        // ESP32-S2 (0x0002) and ESP32-C6 (0x000D) are real chips, not ours.
+        // (The S3, 0x0009, joined the fleet 2026-11-03 with the XIAO.)
         assert_eq!(
-            ImageHeader::parse(&header(0x0009, 3, 1)),
-            Err(ImageError::UnknownChip(9))
+            ImageHeader::parse(&header(0x0002, 3, 1)),
+            Err(ImageError::UnknownChip(2))
+        );
+        assert_eq!(
+            ImageHeader::parse(&header(0x000D, 3, 1)),
+            Err(ImageError::UnknownChip(13))
+        );
+        assert_eq!(
+            ImageHeader::parse(&header(0x0009, 3, 1)).unwrap().chip,
+            ChipId::Esp32S3
         );
         assert_eq!(
             ImageHeader::parse(&header(5, 3, 0)).unwrap().chip,
@@ -290,12 +308,14 @@ mod tests {
 
     #[test]
     fn chip_tokens_round_trip() {
-        for chip in [ChipId::Esp32, ChipId::Esp32C3] {
+        for chip in ChipId::ALL {
             assert_eq!(ChipId::parse(chip.label()), Some(chip));
             assert_eq!(ChipId::from_raw(chip.raw()), Some(chip));
         }
-        assert_eq!(ChipId::parse("esp32s3"), None);
+        assert_eq!(ChipId::parse("esp32s3"), Some(ChipId::Esp32S3));
+        assert_eq!(ChipId::parse("esp32s2"), None);
         assert_eq!(ChipId::parse("ESP32"), None);
+        assert_eq!(ChipId::parse("ESP32S3"), None);
     }
 
     #[test]

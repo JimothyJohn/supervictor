@@ -152,6 +152,14 @@ pub trait DeviceStore: Send + Sync {
         device_id: &str,
         desired_fw: Option<&str>,
     ) -> Result<DeviceRecord, AppError>;
+    /// Set (`Some`) or clear (`None`, back to the firmware default) the
+    /// uplink interval pushed to a device; returns the updated record,
+    /// `DeviceNotFound` for an unknown id. The caller validates the range.
+    fn set_uplink_interval(
+        &self,
+        device_id: &str,
+        uplink_interval_s: Option<u32>,
+    ) -> Result<DeviceRecord, AppError>;
     /// Replace a device's chart style (every part; unset parts clear);
     /// returns the updated record, `DeviceNotFound` for an unknown id.
     fn set_device_style(

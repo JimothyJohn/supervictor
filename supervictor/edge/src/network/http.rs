@@ -10,8 +10,8 @@ fn push<const N: usize>(buf: &mut HString<N>, s: &str) -> Result<(), HttpError> 
 
 /// Build an HTTP/1.1 GET request for the given host and optional path.
 ///
-/// Same dialect as [`post_request`]: HTTP/1.1 + `Connection: close`, since
-/// the device is a one-shot client that reads to EOF. Capacity is 192 — the
+/// HTTP/1.1 + `Connection: close`: a GET is a one-shot read to EOF (the
+/// uplink POST keeps its session; see [`post_request`]). Capacity is 192 — the
 /// fixed headers are ~100 bytes, leaving room for real hostnames like
 /// `staging.supervictor.advin.io` plus a path.
 pub fn get_request(host: &str, path: Option<&str>) -> Result<HString<192>, HttpError> {
@@ -56,9 +56,11 @@ where
     push(&mut request, host)?;
     push(&mut request, "\r\nContent-Type: application/json\r\n")?;
 
-    // One-shot client: tell HTTP/1.1 servers to close instead of keeping
-    // the connection alive while the device blocks on read-to-EOF.
-    push(&mut request, "Connection: close\r\n")?;
+    // Keep the session: the uplink loop sends the next POST on the same TLS
+    // connection and reads each response by Content-Length, not to EOF
+    // (`ResponseHead::reusable_after` decides). It was `close` until
+    // 2026-11, which made every uplink pay a full handshake.
+    push(&mut request, "Connection: keep-alive\r\n")?;
 
     // A payload that doesn't fit the buffer is an error, not an empty POST —
     // silently sending Content-Length: 0 would register a bogus uplink.
@@ -241,14 +243,19 @@ mod tests {
         assert!(bad_body.starts_with('"'));
     }
 
-    /// GET and POST speak the same dialect: HTTP/1.1 + Connection: close.
+    /// A GET is one-shot (HTTP/1.1 + Connection: close); the uplink POST
+    /// keeps its session (Connection: keep-alive).
     #[test]
-    fn test_get_request_dialect_matches_post() {
+    fn test_get_request_closes_and_post_keeps_alive() {
         let request = get_request("test.host.com", Some("/hello")).unwrap();
         assert!(request.starts_with("GET /hello HTTP/1.1\r\n"));
         assert!(request.contains("Host: test.host.com\r\n"));
         assert!(request.contains("Connection: close\r\n"));
         assert!(request.ends_with("\r\n\r\n"));
+        let pre: HString<64> = "x".try_into().unwrap();
+        let post = post_request("test.host.com", &pre, Some("/")).unwrap();
+        assert!(post.contains("Connection: keep-alive\r\n"), "{post}");
+        assert!(!post.contains("Connection: close"), "{post}");
     }
 
     /// Production-sized hostname + path must fit the GET buffer.

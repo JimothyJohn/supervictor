@@ -1319,6 +1319,10 @@ pub struct DeviceHistory<'a> {
     pub threshold_ma: i64,
     /// The fleet default, shown beside the override form.
     pub fleet_threshold_ma: i64,
+    /// Version of the settings block pushed to this device now.
+    pub config_version: u32,
+    /// Whether the device has yet to echo that version.
+    pub config_pending: bool,
 }
 
 /// `GET /ui` — fleet table plus the register form; on a phone, the verdict
@@ -1473,7 +1477,16 @@ pub fn device_page(
                     @if let Some(m) = device.min_on_s { " " span .current-inline.min-on { "producing after " (m) " s above it" } }
                 }
                 dt { "power threshold" }
-                dd { (threshold_form(device, history, csrf)) }
+                dd {
+                    (threshold_form(device, history, csrf))
+                    " "
+                    @if history.config_pending {
+                        span .badge.config-pending title="the device has not yet echoed this settings version; it applies them on its next uplink" { "pending" }
+                    } @else {
+                        span .badge.config-applied title="the device runs these settings" { "applied" }
+                    }
+                    " " span .muted { "v" (history.config_version) " on the device" }
+                }
                 dt { "chart style" }
                 dd { (style_form(device, &history.style, csrf)) }
                 dt { "owner" }
@@ -1521,16 +1534,27 @@ pub fn device_page(
 }
 
 /// Revoke/reactivate toggle for a device (CSRF-protected form post).
-/// Set or clear the device's power judgement: the threshold override and
-/// the minimum on-time. Each number box is prefilled with the stored value
-/// (empty when the fleet default / the last reading alone applies);
-/// submitting a box empty clears that part. Both are submitted together.
+/// Set or clear the device's power judgement — the threshold override and
+/// the minimum on-time — and the uplink interval pushed to it. Each number
+/// box is prefilled with the stored value (empty when the fleet default /
+/// the last reading alone / the firmware default applies); submitting a
+/// box empty clears that part. All three are submitted together.
 fn threshold_form(device: &DeviceRecord, history: &DeviceHistory<'_>, csrf: &str) -> Markup {
     let own = device.power_threshold_ma.map(|t| t.to_string());
     let own_min_on = device.min_on_s.map(|m| m.to_string());
+    let own_interval = device.uplink_interval_s.map(|i| i.to_string());
     html! {
         form .inline method="post" action={ "/ui/devices/" (device.device_id) "/threshold" } {
             input type="hidden" name="csrf" value=(csrf);
+            label title="seconds between uplinks, pushed to the device in its next uplink response (empty = the firmware default)" {
+                "every "
+                input type="number" name="uplink_interval_s" step="1"
+                    min=(supervictor_common::config::UPLINK_INTERVAL_MIN_S)
+                    max=(supervictor_common::config::UPLINK_INTERVAL_MAX_S) size="5"
+                    value=[own_interval.as_deref()]
+                    placeholder="fw";
+                " s, "
+            }
             label {
                 "on ≥ "
                 input type="number" name="threshold_ma" step="1" size="8"

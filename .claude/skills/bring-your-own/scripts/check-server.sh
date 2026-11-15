@@ -128,6 +128,17 @@ if [ -f "$ADM_PEM" ] && [ -f "$ADM_KEY" ]; then
             fail "isolation: a device certificate with a forged admin header got $code — the proxy must strip inbound X-SSL-Client-Subject-DN"
         fi
     fi
+    if [ -f "$DEV_PEM" ]; then
+        # The device API is admin-only: a board's certificate must not list
+        # the inventory (an endpoint older than 2026-11-15 answers 200).
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 --cacert "$CA_PEM" \
+            --cert "$DEV_PEM" --key "$DEV_KEY" "https://$HOST:$PORT/devices" || true)"
+        if [ "$code" = "403" ]; then
+            pass "isolation: a device certificate cannot list devices (403)"
+        else
+            fail "isolation: a device certificate got $code from GET /devices — upgrade the endpoint (the device API is admin-only)"
+        fi
+    fi
     body="$(curl -s --max-time 10 --cacert "$CA_PEM" --cert "$ADM_PEM" --key "$ADM_KEY" \
         "https://$HOST:$PORT/devices" || true)"
     if printf '%s' "$body" | grep -q "\"device_id\":\"$DEVICE\""; then

@@ -91,6 +91,10 @@ pub struct Ingested {
     pub response: UplinkResponse,
     /// The stored row: device id, receive time, payload minus `id`.
     pub record: UplinkRecord,
+    /// The device's record when it is registered, for the caller to add
+    /// what depends on fleet-wide settings (the pushed `config` block
+    /// needs the fleet threshold, which lives in the router state).
+    pub device: Option<DeviceRecord>,
 }
 
 /// Parse and persist a device uplink message.
@@ -130,6 +134,7 @@ pub fn ingest_uplink(
     validate::check_levels(&uplink.levels, uplink.levels_ms)?;
 
     let mut desired_fw = None;
+    let mut device_record = None;
     if let Some(s) = store {
         let device = s.get_device(&uplink.id)?;
         authorize_uplink(
@@ -138,7 +143,8 @@ pub fn ingest_uplink(
             client_subject.as_deref(),
             require_registration,
         )?;
-        desired_fw = device.and_then(|d| d.desired_fw);
+        desired_fw = device.as_ref().and_then(|d| d.desired_fw.clone());
+        device_record = device;
     }
 
     // Persist every field the device sent (health metadata, sensor
@@ -169,8 +175,10 @@ pub fn ingest_uplink(
             current: uplink.current,
             client_subject,
             desired_fw,
+            config: None,
         },
         record,
+        device: device_record,
     })
 }
 
@@ -215,6 +223,40 @@ pub fn handle_set_desired_fw(
         }
     }
     let saved = store.set_desired_fw(device_id, req.desired_fw.as_deref())?;
+    Ok(DeviceResponse::from(saved))
+}
+
+/// Set or clear the uplink interval pushed to a device from a JSON body
+/// (`{"uplink_interval_s": 10}`; `{}`, `null` or an empty body goes back
+/// to the firmware default). Range-checked against `common::config`;
+/// unknown keys are rejected, never read as a clear.
+pub fn handle_set_device_config(
+    device_id: &str,
+    raw_body: Option<&str>,
+    store: &dyn DeviceStore,
+) -> Result<DeviceResponse, AppError> {
+    validate::check_device_id(fields::DEVICE_ID, device_id)?;
+    let invalid = |detail: String| AppError::InvalidPayload {
+        detail,
+        structured: None,
+    };
+    let req: supervictor_common::models::DeviceConfigRequest =
+        match raw_body.map(str::trim).filter(|b| !b.is_empty()) {
+            None => Default::default(),
+            Some(body) => {
+                let value: serde_json::Value =
+                    serde_json::from_str(body).map_err(|e| invalid(e.to_string()))?;
+                match value {
+                    serde_json::Value::Null => Default::default(),
+                    serde_json::Value::Object(_) => {
+                        serde_json::from_value(value).map_err(|e| invalid(e.to_string()))?
+                    }
+                    _ => return Err(invalid("body must be a JSON object".into())),
+                }
+            }
+        };
+    validate::check_uplink_interval_s(req.uplink_interval_s)?;
+    let saved = store.set_uplink_interval(device_id, req.uplink_interval_s)?;
     Ok(DeviceResponse::from(saved))
 }
 
@@ -293,6 +335,7 @@ pub fn handle_register_device(
         min_on_s: req.min_on_s.filter(|s| *s > 0),
         style,
         desired_fw: None,
+        uplink_interval_s: None,
     };
 
     let saved = store.put_device(record)?;

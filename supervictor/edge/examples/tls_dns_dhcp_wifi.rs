@@ -137,10 +137,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
         net_seed,
     );
 
-    spawner
-        .spawn(connection(controller, env!("SSID"), env!("PASSWORD")))
-        .ok();
-    spawner.spawn(net_task(runner)).ok();
+    spawner.spawn(connection(controller, env!("SSID"), env!("PASSWORD")).unwrap());
+    spawner.spawn(net_task(runner).unwrap());
 
     loop {
         Timer::after(Duration::from_millis(2000)).await;

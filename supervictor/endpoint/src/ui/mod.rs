@@ -115,8 +115,8 @@ fn ensure_csrf(headers: &HeaderMap) -> (String, Option<[(header::HeaderName, Str
         Some(token) => (token, None),
         None => {
             let token = csrf_token();
-            // No `Secure` attribute: TLS is terminated by Caddy/API GW, and
-            // SAM-local dev is plain http. SameSite=Strict is the backstop.
+            // No `Secure` attribute: TLS may be terminated by a proxy (Caddy)
+            // and local dev can run plain http. SameSite=Strict is the backstop.
             let cookie = format!("{CSRF_COOKIE}={token}; Path=/ui; SameSite=Strict; HttpOnly");
             (token, Some([(header::SET_COOKIE, cookie)]))
         }
@@ -297,9 +297,10 @@ async fn device_detail(
     let health = fleet::snapshot(state.store.as_ref(), now, state.power_threshold_ma)?
         .into_iter()
         .find(|d| d.device_id == device_id);
-    let (power, current) = health
-        .map(|h| (h.power, h.current))
-        .unwrap_or((fleet::PowerState::Unknown, None));
+    let config_version = device.config(state.power_threshold_ma).version;
+    let (power, current, config_pending) = health
+        .map(|h| (h.power, h.current, h.config_pending))
+        .unwrap_or((fleet::PowerState::Unknown, None, true));
     let uplinks = state.store.get_uplinks(&device_id, 20)?;
     let (token, set_cookie) = ensure_csrf(&headers);
     let page = views::device_page(
@@ -313,6 +314,8 @@ async fn device_detail(
             current,
             threshold_ma: device.effective_threshold_ma(state.power_threshold_ma),
             fleet_threshold_ma: state.power_threshold_ma,
+            config_version,
+            config_pending,
         },
         &uplinks,
         &token,
@@ -410,6 +413,9 @@ struct ThresholdForm {
     /// Minimum on-time in seconds; empty or 0 judges the last reading alone.
     #[serde(default)]
     min_on_s: String,
+    /// Uplink interval in seconds pushed to the device; empty = firmware default.
+    #[serde(default)]
+    uplink_interval_s: String,
 }
 
 async fn set_threshold(
@@ -439,16 +445,30 @@ async fn set_threshold(
             structured: None,
         })?)
     };
-    // Same validation and store path as the JSON API.
+    let raw = form.uplink_interval_s.trim();
+    let uplink_interval_s = if raw.is_empty() {
+        None
+    } else {
+        Some(raw.parse::<u32>().map_err(|_| AppError::InvalidPayload {
+            detail: "uplink_interval_s must be a whole number of seconds, or empty for the firmware default".into(),
+            structured: None,
+        })?)
+    };
+    // Same validation and store path as the JSON API. The interval is
+    // validated first so a bad one leaves the threshold untouched too.
+    crate::validate::check_uplink_interval_s(uplink_interval_s)?;
     let body =
         serde_json::json!({ "power_threshold_ma": threshold, "min_on_s": min_on_s }).to_string();
     crate::handlers::handle_set_device_threshold(&device_id, Some(&body), state.store.as_ref())?;
+    let body = serde_json::json!({ "uplink_interval_s": uplink_interval_s }).to_string();
+    crate::handlers::handle_set_device_config(&device_id, Some(&body), state.store.as_ref())?;
     tracing::info!(
         admin = %sanitize_for_log(&subject_of(&headers)),
         device_id = %sanitize_for_log(&device_id),
         action = "threshold",
         threshold_ma = ?threshold,
         min_on_s = ?min_on_s,
+        uplink_interval_s = ?uplink_interval_s,
         "fleet action"
     );
     Ok(Redirect::to(&format!("/ui/devices/{device_id}")).into_response())

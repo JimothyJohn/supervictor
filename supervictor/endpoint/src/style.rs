@@ -231,6 +231,7 @@ mod tests {
                 ..Default::default()
             },
             desired_fw: None,
+            uplink_interval_s: None,
         }
     }
 

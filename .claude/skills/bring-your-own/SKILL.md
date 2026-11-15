@@ -112,7 +112,8 @@ Pick one path from `references/board.md`:
 |---|---|
 | Olimex ESP32-POE-ISO, ESP32-POE2, ESP32-C3 devkit | supported: `HOST=<HOST>` in `.env.dev`, then `QS_HARDWARE=flash ./Quickstart` or the `cargo run` line for the board |
 | another classic-ESP32 board with a LAN8720/LAN8710 PHY over RMII | a new `edge/src/board/<name>.rs` + a `board-<name>` feature; a few constants, no driver work |
-| another ESP32 family chip over WiFi (S3, C6, …) | not wired today; it means plumbing a `chip-<x>` feature through every esp-* dependency — scope it honestly |
+| an ESP32-S3 over WiFi | wired: `--features wifi,chip-esp32s3 --target xtensa-esp32s3-none-elf` (`references/board.md`) |
+| another ESP32 family chip over WiFi (C6, …) | not wired today; it means plumbing a `chip-<x>` feature through every esp-* dependency — scope it honestly |
 | Raspberry Pi or any Linux/macOS machine | the desktop client binary: same certs, same wire, runtime env vars, no toolchain on the device |
 | anything else that can do TLS 1.2+ with a client certificate | speak the wire contract directly — ten lines in any language; prove it with curl first |
 

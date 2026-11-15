@@ -48,6 +48,27 @@ pub fn check_text(field: &str, value: &str, max_len: usize) -> Result<(), AppErr
 /// A minimum on-time must fit the snapshot's history read: at most
 /// [`crate::fleet::MAX_MIN_ON_S`] seconds. `None` and 0 are "judge the last
 /// reading alone".
+/// An uplink interval must be within what a device will run
+/// (`common::config`); the endpoint refuses rather than clamps, so what
+/// the dashboard shows is what the device does.
+pub fn check_uplink_interval_s(value: Option<u32>) -> Result<(), AppError> {
+    use supervictor_common::config::{UPLINK_INTERVAL_MAX_S, UPLINK_INTERVAL_MIN_S};
+    match value {
+        Some(s) if !(UPLINK_INTERVAL_MIN_S..=UPLINK_INTERVAL_MAX_S).contains(&s) => {
+            Err(AppError::InvalidPayload {
+                detail: format!(
+                    "{} must be between {} and {} seconds",
+                    fields::UPLINK_INTERVAL_SETTING_S,
+                    UPLINK_INTERVAL_MIN_S,
+                    UPLINK_INTERVAL_MAX_S
+                ),
+                structured: None,
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
 pub fn check_min_on_s(value: Option<u32>) -> Result<(), AppError> {
     match value {
         Some(s) if s > crate::fleet::MAX_MIN_ON_S => Err(AppError::InvalidPayload {

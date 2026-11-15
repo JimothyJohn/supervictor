@@ -2,8 +2,9 @@
 
 use embassy_time::Duration;
 
-/// Remote API hostname, set at compile time.
-pub const HOST: &str = env!("HOST");
+// HOST, SSID, PASSWORD and DEVICE_NAME are no longer constants: the board
+// reads them from the `nvs` partition at boot (`settings`), and the values
+// the image was built with only seed an empty partition.
 // CERT_PATH / CA_PATH have no runtime consts: network/tls.rs consumes them
 // directly via env! inside include_str! at compile time.
 
@@ -39,6 +40,11 @@ pub const DRAM2_HEAP_SIZE: usize = 96 * 1024;
 /// The C3's RAM is one 400 KB segment, so the boot stack has ample leftover
 /// at this size (hardware-verified pre-Xtensa-retarget at 144 KB).
 #[cfg(feature = "chip-esp32c3")]
+pub const HEAP_SIZE: usize = 144 * 1024;
+/// Total heap allocation in bytes for the ESP32-S3 allocator. The S3 has
+/// 512 KB of internal SRAM, so the C3's figure leaves the boot stack far
+/// more room than the classic ESP32's tight layout; PSRAM is not used.
+#[cfg(feature = "chip-esp32s3")]
 pub const HEAP_SIZE: usize = 144 * 1024;
 
 // --- Network Timing ---
@@ -79,8 +85,15 @@ pub const TCP_RX_BUFFER_SIZE: usize = 4096;
 pub const TLS_RX_BUFFER_SIZE: usize = 4096;
 /// TCP transmit buffer size in bytes.
 pub const TCP_TX_BUFFER_SIZE: usize = 4096;
-/// Timeout for TCP socket operations.
+/// Timeout for TCP socket operations. smoltcp aborts a connection that
+/// receives nothing for this long — including an idle keep-alive session
+/// between uplinks, unless [`SOCKET_KEEPALIVE`] probes keep it fed.
 pub const SOCKET_TIMEOUT: Duration = Duration::from_secs(10);
+/// TCP keep-alive probe interval on the uplink session. Must be well under
+/// [`SOCKET_TIMEOUT`]: the probe's ACK is what keeps an idle session (a 10 s
+/// uplink interval waits up to 12 s with jitter) from timing itself out.
+pub const SOCKET_KEEPALIVE: Duration = Duration::from_secs(4);
+const _: () = assert!(SOCKET_KEEPALIVE.as_millis() * 2 < SOCKET_TIMEOUT.as_millis());
 
 // --- TLS ---
 /// TLS port used for the remote API endpoint.
@@ -135,8 +148,8 @@ const fn parse_env_u32(v: Option<&str>, default: u32) -> u32 {
 pub const UPLINK_INTERVAL_S: u32 = parse_env_u32(option_env!("UPLINK_INTERVAL_S"), 5);
 const _: () = assert!(UPLINK_INTERVAL_S > 0, "UPLINK_INTERVAL_S must be >= 1");
 
-/// Delay between iterations of the main uplink loop on success.
-pub const MAIN_LOOP_DELAY: Duration = Duration::from_secs(UPLINK_INTERVAL_S as u64);
+// The loop delay itself is a runtime value: `UPLINK_INTERVAL_S` unless the
+// endpoint pushed another interval (`settings::Settings::effective_interval_s`).
 /// Samples per uplink interval, shipped as an 8-bit `levels` burst (one
 /// byte per register per sample; `models::uplink::LEVELS_SAMPLES_MAX`
 /// caps it). 50 over the default 5 s interval = a sample every 100 ms

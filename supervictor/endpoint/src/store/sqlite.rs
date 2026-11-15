@@ -60,6 +60,7 @@ impl SqliteDeviceStore {
             ("line_style", "line_style TEXT"),
             ("marker", "marker TEXT"),
             ("desired_fw", "desired_fw TEXT"),
+            ("uplink_interval_s", "uplink_interval_s INTEGER"),
         ] {
             let present = conn
                 .prepare("SELECT 1 FROM pragma_table_info('devices') WHERE name = ?1")
@@ -75,7 +76,7 @@ impl SqliteDeviceStore {
 
     /// Column list shared by every device SELECT, in `row_to_device` order.
     const DEVICE_COLUMNS: &'static str =
-        "device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker, desired_fw, min_on_s";
+        "device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker, desired_fw, min_on_s, uplink_interval_s";
 
     fn row_to_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRecord> {
         Ok(DeviceRecord {
@@ -106,6 +107,11 @@ impl SqliteDeviceStore {
                 .get::<_, Option<i64>>(10)?
                 .and_then(|v| u32::try_from(v).ok())
                 .filter(|v| *v > 0),
+            // Same shape: INTEGER, out-of-range or 0 reads as the default.
+            uplink_interval_s: row
+                .get::<_, Option<i64>>(11)?
+                .and_then(|v| u32::try_from(v).ok())
+                .filter(|v| *v > 0),
         })
     }
 }
@@ -117,7 +123,7 @@ impl DeviceStore for SqliteDeviceStore {
             .lock()
             .map_err(|_| AppError::Store(StoreError::Poisoned))?;
         conn.execute(
-            "INSERT INTO devices (device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker, desired_fw, min_on_s) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO devices (device_id, owner_id, subject_dn, status, created_at, power_threshold_ma, color, line_style, marker, desired_fw, min_on_s, uplink_interval_s) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 record.device_id,
                 record.owner_id,
@@ -130,6 +136,7 @@ impl DeviceStore for SqliteDeviceStore {
                 record.style.marker.map(Marker::label),
                 record.desired_fw,
                 record.min_on_s,
+                record.uplink_interval_s,
             ],
         )
         .map_err(|e| match e {
@@ -267,6 +274,33 @@ impl DeviceStore for SqliteDeviceStore {
                     params![device_id, desired_fw],
                 )
                 .map_err(|e| AppError::Store(StoreError::io("set_desired_fw", e)))?;
+            if updated == 0 {
+                return Err(AppError::DeviceNotFound {
+                    device_id: device_id.to_string(),
+                });
+            }
+        }
+        self.get_device(device_id)?.ok_or(AppError::DeviceNotFound {
+            device_id: device_id.to_string(),
+        })
+    }
+
+    fn set_uplink_interval(
+        &self,
+        device_id: &str,
+        uplink_interval_s: Option<u32>,
+    ) -> Result<DeviceRecord, AppError> {
+        {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|_| AppError::Store(StoreError::Poisoned))?;
+            let updated = conn
+                .execute(
+                    "UPDATE devices SET uplink_interval_s = ?2 WHERE device_id = ?1",
+                    params![device_id, uplink_interval_s],
+                )
+                .map_err(|e| AppError::Store(StoreError::io("set_uplink_interval", e)))?;
             if updated == 0 {
                 return Err(AppError::DeviceNotFound {
                     device_id: device_id.to_string(),

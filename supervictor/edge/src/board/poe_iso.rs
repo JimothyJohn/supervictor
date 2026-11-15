@@ -188,7 +188,7 @@ pub(super) mod bringup {
             .modify(|_, w| w.plla_force_pd().clear_bit().plla_force_pu().set_bit());
 
         // Revision-0 silicon can't use the fractional SDM stages.
-        let is_rev0 = esp_hal::efuse::Efuse::chip_revision() < 100;
+        let is_rev0 = esp_hal::efuse::chip_revision().combined() < 100;
         let sdm_stop_val_2 = if is_rev0 {
             sdm0 = 0;
             sdm1 = 0;

@@ -10,6 +10,12 @@ runner = "espflash flash --monitor --partition-table partitions.csv"
 [target.riscv32imc-unknown-none-elf]
 runner = "espflash flash --monitor --partition-table partitions.csv"
 
+# ESP32-S3 (XIAO ESP32S3 Sense): --features wifi,chip-esp32s3
+#   --target xtensa-esp32s3-none-elf. Same esp toolchain (espup installs
+#   the esp32s3 target with --targets esp32,esp32s3).
+[target.xtensa-esp32s3-none-elf]
+runner = "espflash flash --monitor --partition-table partitions.csv"
+
 # The esp toolchain ships prebuilt std only for the host; xtensa targets are
 # built from the bundled rust-src. ([unstable] works because the esp channel
 # cargo is nightly-enabled.)

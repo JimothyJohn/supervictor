@@ -18,8 +18,7 @@ use embassy_time::{Instant, Timer};
 use esp_hal::peripherals::WIFI;
 use esp_println::println;
 use esp_radio::esp_now::{EspNow, EspNowError, EspNowReceiver, EspNowSender, BROADCAST_ADDRESS};
-use esp_radio::wifi::{self, WifiController, WifiMode};
-use esp_radio::Controller;
+use esp_radio::wifi::{self, ControllerConfig, WifiController};
 
 use crate::config::{ESPNOW_BEACON_INTERVAL, ESPNOW_CHANNEL, ESPNOW_REPORT_INTERVAL};
 
@@ -30,12 +29,11 @@ pub const BEACON_MAGIC: &str = "SVB1";
 /// back ESP-NOW. The controller must outlive the program: dropping it
 /// deinitialises the radio under the running tasks.
 pub fn init(
-    radio: &'static Controller<'static>,
     wifi: WIFI<'static>,
 ) -> Result<(WifiController<'static>, EspNow<'static>), EspNowError> {
-    let (mut controller, interfaces) = wifi::new(radio, wifi, wifi::Config::default())?;
-    controller.set_mode(WifiMode::Sta)?;
-    controller.start()?;
+    // ControllerConfig's default initial config is an empty station: the
+    // radio starts in station mode and never tries to associate.
+    let (controller, interfaces) = wifi::new(wifi, ControllerConfig::default())?;
     let esp_now = interfaces.esp_now;
     esp_now.set_channel(ESPNOW_CHANNEL)?;
     println!("ESP-NOW version {:?}", esp_now.version());

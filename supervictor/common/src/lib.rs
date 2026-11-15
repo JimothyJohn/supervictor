@@ -9,6 +9,8 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+/// Pushed device settings: interval bounds and the config-block version.
+pub mod config;
 /// JSON field-name constants shared across device and endpoint.
 pub mod fields;
 /// Firmware image header, slot size and version order (OTA).

@@ -177,7 +177,7 @@ mod tests {
                 ManifestError::Digest,
             ),
             (
-                r#"{"version":"0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32s3"}"#,
+                r#"{"version":"0.2.0","size":100,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","chip":"esp32s2"}"#,
                 ManifestError::Chip,
             ),
             (

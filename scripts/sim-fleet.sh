@@ -9,6 +9,8 @@
 #   ./scripts/sim-fleet.sh logs   [service]        follow container logs
 #
 # Env: FLEET_OWNER (owner_id for new registrations, default nick),
+#      FLEET_ADMIN (admin cert under certs/admins/ that registers and sets
+#      thresholds, default nick),
 #      SIM_SPEED / SIM_INTERVAL_S (passed through to compose),
 #      SIM_SERVICES (space-separated subset of services; default all).
 # Device certs come from the fleet CA (./Quickstart certs device <name>); the
@@ -93,8 +95,11 @@ min_on_for() { # <service> -> seconds or empty (last reading alone)
     esac
 }
 
-register() { # <device>
+register() { # <device> — with the admin cert: the device API is admin-only
     local dir="$REPO_ROOT/certs/devices/$1" subject payload status
+    local admin_dir="$REPO_ROOT/certs/admins/${FLEET_ADMIN:-nick}"
+    [[ -f "$admin_dir/admin.pem" && -f "$admin_dir/admin.key" ]] \
+        || fail "no admin cert at $admin_dir (./Quickstart certs admin <name>, FLEET_ADMIN=<name>)"
     subject="$(openssl x509 -in "$dir/client.pem" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"
     local threshold min_on
     threshold="$(threshold_for "$1")"
@@ -102,11 +107,12 @@ register() { # <device>
     payload="$(printf '{"device_id":"%s","owner_id":"%s","subject_dn":"%s"%s%s}' \
         "$1" "$OWNER" "$subject" "${threshold:+,\"power_threshold_ma\":$threshold}" "${min_on:+,\"min_on_s\":$min_on}")"
     status="$(curl -sS -o /dev/null -w '%{http_code}' "${CA_FLAG[@]}" \
-        --cert "$dir/client.pem" --key "$dir/client.key" \
+        --cert "$admin_dir/admin.pem" --key "$admin_dir/admin.key" \
         -X POST "https://$SIM_HOST/devices" -H 'content-type: application/json' -d "$payload")"
     case "$status" in
     201) log "$1: registered (owner $OWNER${threshold:+, threshold $threshold mA}${min_on:+, min on $min_on s})" ;;
     409) log "$1: already registered" ;;
+    403) fail "$1: registration refused (HTTP 403): $admin_dir is not an admin cert $SIM_HOST trusts" ;;
     *) fail "$1: registration returned HTTP $status" ;;
     esac
 }
@@ -204,5 +210,5 @@ down) cmd_down ;;
 status) cmd_status "${2:-staging}" ;;
 thresholds) cmd_thresholds "${2:-staging}" ;;
 logs) shift; cmd_logs "$@" ;;
-*) sed -n '2,16p' "$0"; exit 1 ;;
+*) sed -n '2,18p' "$0"; exit 1 ;;
 esac

@@ -83,6 +83,7 @@ fn uplink_full_telemetry_roundtrip() {
         seq: Some(u32::MAX),
         uptime_s: Some(86_400),
         interval_s: Some(300),
+        config_version: None,
         heap_free: Some(73_728),
         rssi_dbm: Some(-67),
         temp_c: Some(23.5),
@@ -162,6 +163,7 @@ fn uplink_telemetry_field_names() {
         seq: Some(1),
         uptime_s: Some(1),
         interval_s: Some(1),
+        config_version: None,
         heap_free: Some(1),
         rssi_dbm: Some(-1),
         temp_c: Some(0.0),
@@ -286,6 +288,7 @@ fn device_response_roundtrip() {
         line_style: None,
         marker: None,
         desired_fw: None,
+        uplink_interval_s: None,
     };
     let json = serde_json::to_string(&resp).unwrap();
     let back: DeviceResponse = serde_json::from_str(&json).unwrap();
@@ -306,6 +309,7 @@ fn device_response_omits_none_subject_dn() {
         line_style: None,
         marker: None,
         desired_fw: None,
+        uplink_interval_s: None,
     };
     let json = serde_json::to_string(&resp).unwrap();
     let val: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -329,6 +333,7 @@ fn device_response_includes_some_subject_dn() {
         line_style: None,
         marker: None,
         desired_fw: None,
+        uplink_interval_s: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     assert_eq!(val["subject_dn"], "CN=x");
@@ -348,6 +353,7 @@ fn device_response_field_names() {
         line_style: None,
         marker: None,
         desired_fw: None,
+        uplink_interval_s: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     let obj = val.as_object().unwrap();
@@ -489,6 +495,7 @@ fn register_and_response_carry_style_fields_optionally() {
         line_style: Some(LineStyle::Dashed),
         marker: None,
         desired_fw: None,
+        uplink_interval_s: None,
     };
     let val: serde_json::Value = serde_json::to_value(&resp).unwrap();
     assert_eq!(val["color"], "s2");

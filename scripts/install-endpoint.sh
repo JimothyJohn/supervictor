@@ -6,7 +6,7 @@
 # no Caddy, no toolchain on the host. Run as root on the target machine:
 #
 #   curl -fsSL https://raw.githubusercontent.com/JimothyJohn/supervictor/master/scripts/install-endpoint.sh \
-#     | sudo bash -s -- v0.1.0
+#     | sudo bash -s -- v0.2.0
 #
 #   # or from a tarball already on the box (air-gapped / testing a build):
 #   sudo ./install-endpoint.sh --local supervictor-endpoint-x86_64-unknown-linux-musl.tar.gz

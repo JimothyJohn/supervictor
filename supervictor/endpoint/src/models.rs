@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Re-exported wire types shared between endpoint and CLI.
 pub use supervictor_common::models::{
-    DeviceResponse, DeviceStyle, RegisterDeviceRequest, UplinkMessage,
+    DeviceConfig, DeviceResponse, DeviceStyle, RegisterDeviceRequest, UplinkMessage,
 };
 
 // --- Domain Records (storage layer) ---
@@ -38,12 +38,31 @@ pub struct DeviceRecord {
     /// and echoed to the device in every uplink response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desired_fw: Option<String>,
+    /// Uplink interval (s) pushed to the device; `None` means the firmware's
+    /// compiled default. Set by `PUT /devices/{id}/config`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uplink_interval_s: Option<u32>,
 }
 
 impl DeviceRecord {
     /// The threshold this device is judged against: its own, else the fleet's.
     pub fn effective_threshold_ma(&self, fleet_threshold_ma: i64) -> i64 {
         self.power_threshold_ma.unwrap_or(fleet_threshold_ma)
+    }
+
+    /// The settings block pushed to this device in every uplink response:
+    /// its interval (0 = firmware default) and effective threshold, with
+    /// the version derived from them.
+    pub fn config(&self, fleet_threshold_ma: i64) -> DeviceConfig {
+        let uplink_interval_s = self
+            .uplink_interval_s
+            .unwrap_or(supervictor_common::config::UPLINK_INTERVAL_DEFAULT);
+        let threshold_ma = self.effective_threshold_ma(fleet_threshold_ma);
+        DeviceConfig {
+            version: supervictor_common::config::version(uplink_interval_s, threshold_ma),
+            uplink_interval_s,
+            threshold_ma,
+        }
     }
 
     /// Minimum on-time in seconds (0 when unset), capped at
@@ -94,6 +113,11 @@ pub struct UplinkResponse {
     /// runs and pulls the image if newer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub desired_fw: Option<String>,
+    /// Settings the device should run (interval, threshold), versioned by
+    /// their values; present for every registered device. The device
+    /// applies a block whose version differs from the one it holds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<DeviceConfig>,
 }
 
 /// JSON error response body returned on request failures.
@@ -121,6 +145,7 @@ impl From<DeviceRecord> for DeviceResponse {
             line_style: r.style.line_style,
             marker: r.style.marker,
             desired_fw: r.desired_fw,
+            uplink_interval_s: r.uplink_interval_s,
         }
     }
 }

@@ -424,6 +424,7 @@ fn full_uplink_with_max_id_fits_the_request_buffers() {
     msg.seq = Some(u32::MAX);
     msg.uptime_s = Some(u32::MAX);
     msg.interval_s = Some(u32::MAX);
+    msg.config_version = Some(u32::MAX);
     msg.heap_free = Some(u32::MAX);
     msg.rssi_dbm = Some(i8::MIN);
     msg.temp_c = Some(-99.999_99);
@@ -474,6 +475,56 @@ fn ack_without_a_target_or_with_garbage_means_no_instruction() {
         "<html>502 Bad Gateway</html>",
     ] {
         assert_eq!(UplinkAck::parse(body).desired_fw, None, "{body}");
+    }
+}
+
+#[test]
+fn ack_reads_the_config_block_beside_the_target() {
+    use crate::models::uplink::AckConfig;
+    let ack = UplinkAck::parse(
+        r#"{"message":"Uplink received","device_id":"d","current":1,"desired_fw":"0.2.0","config":{"version":123456789,"uplink_interval_s":10,"threshold_ma":12000}}"#,
+    );
+    assert_eq!(ack.desired_fw.as_deref(), Some("0.2.0"));
+    assert_eq!(
+        ack.config,
+        Some(AckConfig {
+            version: 123_456_789,
+            uplink_interval_s: 10,
+            threshold_ma: 12_000,
+        })
+    );
+    // Field order and extra keys around the block do not matter.
+    let ack = UplinkAck::parse(
+        r#"{"config":{"threshold_ma":-5,"version":7},"message":"x","future":[1,2]}"#,
+    );
+    assert_eq!(
+        ack.config,
+        Some(AckConfig {
+            version: 7,
+            uplink_interval_s: 0,
+            threshold_ma: -5,
+        })
+    );
+}
+
+#[test]
+fn ack_config_is_absent_or_default_when_the_block_is_missing_or_odd() {
+    use crate::models::uplink::AckConfig;
+    assert_eq!(UplinkAck::parse(r#"{"desired_fw":"0.2.0"}"#).config, None);
+    assert_eq!(UplinkAck::parse(r#"{"config":null}"#).config, None);
+    assert_eq!(
+        UplinkAck::parse(r#"{"config":{}}"#).config,
+        Some(AckConfig::default()),
+        "an empty block is version 0 = ignored by the caller"
+    );
+    // A block of the wrong shape poisons only this ack, never the uplink.
+    for body in [
+        r#"{"config":"x"}"#,
+        r#"{"config":[1]}"#,
+        r#"{"config":{"version":"7"}}"#,
+        r#"{"config":{"version":-1}}"#,
+    ] {
+        assert_eq!(UplinkAck::parse(body), UplinkAck::default(), "{body}");
     }
 }
 

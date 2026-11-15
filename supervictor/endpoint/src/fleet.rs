@@ -203,6 +203,17 @@ pub struct FleetDevice {
     /// True while `desired_fw` is set and differs from the reported `fw`:
     /// the rollout is still in flight for this device.
     pub fw_pending: bool,
+    /// Uplink interval pushed to the device (s), when one overrides the
+    /// firmware default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uplink_interval_s: Option<u32>,
+    /// Version of the settings block the endpoint pushes to this device
+    /// now (`common::config::version` of its interval and threshold).
+    pub config_version: u32,
+    /// True until the device echoes `config_version` for the block the
+    /// endpoint pushes now: the settings have not reached it yet (or it
+    /// runs firmware that predates pushed settings).
+    pub config_pending: bool,
 }
 
 /// Aggregate counts, as served by `GET /fleet/summary`.
@@ -239,7 +250,13 @@ pub fn snapshot(
     threshold_ma: i64,
 ) -> Result<Vec<FleetDevice>, AppError> {
     let devices = store.list_devices()?;
-    let latest: std::collections::HashMap<String, (String, Option<String>, Option<i64>)> = store
+    struct Latest {
+        at: String,
+        fw: Option<String>,
+        current: Option<i64>,
+        config_version: Option<u32>,
+    }
+    let latest: std::collections::HashMap<String, Latest> = store
         .latest_uplinks()?
         .into_iter()
         .map(|u| {
@@ -249,15 +266,33 @@ pub fn snapshot(
                 .and_then(|v| v.as_str())
                 .map(String::from);
             let current = payload_current(&u.payload);
-            (u.device_id, (u.received_at, fw, current))
+            let config_version = u
+                .payload
+                .get(supervictor_common::fields::UPLINK_CONFIG_VERSION)
+                .and_then(|v| v.as_u64())
+                .and_then(|v| u32::try_from(v).ok());
+            (
+                u.device_id,
+                Latest {
+                    at: u.received_at,
+                    fw,
+                    current,
+                    config_version,
+                },
+            )
         })
         .collect();
 
     let mut out = Vec::with_capacity(devices.len());
     for device in devices {
-        let (last_uplink, fw, current) = match latest.get(&device.device_id) {
-            Some((at, fw, current)) => (Some(at.clone()), fw.clone(), *current),
-            None => (None, None, None),
+        let (last_uplink, fw, current, reported_config) = match latest.get(&device.device_id) {
+            Some(l) => (
+                Some(l.at.clone()),
+                l.fw.clone(),
+                l.current,
+                l.config_version,
+            ),
+            None => (None, None, None, None),
         };
         let staleness = staleness_of(last_uplink.as_deref(), now_unix);
         let device_threshold = device.effective_threshold_ma(threshold_ma);
@@ -287,6 +322,8 @@ pub fn snapshot(
             .desired_fw
             .as_deref()
             .is_some_and(|want| fw.as_deref() != Some(want));
+        let config_version = device.config(threshold_ma).version;
+        let config_pending = reported_config != Some(config_version);
         out.push(FleetDevice {
             device_id: device.device_id,
             owner_id: device.owner_id,
@@ -301,6 +338,9 @@ pub fn snapshot(
             min_on_s: device.min_on_s.filter(|_| min_on_s > 0),
             fw_pending,
             desired_fw: device.desired_fw,
+            uplink_interval_s: device.uplink_interval_s,
+            config_version,
+            config_pending,
         });
     }
     Ok(out)

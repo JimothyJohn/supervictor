@@ -19,8 +19,8 @@
 # re-resolves the "latest AL2023" AMI alias and REPLACES the instance (SQLite
 # file, Let's Encrypt cert, hand-installed build gone). Changes to a live
 # stack go through scripts/staging-stack-update.sh. The prod box needs
-# supervictor.advin.io free first (scratch/01-teardown-lambda-stacks.sh): the
-# stack creates the A record and CloudFormation refuses a name another stack owns.
+# supervictor.advin.io free first: the stack creates the A record and
+# CloudFormation refuses a name another stack owns.
 #
 #   STAGE             staging (default) | prod — stack name, hostname, S3 prefix, AMI pin
 #   TAG               release the box installs (default: the newest GitHub release)

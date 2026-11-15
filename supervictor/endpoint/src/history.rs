@@ -605,6 +605,7 @@ mod tests {
             min_on_s: None,
             style: Default::default(),
             desired_fw: None,
+            uplink_interval_s: None,
         }
     }
 
