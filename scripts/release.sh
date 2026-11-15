@@ -12,6 +12,7 @@
 set -euo pipefail
 TAG="${TAG:?set TAG, e.g. TAG=v0.2.0}"
 REPO="${REPO:-JimothyJohn/supervictor}"
+export GH_PAGER=cat # never wait at a pager prompt
 for t in git gh; do command -v "$t" >/dev/null || { echo "[release] missing tool: $t" >&2; exit 1; }; done
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \

@@ -42,8 +42,14 @@ done
 
 echo "endpoint https://$HOST:$PORT  device=$DEVICE  admin=$ADMIN  ca=$CA_PEM"
 
-# 1. TCP reachability (bash's /dev/tcp resolves the name too).
-if (exec 3<>"/dev/tcp/$HOST/$PORT") 2>/dev/null; then
+# 1. TCP reachability. curl, not bash's /dev/tcp: macOS 26 kills /bin/bash
+# on that redirect (SIGKILL), which read as "cannot connect" on a healthy
+# box. No client certificate is sent, so the handshake is expected to fail;
+# only name resolution (6), connection (7) and timeout (28) mean unreachable.
+tcp_rc=0
+curl -s -o /dev/null --connect-timeout 8 --max-time 12 -k "https://$HOST:$PORT/" 2>/dev/null || tcp_rc=$?
+case "$tcp_rc" in 5 | 6 | 7 | 28) tcp_down=1 ;; *) tcp_down=0 ;; esac
+if [ "$tcp_down" = 0 ]; then
     pass "tcp: $HOST:$PORT accepts connections"
 else
     fail "tcp: cannot connect to $HOST:$PORT — DNS, firewall/security group, or the service is down"
