@@ -55,7 +55,7 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-27
       by: decisions session
       notes: EMAIL=you@… ./scripts/billing-alarm.sh
-- [ ] **Put v0.2.0 on staging** — v0.2.0 is released (2026-10-28) and runs on prod; staging runs a hand-installed build (nothing outside the box reports the version; it does accept `min_on_s`, so it is at least the 2026-10-27 tree, and the sim thresholds including the 120 s min-on were applied 2026-11-15). `install-staging.sh` without a TAG installs the newest release.
+- [ ] **Put v0.2.0 on staging** — v0.2.0 is released (2026-10-28) and runs on prod; staging runs a hand-installed build (nothing outside the box reports the version; it does accept `min_on_s`, so it is at least the 2026-10-27 tree, and the sim thresholds including the 120 s min-on were applied 2026-11-15). `install-staging.sh` needs a TAG.
       needs: a native terminal (the restart is yours)
       result: staging runs a reproducible release
       est: 10m
@@ -81,7 +81,7 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       id: release-admin-gate
       asked: 2026-11-15
       by: board session (feat/admin-gate-device-api)
-      notes: ./scripts/ship.sh go (tags, releases, installs prod), then ./scripts/install-staging.sh (staging, newest release)
+      notes: ./scripts/ship.sh go (tags, releases, installs prod), then TAG=<the tag ship.sh made> ./scripts/install-staging.sh (staging; TAG is required)
 - [ ] **Pi as a live device** — `pi-edge-01` is dark since 2026-10-24.
       needs: your password on nick@10.0.0.56 (no agent-reachable key is authorized); Docker if `target-pi/` needs a rebuild (`BUILD=1`)
       result: a Linux reference device fresh on staging

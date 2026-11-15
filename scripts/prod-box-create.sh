@@ -28,7 +28,20 @@ log "as $(aws sts get-caller-identity --query Arn --output text)"
 REC="$(aws route53 list-resource-record-sets --hosted-zone-id Z039212425BG1MHVPYWDN \
     --query "ResourceRecordSets[?Name=='supervictor.advin.io.' && Type=='A'] | length(@)" --output text)"
 [ "$REC" = 0 ] || fail "an A record for supervictor.advin.io still exists in Route53 — the stack would fail creating DnsRecord. Remove it (or find which stack owns it) first"
-gh release view "$TAG" --repo JimothyJohn/supervictor --json assets --jq '.assets[].name' | grep -q 'aarch64-unknown-linux-musl.tar.gz$' \
+# True when <tag>'s release carries the aarch64 musl tarball. gh's output is
+# captured whole, then matched: piping gh into `grep -q` under pipefail
+# failed in a real terminal on 2026-11-15 with the asset attached (grep
+# exits on the first match, and gh there also talks to the terminal).
+# Escape sequences and CRs are stripped so a coloured line still matches,
+# gh is kept off the terminal, and the verdict is the names alone.
+has_aarch64_tarball() { # <tag> <repo>
+    local names
+    names="$(NO_COLOR=1 GH_NO_UPDATE_NOTIFIER=1 gh release view "$1" --repo "$2" \
+        --json assets --jq '.assets[].name' </dev/null 2>/dev/null)" || true
+    printf '%s\n' "$names" | tr -d '\r' | sed $'s/\x1b\\[[0-9;?]*[A-Za-z]//g' \
+        | grep -x 'supervictor-endpoint-aarch64-unknown-linux-musl.tar.gz' >/dev/null
+}
+has_aarch64_tarball "$TAG" JimothyJohn/supervictor \
     || fail "release $TAG has no aarch64 musl tarball — TAG=$TAG ./scripts/release.sh first"
 if ST="$(aws cloudformation describe-stacks --stack-name "$STAGING_STACK" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)"; then
     fail "$STAGING_STACK exists ($ST). Update: STAGE=prod ./scripts/staging-stack-update.sh; a failed create: STAGE=prod CONFIRM=$STAGING_STACK ./scripts/teardown-staging.sh"
