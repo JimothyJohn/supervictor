@@ -80,7 +80,8 @@ pub fn dn_matches(a: &str, b: &str) -> bool {
 }
 
 /// Route-layer gate: 403 unless the forwarded mTLS subject is an admin.
-/// Shared by the dashboard (`/ui/*`) and the fleet JSON API (`/fleet*`).
+/// Shared by the dashboard (`/ui/*`), the fleet JSON API (`/fleet*`) and
+/// the device API (`/devices*`, bar a device's own firmware downloads).
 pub async fn require_admin(request: Request, next: Next) -> Response {
     match client_identity(request.extensions(), request.headers()) {
         Some(subject) if is_admin_subject(&subject) => next.run(request).await,

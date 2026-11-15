@@ -13,7 +13,7 @@ path (one endpoint, a SQLite file, admin mTLS) when this track opens.
   every uplink, in SQLite by default or DynamoDB behind the `dynamo`
   feature.
 - **Registration and ingest validation.** `POST /devices`, `GET /devices`,
-  `GET /devices/{id}` (README, "Build on it"); an uplink is bound to its
+  `GET /devices/{id}` (README, "Build on it"; admin certificate only); an uplink is bound to its
   registered certificate, and `REQUIRE_REGISTRATION=true` turns away
   unregistered, inactive or unbound devices.
 - **Onboarding.** `./Quickstart onboard` and `scripts/rack-flash.sh`

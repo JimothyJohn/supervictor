@@ -5,9 +5,9 @@
 #   ./scripts/boards-to-prod.sh                        # then every PoE board still on staging
 #   FW_VERSION=0.1.9 ./scripts/boards-to-prod.sh ...   # if 0.1.8 is already taken
 #
-# Per device: register it on prod with its own certificate (POST /devices with
-# device_id, owner_id, subject_dn — the cert binding REQUIRE_REGISTRATION=true
-# wants), then `VIA=staging scripts/ota-push.sh <device> prod`: the image is
+# Per device: register it on prod with the admin certificate (POST /devices
+# with device_id, owner_id, subject_dn — the cert binding
+# REQUIRE_REGISTRATION=true wants; a device certificate cannot register), then `VIA=staging scripts/ota-push.sh <device> prod`: the image is
 # built with HOST=supervictor.advin.io, uploaded to and activated on STAGING
 # (the box the device talks to today), the device pulls it, boots it, and
 # confirms on its first PROD uplink. Its staging row goes stale, then dark —
@@ -44,10 +44,11 @@ register_prod() { # <device>
     local d="$1" subject payload status
     subject="$(openssl x509 -in "certs/devices/$d/client.pem" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"
     payload="$(printf '{"device_id":"%s","owner_id":"%s","subject_dn":"%s"}' "$d" "$OWNER" "$subject")"
-    status="$(curl -s -m 20 -o /dev/null -w '%{http_code}' --cacert "$STAGING_BUNDLE" \
-        --cert "certs/devices/$d/client.pem" --key "certs/devices/$d/client.key" \
+    status="$(admin_curl -s -m 20 -o /dev/null -w '%{http_code}' --cacert "$STAGING_BUNDLE" \
+        -H 'Content-Type: application/json' \
         -X POST "$PROD/devices" -d "$payload")"
     case "$status" in
+    403) fail "registration of $d on prod refused (HTTP 403): $ADMIN_PEM is not an admin certificate prod trusts" ;;
     201) log "  registered $d on prod ($subject)" ;;
     409) log "  $d already registered on prod" ;;
     *) fail "registration of $d on prod failed: HTTP $status" ;;

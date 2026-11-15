@@ -151,6 +151,12 @@ Rust API endpoint in `supervictor/endpoint/` — companion to the ESP32 edge dev
   folds a burst's earlier samples into their own buckets. Distinct from the
   history page's live *windows* (`1m`/`5m`, `PageMode::Live`), which
   re-render the bucketed charts on every uplink.
+- Device API is admin-only (decided 2026-11-15): `POST /devices`,
+  `GET /devices`, `GET /devices/{id}` and `GET /devices/{id}/uplinks` sit
+  behind `middleware::require_admin` with the fleet routes. Every board
+  carries a fleet-CA certificate, so a device certificate reaches only
+  `POST /` (its own uplinks), `GET /` and its own firmware; scripts register
+  with the admin certificate. `tests/test_device_api_auth.rs`.
 - Uplink identity: a device registered with a `subject_dn` is bound to that
   certificate — `POST /` for it must carry a matching mTLS subject or it is
   403'd (`handlers::authorize_uplink`). `REQUIRE_REGISTRATION=true` further

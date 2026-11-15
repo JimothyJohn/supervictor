@@ -81,6 +81,16 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       id: promote-dev-master
       asked: 2026-10-27
       by: decisions session
+- [ ] **Release the admin-gated endpoint to staging and prod** — the device API (`POST /devices`, `GET /devices`, `GET /devices/{id}`, `GET /devices/{id}/uplinks`) is admin-only on dev since 2026-11-15; both boxes still run a build where any fleet-CA certificate passes. The scripts already register with the admin certificate, which the old build accepts too, so nothing breaks in between. Boards are untouched: firmware never calls these routes.
+      needs: dev promoted to master; a native terminal (the restarts are yours)
+      result: on both boxes a device certificate gets 403 from the device API (`.claude/skills/bring-your-own/scripts/check-server.sh <host>` shows the isolation line)
+      depends: promote-dev-master
+      est: 20m
+      difficulty: low
+      id: release-admin-gate
+      asked: 2026-11-15
+      by: board session (feat/admin-gate-device-api)
+      notes: ./scripts/ship.sh go (tags, releases, installs prod), then ./scripts/install-staging.sh (staging, newest release)
 - [ ] **Restart the simulated fleet from a dev checkout and retire its worktree** — the ten `sim-*` containers still run from `../supervictor-sim-profiles` (an old branch, merged). The session was denied stopping them (workload interference). Thresholds for the eight unheated profiles were re-applied on staging 03:25Z; the extruder/molder 120 s min-on needs the new endpoint on the box first (cut-v0-2-0 or `scripts/deploy-staging-build.sh`).
       needs: Docker (up on the Studio); a checkout on dev
       result: containers built from dev; `git worktree remove ../supervictor-sim-profiles` possible
@@ -91,6 +101,7 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-27
       by: decisions session
       notes: ./scripts/sim-fleet.sh down (in ../supervictor-sim-profiles), ./scripts/sim-fleet.sh up staging (from dev), ./scripts/sim-fleet.sh thresholds staging, then git worktree remove ../supervictor-sim-profiles
+      status: ready
 - [ ] **OTA resume proof not re-run against the current endpoint** — run 2 passed on rack-03 (revert after an EN reset mid-trial, resume after a power cut); the stalled-download proof (`OTA: resuming at`) was last run against an older endpoint build. Optional; the scripts live in `../supervictor-poe-iso/scratch/` (07, and 05 for the deterministic power-cut variant).
       needs: rack-03 on USB; ~5 min; the poe-iso worktree
       result: the resume path proven on the shipped endpoint, or the scripts deleted with the worktree
@@ -171,16 +182,6 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
 
 ## Open questions for Nick
 
-- [ ] **Admin-gate the device API?** — `POST /devices`, `GET /devices` and `GET /devices/{id}/uplinks` sit outside `require_admin` (`supervictor/endpoint/src/routes.rs`, the bare `router` block), so any fleet-CA certificate passes, and each board carries one in flash. One extracted key can register a device_id that is not taken yet bound to its own DN and then uplink as it (strict registration does not stop that), list every device and owner, and read any device's uplinks. Today's flows depend on it: `scripts/boards-to-prod.sh` and `./Quickstart onboard` register a board with the board's own certificate; Quickstart `up` already uses the admin cert. Found in the 2026-11-03 deep clean.
-      needs: your call on the auth model
-      result: device certificates can only uplink and read their own firmware; registration and reads are admin
-      options: admin-gate all three + move boards-to-prod and onboard to the admin cert (recommended) | admin-gate registration only, a device reads only itself | keep open, document why
-      est: 3h
-      difficulty: med
-      id: admin-gate-device-api
-      asked: 2026-11-03
-      by: deep-clean session
-      notes: regression tests first (device cert → 403 on each route); prod and staging boxes need a release after it lands
 - [ ] **esp32 PAC: three copies in the edge build** — `supervictor/edge/Cargo.toml` pins `esp32 = 0.42`; on the esp-hal 1.1 line (2026-11) esp-hal pulls 0.40 and esp-rom-sys 0.41, so the lock still carries three PACs (Dependabot moved ours 0.40 → 0.42 in 86a689d). `sha2` 0.11 is likewise a second copy next to the 0.10 esp-hal and mbedtls-rs-sys use. It builds and passes; the cost is compile time and two PACs for the same silicon.
       needs: a pick
       result: one PAC version in the edge build, or comments that tell the truth
@@ -190,12 +191,4 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       id: esp32-pac-dedupe
       asked: 2026-11-03
       by: deep-clean session (PR 144)
-- [ ] **Two ROADMAP items the docs pass could not settle** — "/demo still renders placeholder names": is that still true? And has the XIAO ESP32-S3 triggered "board abstraction"? Left untouched in PR 146.
-      needs: 1 min each
-      result: ROADMAP says only what is still ahead
-      options: both still open | remove both | answer each
-      est: 5m
-      difficulty: low
-      id: roadmap-unsettled
-      asked: 2026-11-03
-      by: deep-clean session (PR 146)
+      answer: pin esp32 to esp-hal's version + Dependabot ignore
