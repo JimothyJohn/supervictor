@@ -37,8 +37,8 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-27
       by: decisions session
       notes: TAG=v0.2.0 ./scripts/staging-stack-changeset.sh (YES=1 to skip the prompt)
-- [ ] **Flip staging to strict registration** — `REQUIRE_REGISTRATION=true` on the box (new boxes already default to it). The script lists devices without a bound certificate first and refuses unless the list is empty or `FORCE=1`; today `c3-wifi-01`, `c3-wifi-02`, `wrover-wifi-01` and `pi-edge-01` are unbound and dark — revoke them on /ui or re-register (`rack-flash.sh staging`, `Quickstart onboard`) first. Edits `/etc/supervictor/env` over SSM and restarts the unit (a restart is yours), then pings with a device cert and reads the summary.
-      needs: a decision on the four unbound devices; a native terminal
+- [ ] **Flip staging to strict registration** — `REQUIRE_REGISTRATION=true` on the box (new boxes already default to it). The script lists devices without a bound certificate first and refuses unless the list is empty or `FORCE=1`; on 2026-11-15 the list is empty (every staging device is bound). Edits `/etc/supervictor/env` over SSM and restarts the unit (a restart is yours), then pings with a device cert and reads the summary.
+      needs: a native terminal
       result: only registered, active, certificate-bound devices can uplink to staging
       est: 15m
       difficulty: low
@@ -64,9 +64,9 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-27
       by: decisions session
       notes: ./scripts/dev-branch-protection.sh
-- [ ] **Put v0.2.0 on staging** — v0.2.0 is released (2026-10-28) and runs on prod; staging still runs whatever was hand-installed before it (nothing outside the box reports the version). `install-staging.sh` without a TAG installs the newest release.
+- [ ] **Put v0.2.0 on staging** — v0.2.0 is released (2026-10-28) and runs on prod; staging runs a hand-installed build (nothing outside the box reports the version; it does accept `min_on_s`, so it is at least the 2026-10-27 tree, and the sim thresholds including the 120 s min-on were applied 2026-11-15). `install-staging.sh` without a TAG installs the newest release.
       needs: a native terminal (the restart is yours)
-      result: staging runs a reproducible release; the extruder/molder min-on can be applied (`./scripts/sim-fleet.sh thresholds staging`)
+      result: staging runs a reproducible release
       est: 10m
       difficulty: low
       id: cut-v0-2-0
@@ -91,22 +91,11 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-11-15
       by: board session (feat/admin-gate-device-api)
       notes: ./scripts/ship.sh go (tags, releases, installs prod), then ./scripts/install-staging.sh (staging, newest release)
-- [ ] **Restart the simulated fleet from a dev checkout and retire its worktree** — the ten `sim-*` containers still run from `../supervictor-sim-profiles` (an old branch, merged). The session was denied stopping them (workload interference). Thresholds for the eight unheated profiles were re-applied on staging 03:25Z; the extruder/molder 120 s min-on needs the new endpoint on the box first (cut-v0-2-0 or `scripts/deploy-staging-build.sh`).
-      needs: Docker (up on the Studio); a checkout on dev
-      result: containers built from dev; `git worktree remove ../supervictor-sim-profiles` possible
-      depends: cut-v0-2-0
-      est: 15m
-      difficulty: low
-      id: sim-fleet-restart
-      asked: 2026-10-27
-      by: decisions session
-      notes: ./scripts/sim-fleet.sh down (in ../supervictor-sim-profiles), ./scripts/sim-fleet.sh up staging (from dev), ./scripts/sim-fleet.sh thresholds staging, then git worktree remove ../supervictor-sim-profiles
-      status: ready
-- [ ] **OTA resume proof not re-run against the current endpoint** — run 2 passed on rack-03 (revert after an EN reset mid-trial, resume after a power cut); the stalled-download proof (`OTA: resuming at`) was last run against an older endpoint build. Optional; the scripts live in `../supervictor-poe-iso/scratch/` (07, and 05 for the deterministic power-cut variant).
-      needs: rack-03 on USB; ~5 min; the poe-iso worktree
+- [ ] **OTA resume proof not re-run against the current endpoint** — run 2 passed on rack-03 (revert after an EN reset mid-trial, resume after a power cut); the stalled-download proof (`OTA: resuming at`) was last run against an older endpoint build. Optional. The `../supervictor-poe-iso` worktree and its untracked `scratch/` scripts (05, 07) are gone since the prune, so running it means rewriting them from docs/OTA.md ("Contract and bench proof", the `firmware_fault` route).
+      needs: rack-03 on USB (it runs helmsman today); ~30 min with the script rewrite
       result: the resume path proven on the shipped endpoint, or the scripts deleted with the worktree
       options: run it | drop it
-      est: 15m
+      est: 45m
       difficulty: low
       id: ota-resume-proof
       asked: 2026-10-27
@@ -129,16 +118,16 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-26
       by: decisions session
       notes: on the Air: scp nick@10.0.0.41:github/supervictor/scripts/iphone-cert.sh ~/ && ~/iphone-cert.sh (AirDrop the identity)
-- [ ] **Fill the switch-port column** — `certs/rack-inventory.tsv` still has `-` for every board, so a dark fleet row does not map to a cable (HARDWARE.md §10).
+- [ ] **Fill the switch-port column** — `certs/rack-inventory.tsv` has ports for poe2-wifi-01 (1), poe-iso-eth-01 (2), poe2-rack-01 (3), poe-iso-rack-01 (5), poe-iso-rack-02 (6); poe-iso-rack-03 is still `-` (HARDWARE.md §10). The WiFi devkits have no port.
       needs: a look at the rack
       result: device → LS108GP port recorded
-      est: 10m
+      est: 2m
       difficulty: low
       id: rack-switch-ports
       asked: 2026-10-27
       by: decisions session
-- [ ] **Finish moving the boards to prod** — fresh on prod at 0.1.8 (2026-10-28 12:17Z): poe-iso-eth-01, poe-iso-rack-01, poe-iso-rack-03, poe2-wifi-01. Left: poe2-rack-01 (fresh on staging at 0.1.6, not yet registered on prod — rerun in progress) and poe-iso-rack-02 (registered on prod, dark on staging since 02:10:28Z; the 300 s watchdog did not recover it after the port-8 cable was re-seated — re-seat its own cable, then USB serial if still dark; it moves itself once it uplinks).
-      needs: hands on rack-02; the esp toolchain; ~3 min per board
+- [ ] **Finish moving the boards to prod** — state 2026-11-15: fresh on prod at 0.1.9-rc.1: poe-iso-rack-01, poe2-wifi-01. Reached prod at 0.1.8 and dark since: poe-iso-eth-01 (2026-11-03), poe2-rack-01 (2026-11-01), poe-iso-rack-03 (2026-11-08, now running helmsman). Never seen on prod: poe-iso-rack-02 (registered; dark on staging since 2026-10-28 02:10Z — re-seat its cable, then USB serial; it moves itself once it uplinks). The next firmware must be newer than 0.1.9-rc.1 (anti-rollback).
+      needs: hands on rack-02 and the two dark boards (power, cable); the esp toolchain; ~3 min per board
       result: the six PoE boards fresh on prod; staging keeps the simulated fleet
       est: 30m
       difficulty: med
@@ -146,16 +135,6 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-10-27
       by: prod-box session (PR 124)
       notes: ./scripts/boards-to-prod.sh (idempotent: skips boards already fresh on prod)
-- [ ] **Prune merged worktrees and branches** — deep clean 2026-11-03: 14 sibling worktrees (13 merged + the stale `dev` checkout in `../supervictor-live-scaled`), 50 merged local branches, 11 unmerged ones triaged as superseded (each reason is in the script's SUPERSEDED list; a branch that moved since triage is kept), 9 origin branches, and the main checkout from `fix/boards-to-prod-bash32` onto `dev`. Also removes the Python/Lambda-era caches (`supervictor/endpoint/.aws-sam/`, `.pytest_cache/`, `.ruff_cache/`, `.python-version`) and `.claude/handoff-pr85-live-levels.md`. Dry run by default; worktrees that are dirty, active in the last 6 h, have a process inside, or have an open PR are kept. Every deleted ref and its SHA goes to `.logs/prune-<utc>.tsv`.
-      needs: the chore/clean-* PRs merged (their worktrees are kept until then); a terminal (branch deletion is denied to sessions)
-      result: one worktree, local branches = dev, master and live work; origin holds only dev, master and open-PR heads
-      options: run it | keep some (say which)
-      est: 5m
-      difficulty: low
-      id: prune-merged
-      asked: 2026-11-03
-      by: deep-clean session (chore/clean-git-prune)
-      notes: ./scripts/prune-merged.sh (read the plan) → GO=1 ./scripts/prune-merged.sh; rerun any time, it is idempotent
 
 ## Notes — local state (not tasks)
 
