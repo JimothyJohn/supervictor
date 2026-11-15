@@ -91,16 +91,18 @@ serverless stages that would have needed an S3 store were retired
   during its trial boots rebuilds the trial from otadata
   (`policy::adopt_untracked`): a slot still `New` with no record is on
   trial, the other slot is the fallback. Watchdog (`SysRtcWdt`) and
-  software resets keep both records. Decided 2026-10-26 (TODO
-  `ota-resume-proof`): no flash-resident resume record.
+  software resets keep both records. Decided 2026-10-26: no
+  flash-resident resume record.
 - **Resume is proven without a reset.** `PUT /devices/{id}/firmware_fault`
   (admin, body `{"stall_at": N, "stall_secs": 15}`, one-shot, in memory)
   makes the device's next image download pause after `N` bytes for longer
   than its 10 s read timeout. The device drops the connection, keeps its
   resume record, and the next uplink retries with `Range` + `If-Match`:
   serial prints `OTA: resuming at N'` and the fleet reports the new version.
-  The bench script that drives it on rack-03 is not tracked (TODO card
-  `ota-resume-proof`); the endpoint tests pin the bytes-and-framing invariant.
+  Proven on rack-03 in 2026-10 against the endpoint of that week; the
+  bench script was never tracked and is gone, and the proof was not
+  repeated on later builds (dropped 2026-11-15). The endpoint tests pin
+  the bytes-and-framing invariant.
 - **The partition table is frozen.** `supervictor/edge/partitions.csv`
   (nvs / otadata / phy_init / ota_0 / ota_1 on 4 MB) changes only with a USB
   flash of every board. The rack took that flash on 2026-10-27;

@@ -82,15 +82,6 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       asked: 2026-11-15
       by: board session (feat/admin-gate-device-api)
       notes: ./scripts/ship.sh go (tags, releases, installs prod), then ./scripts/install-staging.sh (staging, newest release)
-- [ ] **OTA resume proof not re-run against the current endpoint** — run 2 passed on rack-03 (revert after an EN reset mid-trial, resume after a power cut); the stalled-download proof (`OTA: resuming at`) was last run against an older endpoint build. Optional. The `../supervictor-poe-iso` worktree and its untracked `scratch/` scripts (05, 07) are gone since the prune, so running it means rewriting them from docs/OTA.md ("Contract and bench proof", the `firmware_fault` route).
-      needs: rack-03 on USB (it runs helmsman today); ~30 min with the script rewrite
-      result: the resume path proven on the shipped endpoint, or the scripts deleted with the worktree
-      options: run it | drop it
-      est: 45m
-      difficulty: low
-      id: ota-resume-proof
-      asked: 2026-10-27
-      by: decisions session
 - [ ] **Pi as a live device** — `pi-edge-01` is dark since 2026-10-24.
       needs: your password on nick@10.0.0.56 (no agent-reachable key is authorized); Docker if `target-pi/` needs a rebuild (`BUILD=1`)
       result: a Linux reference device fresh on staging
