@@ -27,7 +27,8 @@
 #              identifier; ports move. flash.sh reads features from it too.
 #   WARM=0     skip the cache-warming builds at start.
 #   OWNER      owner_id used at registration (default $USER).
-#   ADMIN      admin certificate that reads /fleet (default $USER).
+#   ADMIN      admin certificate that registers devices and reads /fleet
+#              (default $USER).
 #   FW_ROOT    checkout to build from (default: this one).
 # shellcheck source=scripts/_lib.sh
 . "$(dirname "$0")/_lib.sh"
@@ -201,12 +202,14 @@ register() { # <device>
     local d="$1" subject payload status
     subject="$(openssl x509 -in "$REPO_ROOT/certs/devices/$d/client.pem" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"
     payload="$(printf '{"device_id":"%s","owner_id":"%s","subject_dn":"%s"}' "$d" "$OWNER" "$subject")"
-    status="$(curl -s -m 20 -o /dev/null -w '%{http_code}' --cacert "$CA" \
-        --cert "$REPO_ROOT/certs/devices/$d/client.pem" --key "$REPO_ROOT/certs/devices/$d/client.key" \
+    # Admin certificate: the device API refuses a device's own.
+    status="$(admin_curl -s -m 20 -o /dev/null -w '%{http_code}' --cacert "$CA" \
+        -H 'Content-Type: application/json' \
         -X POST "https://$HOST${API_PATH%/}/devices" -d "$payload")"
     case "$status" in
     201) note "registered $d ($subject)" ;;
     409) note "$d already registered" ;;
+    403) die "registration of $d refused (HTTP 403): $ADMIN_PEM is not an admin certificate $HOST trusts" ;;
     *) die "registration of $d failed: HTTP $status" ;;
     esac
 }

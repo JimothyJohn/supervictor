@@ -60,8 +60,8 @@ Three crates: `supervictor/common` (wire contract, `no_std`), `supervictor/edge`
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
 | `POST` | `/` | Device uplink; identity bound to the client certificate |
-| `GET`/`POST` | `/devices` | List / register (`device_id`, `owner_id`, `subject_dn`, optional `power_threshold_ma`, `color`, `line_style`, `marker`) |
-| `GET` | `/devices/{id}`, `/devices/{id}/uplinks` | Device record, recent uplinks |
+| `GET`/`POST` | `/devices` | List / register (admin; `device_id`, `owner_id`, `subject_dn`, optional `power_threshold_ma`, `color`, `line_style`, `marker`) |
+| `GET` | `/devices/{id}`, `/devices/{id}/uplinks` | Device record, recent uplinks (admin) |
 | `PUT` | `/devices/{id}/threshold` | Set or clear the device's power threshold (admin) |
 | `PUT` | `/devices/{id}/config` | Set or clear the uplink interval pushed to the device, 1–600 s; interval and threshold reach it as the `config` block of its next uplink response, and `/fleet` reports `config_pending` until it echoes the version (admin) |
 | `PUT` | `/devices/{id}/style` | Replace how the dashboard draws the device: `color` (`s0`–`s7` or `#rrggbb`), `line_style`, `marker` (admin) |

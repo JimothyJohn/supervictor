@@ -456,26 +456,27 @@
     <div class="endpoint">
       <span class="method get">GET</span>
       <span class="path">/devices</span>
-      <span class="desc">List all registered devices</span>
+      <span class="desc">List all registered devices (admin)</span>
     </div>
     <div class="endpoint">
       <span class="method post">POST</span>
       <span class="path">/devices</span>
-      <span class="desc">Register a new device</span>
+      <span class="desc">Register a new device (admin)</span>
     </div>
     <div class="endpoint">
       <span class="method get">GET</span>
       <span class="path">/devices/{device_id}</span>
-      <span class="desc">Get device details</span>
+      <span class="desc">Get device details (admin)</span>
     </div>
     <div class="endpoint">
       <span class="method get">GET</span>
       <span class="path">/devices/{device_id}/uplinks</span>
-      <span class="desc">Recent uplink history for a device</span>
+      <span class="desc">Recent uplink history for a device (admin)</span>
     </div>
   </div>
   <p style="color:var(--muted); margin-top:16px; font-size:0.9rem;">
-    Device routes take the device's certificate. The admin routes (fleet health and history,
+    A device's certificate reaches only its own uplink (<code>POST /</code>) and its own firmware.
+    The device API above and the other admin routes (fleet health and history,
     thresholds, pushed config, styles, firmware, the <code>/ui</code> dashboard) need a certificate
     with <code>OU=admin</code>; the full table is in the
     <a href="https://github.com/JimothyJohn/supervictor#build-on-it">README</a>.

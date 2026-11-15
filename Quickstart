@@ -574,14 +574,19 @@ cmd_onboard() { # <device-name> <owner-id> [host] [port]
     payload="$(printf '{"device_id":"%s","owner_id":"%s","subject_dn":"%s"}' "$device" "$owner" "$subject")"
     local ca_flag=()
     [[ -f "$REPO_ROOT/certs/ca/ca.pem" ]] && ca_flag=(--cacert "$REPO_ROOT/certs/ca/ca.pem")
-    local status
+    # Registration is admin-only: a device certificate cannot register
+    # itself or anything else.
+    local status admin_dir="$REPO_ROOT/certs/admins/$QS_ADMIN"
+    [[ -f "$admin_dir/admin.pem" && -f "$admin_dir/admin.key" ]] \
+        || fail "no admin certificate at $admin_dir (./Quickstart certs admin $QS_ADMIN, or set QS_ADMIN)"
     status="$(curl -s -o /dev/null -w '%{http_code}' "${ca_flag[@]}" \
-        --cert "$REPO_ROOT/certs/devices/$device/client.pem" \
-        --key "$REPO_ROOT/certs/devices/$device/client.key" \
+        --cert "$admin_dir/admin.pem" --key "$admin_dir/admin.key" \
+        -H 'Content-Type: application/json' \
         -X POST "https://$host:$port/devices" -d "$payload")"
     case "$status" in
     201) log "  registered" ;;
     409) log "  already registered, continuing" ;;
+    403) fail "registration refused (HTTP 403): $admin_dir is not an admin certificate the endpoint trusts" ;;
     *) fail "registration failed with HTTP $status" ;;
     esac
 
