@@ -358,14 +358,24 @@ Each step has a pass criterion; do not skip ahead on a fail.
 
 ## 10. Network and rack
 
-LS108GP port 8 → house router (DHCP 10.0.0.0/24), ports 1–6 boards, port 7
+**Since 2026-11-19 one unmanaged PoE switch carries the rack, the helmsman
+bench (192.168.3.0/24 statics) and the uplink to the house router (DHCP
+10.0.0.0/24)**, so both address ranges share one wire. The LS108GP figures in
+§6.3 and the bill of materials stand until the new switch's model and PoE
+budget are recorded. Seen on 2026-11-20 (Ethernet MAC = the inventory MAC +
+3): `poe2-rack-01` 10.0.0.50, `poe-iso-eth-01` .51, `poe-iso-rack-01` .52,
+`poe2-wifi-01` .53, the Pi .56. `poe-iso-rack-02` and `-03` sent no frame in
+a 25 s capture on the Studio's port: unpowered or unlinked.
+
+Before then: LS108GP port 8 → house router, ports 1–6 boards, port 7
 the Mac Studio. The switch is unmanaged: there is no per-port power cycling
 from software, so a hard reset of a board is a cable pull. If remote power
 cycling becomes a want, that is the one argument for a managed PoE switch,
 not for a different board.
 
-Which board sits on which port is not yet recorded (`switch_port` column in
-`certs/rack-inventory.tsv` is `-`); fill it on the next bench visit so a
+Which board sits on which port of the new switch is not recorded
+(`switch_port` in `certs/rack-inventory.tsv` went back to `-` on 2026-11-20:
+the old values were LS108GP ports); fill it on the next bench visit so a
 dark fleet row maps to a cable.
 
 ## 11. Open decisions for Nick
