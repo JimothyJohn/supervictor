@@ -249,7 +249,8 @@ decided 2026-10-26, no NVS path).
 
 LS108GP: 62 W total, 30 W per port, power managed by measured draw, Extend
 Mode OFF (it drops ports 1–4 to 10 Mb/s and the EMAC wants 100). Six boards
-at 2 W is a tenth of the switch.
+at 2 W is a tenth of the switch. The bench's switch since 2026-11-19 (§10)
+has 120 W across 16 ports, so four boards are under a tenth of it.
 
 ## 7. Firmware hooks
 
@@ -358,15 +359,38 @@ Each step has a pass criterion; do not skip ahead on a fail.
 
 ## 10. Network and rack
 
-LS108GP port 8 → house router (DHCP 10.0.0.0/24), ports 1–6 boards, port 7
+**Since 2026-11-19 one unmanaged 16-port PoE switch (120 W budget; Amazon
+ASIN B0C4X7VZV9, model and per-port limit not yet read) carries the rack,
+the helmsman bench (192.168.3.0/24 statics) and the uplink to the house
+router (DHCP 10.0.0.0/24)**, so both address ranges share one wire. Ports
+as cabled on 2026-11-20 (Nick):
+
+| Port | Device |
+|---|---|
+| 1 | helmsman bench: Novanta MDrive |
+| 2 | work laptop dock (disconnected) |
+| 3 | Raspberry Pi 5 (`pi-edge-01`, 10.0.0.56) |
+| 4 | house router (internet, DHCP) |
+| 5 | helmsman bench: Moxa ioLogik E1213 |
+| 6 | Mac Studio |
+| 7, 8 | ESP32-POE2: `poe2-rack-01` 10.0.0.50, `poe2-wifi-01` .53 (which is which not seen) |
+| 9, 11 | ESP32-POE-ISO: `poe-iso-eth-01` 10.0.0.51, `poe-iso-rack-01` .52 (same) |
+| 10 | helmsman bench: ESP32-P4 node |
+| 12 | helmsman bench: Murrelektronik IMPACT67 |
+
+Addresses from 2026-11-20, matched by MAC (the Ethernet MAC is the
+inventory MAC + 3). `poe-iso-rack-02` and `-03` are not on the switch.
+
+Before then: LS108GP port 8 → house router, ports 1–6 boards, port 7
 the Mac Studio. The switch is unmanaged: there is no per-port power cycling
 from software, so a hard reset of a board is a cable pull. If remote power
 cycling becomes a want, that is the one argument for a managed PoE switch,
 not for a different board.
 
-Which board sits on which port is not yet recorded (`switch_port` column in
-`certs/rack-inventory.tsv` is `-`); fill it on the next bench visit so a
-dark fleet row maps to a cable.
+`switch_port` in `certs/rack-inventory.tsv` holds the new switch's ports
+(`7/8`, `9/11` where the pair is not told apart; `-` off the switch).
+Swapping a pair's cables one at a time tells them apart; record it then,
+so a dark fleet row maps to a cable.
 
 ## 11. Open decisions for Nick
 
