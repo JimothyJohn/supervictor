@@ -81,8 +81,8 @@ Let's Encrypt). `depends:` gives the order; the rest are independent.
       id: rack-switch-ports
       asked: 2026-10-27
       by: decisions session
-- [ ] **Finish moving the boards to prod** — state 2026-11-15: fresh on prod at 0.1.9-rc.1: poe-iso-rack-01, poe2-wifi-01. Reached prod at 0.1.8 and dark since: poe-iso-eth-01 (2026-11-03), poe2-rack-01 (2026-11-01), poe-iso-rack-03 (2026-11-08, now running helmsman). Never seen on prod: poe-iso-rack-02 (registered; dark on staging since 2026-10-28 02:10Z — re-seat its cable, then USB serial; it moves itself once it uplinks). The next firmware must be newer than 0.1.9-rc.1 (anti-rollback).
-      needs: hands on rack-02 and the two dark boards (power, cable); the esp toolchain; ~3 min per board
+- [ ] **Finish moving the boards to prod** — state 2026-11-22: fresh on prod at 0.2.1 (by OTA, ~50 s each): poe-iso-rack-01, poe2-wifi-01, poe-iso-eth-01 (back since the switch move). poe2-rack-01: dark on prod since 2026-11-01 at 0.1.8, 0.2.1 queued (desired_fw set) — it updates itself on its first uplink. poe-iso-rack-03: dark since 2026-11-08, running helmsman. Never seen on prod: poe-iso-rack-02 (registered; dark on staging since 2026-10-28 02:10Z; not on the new switch per the 2026-11-20 helmsman sweep — cable it, then USB serial; it moves itself once it uplinks). The next firmware must be newer than 0.2.1 (anti-rollback).
+      needs: hands on rack-02 and poe2-rack-01 (power, cable); the esp toolchain; ~3 min per board
       result: the six PoE boards fresh on prod; staging keeps the simulated fleet
       est: 30m
       difficulty: med
