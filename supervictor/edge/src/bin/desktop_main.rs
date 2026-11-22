@@ -48,6 +48,11 @@ use supervictor::{
 };
 use tokio_rustls::TlsConnector;
 
+/// How long one uplink response may take, head to last body byte.
+const RESPONSE_DEADLINE: Duration = Duration::from_secs(10);
+/// Largest uplink response, head and body, the client will buffer.
+const MAX_RESPONSE: usize = 64 * 1024;
+
 #[tokio::main]
 async fn main() {
     if let Err(e) = socket_app().await {
@@ -158,9 +163,8 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    let mut response_buf = Vec::new();
-                    match tls_stream.read_to_end(&mut response_buf).await {
-                        Ok(bytes_read) => match String::from_utf8(response_buf) {
+                    match read_response(&mut tls_stream, RESPONSE_DEADLINE).await {
+                        Ok(response_buf) => match String::from_utf8(response_buf) {
                             Ok(response_str) => match parse_response(&response_str) {
                                 Ok(response) => {
                                     println!(
@@ -174,8 +178,11 @@ pub async fn socket_app() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 Err(e) => println!("Error parsing response: {}", e),
                             },
-                            Err(_) => {
-                                println!("Received non-UTF8 response ({} bytes)", bytes_read)
+                            Err(e) => {
+                                println!(
+                                    "Received non-UTF8 response ({} bytes)",
+                                    e.as_bytes().len()
+                                )
                             }
                         },
                         Err(e) => println!("Error reading response: {}", e),
@@ -201,6 +208,78 @@ async fn connect_any(addrs: &[std::net::SocketAddr]) -> std::io::Result<TcpStrea
         }
     }
     Err(last)
+}
+
+/// Read one HTTP response from the stream: the head, then the body to its
+/// `Content-Length`, or to EOF when it has none. The uplink POST asks for
+/// keep-alive (the firmware reuses its TLS session), so the endpoint holds
+/// the connection open after answering; reading to EOF instead hung the
+/// client after its first uplink. The whole read is bounded by `deadline`
+/// and by `MAX_RESPONSE`.
+async fn read_response<S>(stream: &mut S, deadline: Duration) -> std::io::Result<Vec<u8>>
+where
+    S: tokio::io::AsyncRead + Unpin,
+{
+    use std::io::{Error, ErrorKind};
+    use supervictor::ota::http::{parse_head, HeadError};
+
+    let read = async {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        // Total length once the head is in: Some(n) when framed, None to EOF.
+        let mut framed: Option<Option<usize>> = None;
+        loop {
+            if framed.is_none() {
+                match parse_head(&buf) {
+                    Ok((head, body_start)) => {
+                        let total = head
+                            .content_length
+                            .map(|n| body_start.saturating_add(n as usize));
+                        if total.is_some_and(|t| t > MAX_RESPONSE) {
+                            return Err(Error::new(
+                                ErrorKind::InvalidData,
+                                "response larger than the client buffers",
+                            ));
+                        }
+                        framed = Some(total);
+                    }
+                    Err(HeadError::Incomplete) => {}
+                    Err(e) => {
+                        return Err(Error::new(
+                            ErrorKind::InvalidData,
+                            format!("bad response head: {e:?}"),
+                        ))
+                    }
+                }
+            }
+            if let Some(Some(total)) = framed {
+                if buf.len() >= total {
+                    buf.truncate(total);
+                    return Ok(buf);
+                }
+            }
+            if buf.len() > MAX_RESPONSE {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "response larger than the client buffers",
+                ));
+            }
+            let n = stream.read(&mut chunk).await?;
+            if n == 0 {
+                return match framed {
+                    Some(None) => Ok(buf),
+                    _ => Err(Error::new(
+                        ErrorKind::UnexpectedEof,
+                        "connection closed before the response was complete",
+                    )),
+                };
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+    };
+    tokio::time::timeout(deadline, read)
+        .await
+        .map_err(|_| Error::new(ErrorKind::TimedOut, "no complete response in time"))?
 }
 
 fn env_or(var: &str, default: &str) -> String {
@@ -245,4 +324,140 @@ pub fn create_connector() -> Result<TlsConnector, Box<dyn std::error::Error>> {
         .with_client_auth_cert(client_certs, client_key)?;
 
     Ok(TlsConnector::from(Arc::new(config)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{duplex, AsyncWriteExt, DuplexStream};
+
+    const DEADLINE: Duration = Duration::from_secs(10);
+    const ACK: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+content-length: 11\r\n\r\n{\"ok\":true}";
+
+    /// A peer that writes `chunks` (yielding between them) and then keeps
+    /// its end open: the client sees no EOF while the handle lives.
+    fn peer(chunks: Vec<Vec<u8>>) -> (DuplexStream, tokio::task::JoinHandle<DuplexStream>) {
+        let (client, mut server) = duplex(1 << 20);
+        let handle = tokio::spawn(async move {
+            for c in chunks {
+                server.write_all(&c).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+            server
+        });
+        (client, handle)
+    }
+
+    /// A peer that writes `wire` and closes.
+    async fn closing_peer(wire: &[u8]) -> DuplexStream {
+        let (client, mut server) = duplex(1 << 20);
+        server.write_all(wire).await.unwrap();
+        drop(server);
+        client
+    }
+
+    async fn bounded(client: &mut DuplexStream) -> std::io::Result<Vec<u8>> {
+        tokio::time::timeout(Duration::from_secs(60), read_response(client, DEADLINE))
+            .await
+            .expect("read_response outlived its deadline")
+    }
+
+    /// The regression: the endpoint answers the keep-alive POST and holds
+    /// the connection open. The response is complete at Content-Length; a
+    /// client that waits for EOF never returns and the sim posts once.
+    #[tokio::test(start_paused = true)]
+    async fn keep_alive_response_completes_at_content_length() {
+        let (mut client, _server) = peer(vec![ACK.to_vec()]);
+        assert_eq!(bounded(&mut client).await.unwrap(), ACK);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn head_and_body_split_across_reads() {
+        let (head, body) = ACK.split_at(20);
+        let (b1, b2) = body.split_at(body.len() - 3);
+        let (mut client, _server) = peer(vec![head.to_vec(), b1.to_vec(), b2.to_vec()]);
+        assert_eq!(bounded(&mut client).await.unwrap(), ACK);
+    }
+
+    /// Bytes past the framed length are not part of this response.
+    #[tokio::test(start_paused = true)]
+    async fn trailing_bytes_past_content_length_are_dropped() {
+        let mut wire = ACK.to_vec();
+        wire.extend_from_slice(b"HTTP/1.1 200 OK\r\n");
+        let (mut client, _server) = peer(vec![wire]);
+        assert_eq!(bounded(&mut client).await.unwrap(), ACK);
+    }
+
+    /// No Content-Length: the body runs to EOF, as with Connection: close.
+    #[tokio::test(start_paused = true)]
+    async fn unframed_body_reads_to_eof() {
+        let wire = b"HTTP/1.1 200 OK\r\nconnection: close\r\n\r\nhello";
+        let mut client = closing_peer(wire).await;
+        assert_eq!(bounded(&mut client).await.unwrap(), wire);
+    }
+
+    /// A peer that accepts and says nothing costs the deadline, not forever.
+    #[tokio::test(start_paused = true)]
+    async fn silent_peer_times_out_at_the_deadline() {
+        let (mut client, _server) = peer(vec![]);
+        let started = tokio::time::Instant::now();
+        let err = bounded(&mut client).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() <= DEADLINE + Duration::from_millis(1));
+    }
+
+    /// A body shorter than its Content-Length, then held open: timeout.
+    #[tokio::test(start_paused = true)]
+    async fn short_body_held_open_times_out() {
+        let (mut client, _server) = peer(vec![ACK[..ACK.len() - 1].to_vec()]);
+        let err = bounded(&mut client).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    /// A body cut short by EOF is an error, not a partial success.
+    #[tokio::test(start_paused = true)]
+    async fn short_body_then_eof_is_an_error() {
+        let mut client = closing_peer(&ACK[..ACK.len() - 1]).await;
+        let err = bounded(&mut client).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn eof_before_any_byte_is_an_error() {
+        let mut client = closing_peer(b"").await;
+        let err = bounded(&mut client).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn malformed_head_is_an_error() {
+        let (mut client, _server) = peer(vec![b"SSH-2.0-OpenSSH_9.6\r\n\r\n".to_vec()]);
+        let err = bounded(&mut client).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    /// A peer that never ends its head cannot grow the buffer without bound.
+    #[tokio::test(start_paused = true)]
+    async fn endless_head_is_capped() {
+        let mut wire = b"HTTP/1.1 200 OK\r\n".to_vec();
+        while wire.len() <= MAX_RESPONSE + 1024 {
+            wire.extend_from_slice(b"x-pad: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n");
+        }
+        let (mut client, _server) = peer(vec![wire]);
+        let err = bounded(&mut client).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    /// A Content-Length past the cap is refused before reading the body.
+    #[tokio::test(start_paused = true)]
+    async fn oversized_content_length_is_refused() {
+        let wire = format!(
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n",
+            MAX_RESPONSE + 1
+        );
+        let (mut client, _server) = peer(vec![wire.into_bytes()]);
+        let err = bounded(&mut client).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
 }
