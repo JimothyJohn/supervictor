@@ -29,6 +29,11 @@ jobs:
         run: cargo test --workspace --locked
       - name: Check edge desktop feature
         run: cargo check -p supervictor-edge --features desktop
+      # The sim fleet's client: off in the workspace runs above.
+      - name: Clippy + test edge desktop client
+        run: |
+          cargo clippy -p supervictor-edge --features desktop --bin supervictor-desktop --tests -- -D warnings
+          cargo test -p supervictor-edge --features desktop --bin supervictor-desktop --locked
       - name: Check endpoint API-only build (no ui)
         run: cargo check -p supervictor-endpoint --no-default-features --features sqlite
 
