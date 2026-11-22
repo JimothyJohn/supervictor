@@ -196,6 +196,10 @@ validate_and_build() {
 test_unit() {
     log "running workspace test suite"
     cargo test --workspace --target "$HOST_TARGET"
+    # The desktop client (the sim fleet's binary) is behind a feature the
+    # workspace run leaves off.
+    log "running desktop client tests"
+    cargo test -p supervictor-edge --features desktop --bin supervictor-desktop --target "$HOST_TARGET"
     log "unit OK"
 }
 
